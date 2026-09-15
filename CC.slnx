@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="CC.api/CC.api.csproj" Id="c621b977-0118-47c5-862e-da69031bf41e" />
+  <Project Path="CC.domain/CC.domain.csproj" Id="9def903b-aa6c-46d7-b1ff-d616b4b74135" />
+  <Project Path="CC.infrastructure/CC.infrastructure.csproj" Id="900553e6-78d1-4978-87ec-b29d0d880734" />
+  <Project Path="CC/CC.winforms.csproj" />
+</Solution>
