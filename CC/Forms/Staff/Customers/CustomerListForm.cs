@@ -18,7 +18,7 @@ namespace CC.Forms.Staff.Customers
     /// - Table card: white rounded container with #EFE7DF header row
     /// - Table rows: 70px tall rows ensuring names are 100% visible and unclipped
     /// </summary>
-    public class CustomerListForm : Form, ISearchable
+    public class CustomerListForm : Form, ISearchable, INavigationAware
     {
         private Panel topPanel = null!;
         private Label lblTitle = null!;
@@ -33,8 +33,11 @@ namespace CC.Forms.Staff.Customers
         private CustomerDetailsControl detailsControl = null!;
         private Panel tableCardPanel = null!;
         private DataGridView gridCustomers = null!;
+        private PaginationControl pagination = null!;
         private List<Customer> customers = new();
         private string activeSearchQuery = string.Empty;
+        private int currentPage = 1;
+        private const int PageSize = 10;
 
         public CustomerListForm()
         {
@@ -72,9 +75,9 @@ namespace CC.Forms.Staff.Customers
 
             Controls.Add(detailsControl);
             Controls.Add(listContainerPanel);
-
-            Load += async (s, e) => await LoadCustomersAsync();
         }
+
+        public async Task InitializeDataAsync() => await LoadCustomersAsync();
 
         private void InitializeComponent()
         {
@@ -95,7 +98,8 @@ namespace CC.Forms.Staff.Customers
             {
                 txtSearchBox.Text = activeSearchQuery;
             }
-            RefreshGrid();
+            currentPage = 1;
+            _ = LoadCustomersAsync();
         }
 
         // =========================================================
@@ -315,9 +319,18 @@ namespace CC.Forms.Staff.Customers
                 if (e.RowIndex >= 0 && gridCustomers.Columns["colAction"] is { } actionCol && e.ColumnIndex == actionCol.Index)
                     gridCustomers.Cursor = Cursors.Hand;
             };
-            gridCustomers.CellMouseLeave += (s, e) => gridCustomers.Cursor = Cursors.Default;
+            pagination = new PaginationControl
+            {
+                Dock = DockStyle.Bottom
+            };
+            pagination.PageChanged += async (newPage) =>
+            {
+                currentPage = newPage;
+                await LoadCustomersAsync();
+            };
 
             tableCardPanel.Controls.Add(gridCustomers);
+            tableCardPanel.Controls.Add(pagination);
         }
 
         private void GridCustomers_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
@@ -469,44 +482,26 @@ namespace CC.Forms.Staff.Customers
         {
             try
             {
-                customers = await CrmDataService.GetCustomersAsync();
-                RefreshGrid();
+                var paged = await CrmDataService.GetCustomersPagedAsync(activeSearchQuery, currentPage, PageSize);
+                currentPage = paged.Page;
+                customers = paged.Items;
+
+                gridCustomers.RowTemplate.Height = 58;
+                gridCustomers.DataSource = null;
+                gridCustomers.DataSource = customers;
+
+                foreach (DataGridViewRow row in gridCustomers.Rows)
+                {
+                    row.Height = 58;
+                }
+
+                lblSubtitle.Text = $"{paged.TotalCount} total customers";
+                pagination.SetPagination(paged.Page, paged.PageSize, paged.TotalCount, "customers");
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"Unable to load customers from database: {ex.Message}", "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
-        }
-
-        private void RefreshGrid()
-        {
-            var uniqueList = customers
-                .GroupBy(c => c.CustomerId > 0 ? c.CustomerId.ToString() : (c.Email ?? c.FirstName))
-                .Select(g => g.First())
-                .ToList();
-
-            string query = activeSearchQuery.Trim().ToLowerInvariant();
-
-            var filtered = uniqueList
-                .Where(c =>
-                    string.IsNullOrEmpty(query) ||
-                    (c.FirstName != null && c.FirstName.ToLowerInvariant().Contains(query)) ||
-                    (c.LastName != null && c.LastName.ToLowerInvariant().Contains(query)) ||
-                    (c.Email != null && c.Email.ToLowerInvariant().Contains(query)) ||
-                    (c.Phone != null && c.Phone.ToLowerInvariant().Contains(query))
-                )
-                .ToList();
-
-            gridCustomers.RowTemplate.Height = 58;
-            gridCustomers.DataSource = null;
-            gridCustomers.DataSource = filtered;
-
-            foreach (DataGridViewRow row in gridCustomers.Rows)
-            {
-                row.Height = 58;
-            }
-
-            lblSubtitle.Text = $"{filtered.Count} total customers";
         }
 
         private static string GetInitials(string firstName, string lastName)

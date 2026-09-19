@@ -1,85 +1,121 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using CC.Controls;
 using CC.Forms.Authentication;
-using CC.Forms.Manager.Reports;
-using CC.Forms.Staff.Customers;
-using CC.Forms.Staff.FollowUps;
-using CC.Forms.Staff.Inquiries;
-using CC.Forms.Staff.Orders;
-using CC.Forms.Staff.Payments;
 using CC.Services;
 
 namespace CC.Forms.Manager
 {
     /// <summary>
-    /// Manager Dashboard form matching the Sweet Story CRM design mockup.
-    /// Provides full parity with Staff modules plus Reports & Analytics with transaction export.
+    /// Role-specific Manager Dashboard:
+    /// Focuses on operational management, shop-wide order fulfillment, pipeline bottlenecks,
+    /// staff follow-up resolution, and order volume trends with period filtering (7d/30d/90d/all).
     /// </summary>
     public class ManagerDashboardForm : CC.Forms.Shared.DashboardShell
     {
-        private string _currentView = "Dashboard";
+        private string _activePeriod = "30d";
+        private Panel _contentScrollPanel = null!;
+        public Task InitializationTask { get; private set; } = Task.CompletedTask;
 
         public ManagerDashboardForm() : base("Dashboard")
         {
-            PageTitle = "Dashboard";
-
-            // Add Reports navigation item to sidebar (Bar Chart icon \uE9F9)
+            PageTitle = "Manager Dashboard";
             SidebarCtrl.AddNavItem("Reports", "\uE9F9");
-
-            ShowDashboard();
+            SidebarCtrl.SetActiveItem("Dashboard");
+            BuildDashboardShell();
+            InitializationTask = LoadDashboardDataAsync();
         }
 
         protected override void OnNavigationRequested(string key)
         {
             base.OnNavigationRequested(key);
-            _currentView = key;
 
             switch (key)
             {
                 case "Dashboard":
-                    ShowDashboard();
+                    BuildDashboardShell();
+                    _ = LoadDashboardDataAsync();
                     break;
                 case "Customers":
-                    ViewHost.ShowFormInPanel(MainPanel, new CustomerListForm());
+                    CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Staff.Customers.CustomerListForm());
                     break;
                 case "Inquiries":
-                    ViewHost.ShowFormInPanel(MainPanel, new InquiryListForm());
+                    CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Staff.Inquiries.InquiryListForm());
                     break;
                 case "Orders":
-                    ViewHost.ShowFormInPanel(MainPanel, new OrderListForm());
+                    CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Staff.Orders.OrderListForm());
                     break;
                 case "Payments":
-                    ViewHost.ShowFormInPanel(MainPanel, new PaymentListForm());
+                    CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Staff.Payments.PaymentListForm());
                     break;
                 case "Follow-ups":
-                    ViewHost.ShowFormInPanel(MainPanel, new FollowUpListForm());
+                    CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Staff.FollowUps.FollowUpListForm());
                     break;
                 case "Reports":
-                    ViewHost.ShowFormInPanel(MainPanel, new ReportListForm());
+                    CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Manager.Reports.ReportListForm());
                     break;
             }
         }
 
-        private async void ShowDashboard()
+        private void BuildDashboardShell()
         {
-            _currentView = "Dashboard";
+            ViewHost.ClearHostedForm(MainPanel);
             MainPanel.Controls.Clear();
 
-            // Dynamic live metrics calculation from database
-            var metrics = await CrmDataService.GetDashboardMetricsAsync();
-            if (_currentView != "Dashboard") return;
-            int openInquiriesCount = metrics.OpenInquiriesCount;
-            int ordersInProgressCount = metrics.OrdersInProgressCount;
-            int overdueFollowupsCount = metrics.OverdueFollowupsCount;
-            int followupsDueCount = metrics.FollowupsDueCount;
-            int processingOrdersCount = metrics.ProcessingOrdersCount;
-            int readyForPickupCount = metrics.ReadyForPickupCount;
+            if (_contentScrollPanel == null)
+            {
+                _contentScrollPanel = new Panel
+                {
+                    Dock = DockStyle.Fill,
+                    AutoScroll = true,
+                    BackColor = Color.Transparent
+                };
+            }
 
-            // Page Heading Block (calibrated: text-2xl, subtitle text-sm)
+            _contentScrollPanel.Visible = true;
+            MainPanel.Controls.Add(_contentScrollPanel);
+            _contentScrollPanel.BringToFront();
+        }
+
+        public void ScrollToBottom()
+        {
+            if (_contentScrollPanel != null)
+            {
+                _contentScrollPanel.AutoScrollPosition = new Point(0, 500);
+            }
+        }
+
+        private async Task LoadDashboardDataAsync()
+        {
+            try
+            {
+                var data = await CrmDataService.GetManagerDashboardDataAsync(
+                    companyId: SessionService.CurrentUser?.CompanyId,
+                    period: _activePeriod);
+
+                if (IsDisposed) return;
+
+            var rootLayout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                ColumnCount = 1,
+                RowCount = 5,
+                BackColor = Color.Transparent,
+                Padding = Padding.Empty,
+                Margin = Padding.Empty
+            };
+            rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // Header + Period
+            rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // KPI Cards
+            rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // Pipeline Funnel Bar
+            rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // Charts
+            rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // Recent Orders
+
+            // 1. TOP HEADER & PERIOD FILTER
             var topPanel = new Panel
             {
                 Dock = DockStyle.Top,
@@ -93,7 +129,7 @@ namespace CC.Forms.Manager
                 FlowDirection = FlowDirection.TopDown,
                 WrapContents = false,
                 AutoSize = true,
-                Dock = DockStyle.Fill,
+                Dock = DockStyle.Left,
                 BackColor = Color.Transparent
             };
 
@@ -108,7 +144,7 @@ namespace CC.Forms.Manager
 
             var lblSubtitle = new Label
             {
-                Text = $"Executive Overview \u00B7 {DateTime.Now:MMM d, yyyy}",
+                Text = $"Operational Oversight & Order Pipeline \u00B7 {DateTime.Now:MMM d, yyyy}",
                 Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Regular),
                 ForeColor = UITheme.TextMuted,
                 AutoSize = true,
@@ -117,183 +153,365 @@ namespace CC.Forms.Manager
 
             titleStack.Controls.Add(lblTitle);
             titleStack.Controls.Add(lblSubtitle);
-            topPanel.Controls.Add(titleStack);
 
-            // Main 2-Column Responsive Layout Table
-            var layoutTable = new TableLayoutPanel
+            var periodSelector = new PeriodSelectorControl(PeriodSelectorControl.ManagerPeriods)
             {
-                Dock = DockStyle.Fill,
-                ColumnCount = 2,
+                Dock = DockStyle.Right,
+                SelectedPeriod = _activePeriod
+            };
+            periodSelector.PeriodChanged += (s, newPeriod) =>
+            {
+                _activePeriod = newPeriod;
+                _ = LoadDashboardDataAsync();
+            };
+
+            topPanel.Controls.Add(periodSelector);
+            topPanel.Controls.Add(titleStack);
+            rootLayout.Controls.Add(topPanel, 0, 0);
+
+            // 2. 5 MANAGER KPI CARDS (Including Customer Card)
+            var kpiTable = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                ColumnCount = 5,
                 RowCount = 1,
+                Height = 145,
+                Margin = new Padding(0, 0, 0, 18),
                 BackColor = Color.Transparent
             };
-            layoutTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62F)); // Left Column (Main Card)
-            layoutTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38F)); // Right Column (Card Stack)
-            layoutTable.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            kpiTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20F));
+            kpiTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20F));
+            kpiTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20F));
+            kpiTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20F));
+            kpiTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20F));
 
-            // ---- LEFT COLUMN: MAIN SUMMARY CARD ----
-            var leftCard = new Panel
+            var cardCustomers = new DashboardKpiCard
+            {
+                Dock = DockStyle.Fill,
+                Title = "Customers",
+                Value = data.TotalCustomersCount.ToString(),
+                Subtitle = "Registered customer base",
+                Margin = new Padding(0, 0, 6, 0)
+            };
+            cardCustomers.SetBadge("CRM", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
+            cardCustomers.CardClicked += (s, e) => Navigate("Customers");
+
+            var cardActive = new DashboardKpiCard
+            {
+                Dock = DockStyle.Fill,
+                Title = "Active Orders",
+                Value = data.ActiveOrdersCount.ToString(),
+                Subtitle = "Orders currently in production",
+                Margin = new Padding(6, 0, 6, 0)
+            };
+            cardActive.SetBadge("In Progress", UITheme.StatusBlueFg, UITheme.StatusBlueBg);
+            cardActive.CardClicked += (s, e) => Navigate("Orders");
+
+            var cardReady = new DashboardKpiCard
+            {
+                Dock = DockStyle.Fill,
+                Title = "Ready Pickup",
+                Value = data.ReadyForPickupCount.ToString(),
+                Subtitle = "Finished orders awaiting release",
+                Margin = new Padding(6, 0, 6, 0)
+            };
+            cardReady.SetBadge("Completed", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
+            cardReady.CardClicked += (s, e) => Navigate("Orders");
+
+            var cardInquiries = new DashboardKpiCard
+            {
+                Dock = DockStyle.Fill,
+                Title = "Inquiries",
+                Value = data.OpenInquiriesCount.ToString(),
+                Subtitle = "Awaiting quote or response",
+                Margin = new Padding(6, 0, 6, 0)
+            };
+            cardInquiries.SetBadge("Pipeline", UITheme.StatusYellowFg, UITheme.StatusYellowBg);
+            cardInquiries.CardClicked += (s, e) => Navigate("Inquiries");
+
+            var cardOverdue = new DashboardKpiCard
+            {
+                Dock = DockStyle.Fill,
+                Title = "Overdue Tasks",
+                Value = data.ShopOverdueFollowupsCount.ToString(),
+                Subtitle = "Shop-wide overdue interactions",
+                Margin = new Padding(6, 0, 0, 0)
+            };
+            cardOverdue.SetBadge("Urgent", UITheme.StatusRedFg, UITheme.StatusRedBg);
+            cardOverdue.CardClicked += (s, e) => Navigate("Follow-ups");
+
+            kpiTable.Controls.Add(cardCustomers, 0, 0);
+            kpiTable.Controls.Add(cardActive, 1, 0);
+            kpiTable.Controls.Add(cardReady, 2, 0);
+            kpiTable.Controls.Add(cardInquiries, 3, 0);
+            kpiTable.Controls.Add(cardOverdue, 4, 0);
+            rootLayout.Controls.Add(kpiTable, 0, 1);
+
+            // 3. PIPELINE FUNNEL PROGRESS BAR
+            var pipelineBar = new DashboardPipelineBar
             {
                 Dock = DockStyle.Top,
-                Height = 310,
+                Title = "Order Fulfillment Pipeline Funnel",
+                Margin = new Padding(0, 0, 0, 18)
+            };
+            pipelineBar.SetStages(data.PipelineStages);
+            pipelineBar.StageClicked += (s, stage) =>
+            {
+                if (stage == "Inquiries") Navigate("Inquiries");
+                else Navigate("Orders");
+            };
+            rootLayout.Controls.Add(pipelineBar, 0, 2);
+
+            // 4. CHARTS ROW (Order Trends + Staff Performance)
+            var chartsTable = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                ColumnCount = 2,
+                RowCount = 1,
+                Height = 280,
+                Margin = new Padding(0, 0, 0, 18),
+                BackColor = Color.Transparent
+            };
+            chartsTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55F));
+            chartsTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45F));
+
+            var trendChart = new DashboardTrendChart
+            {
+                Dock = DockStyle.Fill,
+                ChartTitle = "Order Volume Trends",
+                ChartSubtitle = "Daily order placements over the period",
+                IsCurrency = false,
+                Margin = new Padding(0, 0, 10, 0)
+            };
+            trendChart.SetData(data.OrderVolumeTrend, isCurrency: false);
+
+            var staffChart = new DashboardBarChart
+            {
+                Dock = DockStyle.Fill,
+                ChartTitle = "Staff Task Resolution",
+                ChartSubtitle = "Follow-ups completed and pending by team member",
+                Margin = new Padding(10, 0, 0, 0)
+            };
+            staffChart.SetData(data.StaffPerformance);
+            staffChart.CategoryClicked += (s, staff) => Navigate("Follow-ups");
+
+            chartsTable.Controls.Add(trendChart, 0, 0);
+            chartsTable.Controls.Add(staffChart, 1, 0);
+            rootLayout.Controls.Add(chartsTable, 0, 3);
+
+            // 5. RECENT HIGH-PRIORITY ORDERS TABLE
+            var ordersPanel = BuildRecentOrdersPanel(data);
+            rootLayout.Controls.Add(ordersPanel, 0, 4);
+
+            if (IsDisposed) return;
+            _contentScrollPanel.SuspendLayout();
+            _contentScrollPanel.Controls.Clear();
+            _contentScrollPanel.Controls.Add(rootLayout);
+            _contentScrollPanel.ResumeLayout(true);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[ManagerDashboard] Error loading data: {ex.Message}");
+            }
+        }
+
+        private Panel BuildRecentOrdersPanel(ManagerDashboardData data)
+        {
+            var card = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 360,
                 BackColor = Color.White,
-                Margin = new Padding(0, 0, 16, 0),
-                Cursor = Cursors.Hand
+                Padding = new Padding(1),
+                Margin = new Padding(0, 0, 0, 24)
             };
-            leftCard.ApplyRoundedRegion(14);
+            card.ApplyRoundedRegion(16);
 
-            leftCard.Paint += (s, e) =>
+            card.Paint += (s, e) =>
             {
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-
-                // Border
-                using (var pen = new Pen(UITheme.BorderColor, 1.2f))
-                {
-                    e.Graphics.DrawRoundedRectangle(pen, new Rectangle(0, 0, leftCard.Width - 1, leftCard.Height - 1), 14);
-                }
-
-                // Title "Open inquiries"
-                using (var titleFont = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold))
-                using (var titleBrush = new SolidBrush(UITheme.TextMuted))
-                {
-                    e.Graphics.DrawString("Open inquiries", titleFont, titleBrush, 24, 24);
-                }
-
-                // Large Stat Number
-                using (var statFont = new Font(UITheme.FontSerif, 42F, FontStyle.Bold))
-                using (var statBrush = new SolidBrush(UITheme.TextDark))
-                {
-                    e.Graphics.DrawString(openInquiriesCount.ToString(), statFont, statBrush, 20, 52);
-                }
-
-                // Green Status Pill "~ Needs handling"
-                UITheme.DrawStatusPill(e.Graphics, new Rectangle(24, 138, 120, 26), "~ Needs handling",
-                    UITheme.StatusGreenBg, UITheme.StatusGreenFg);
-
-                // Trend line chart graphic (Gold/Tan #C7963C)
-                using (var chartPen = new Pen(UITheme.UpgradeGold, 2.2f))
-                {
-                    Point[] points =
-                    {
-                        new Point(leftCard.Width - 140, 110),
-                        new Point(leftCard.Width - 124, 86),
-                        new Point(leftCard.Width - 108, 104),
-                        new Point(leftCard.Width - 92, 68),
-                        new Point(leftCard.Width - 76, 92),
-                        new Point(leftCard.Width - 60, 54),
-                        new Point(leftCard.Width - 44, 110)
-                    };
-                    e.Graphics.DrawLines(chartPen, points);
-                }
-
-                // Horizontal Divider
-                using (var divPen = new Pen(UITheme.BorderColor, 1f))
-                {
-                    e.Graphics.DrawLine(divPen, 24, 195, leftCard.Width - 24, 195);
-                }
-
-                // Bottom Stats Row
-                // Stat 1: Orders in progress
-                using (var labelFont = new Font(UITheme.FontSans, 8.5F, FontStyle.Bold))
-                using (var labelBrush = new SolidBrush(UITheme.TextMuted))
-                {
-                    e.Graphics.DrawString("Orders in progress", labelFont, labelBrush, 24, 212);
-                }
-                using (var numFont = new Font(UITheme.FontSerif, 18F, FontStyle.Bold))
-                using (var numBrush = new SolidBrush(UITheme.TextDark))
-                {
-                    e.Graphics.DrawString(ordersInProgressCount.ToString(), numFont, numBrush, 24, 234);
-                }
-
-                // Stat 2: Overdue follow-ups
-                using (var labelFont = new Font(UITheme.FontSans, 8.5F, FontStyle.Bold))
-                using (var labelBrush = new SolidBrush(UITheme.TextMuted))
-                {
-                    e.Graphics.DrawString("Overdue follow-ups", labelFont, labelBrush, 170, 212);
-                }
-                using (var numFont = new Font(UITheme.FontSerif, 18F, FontStyle.Bold))
-                using (var numBrush = new SolidBrush(overdueFollowupsCount > 0 ? UITheme.StatusRedFg : UITheme.TextDark))
-                {
-                    e.Graphics.DrawString(overdueFollowupsCount.ToString(), numFont, numBrush, 170, 234);
-                }
+                using var pen = new Pen(UITheme.BorderColor, 1f);
+                e.Graphics.DrawRoundedRectangle(pen, new Rectangle(0, 0, card.Width - 1, card.Height - 1), 16);
             };
 
-            leftCard.Resize += (s, e) => leftCard.Invalidate();
-            leftCard.Click += (s, e) => { SidebarCtrl?.SetActiveItem("Inquiries"); OnNavigationRequested("Inquiries"); };
-
-            // ---- RIGHT COLUMN: STACK OF 3 STAT CARDS ----
-            var rightStack = new FlowLayoutPanel
+            var headerPanel = new Panel
             {
                 Dock = DockStyle.Top,
+                Height = 56,
+                BackColor = Color.White,
+                Padding = new Padding(22, 10, 22, 6)
+            };
+
+            var headerLeft = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Left,
                 FlowDirection = FlowDirection.TopDown,
                 WrapContents = false,
                 AutoSize = true,
                 BackColor = Color.Transparent
             };
 
-            var cardFollowups = CreateStatCard("Follow-ups due", followupsDueCount.ToString(), "~ Schedule pending", UITheme.StatusGreenBg, UITheme.StatusGreenFg);
-            cardFollowups.Click += (s, e) => { SidebarCtrl?.SetActiveItem("Follow-ups"); OnNavigationRequested("Follow-ups"); };
-
-            var cardProcessing = CreateStatCard("Processing orders", processingOrdersCount.ToString(), "~ In the oven", UITheme.StatusGreenBg, UITheme.StatusGreenFg);
-            cardProcessing.Click += (s, e) => { SidebarCtrl?.SetActiveItem("Orders"); OnNavigationRequested("Orders"); };
-
-            var cardReady = CreateStatCard("Ready for pickup", readyForPickupCount.ToString(), "~ Notify customers", UITheme.StatusGreenBg, UITheme.StatusGreenFg);
-            cardReady.Click += (s, e) => { SidebarCtrl?.SetActiveItem("Orders"); OnNavigationRequested("Orders"); };
-
-            rightStack.Controls.Add(cardFollowups);
-            rightStack.Controls.Add(cardProcessing);
-            rightStack.Controls.Add(cardReady);
-
-            layoutTable.Controls.Add(leftCard, 0, 0);
-            layoutTable.Controls.Add(rightStack, 1, 0);
-
-            MainPanel.Controls.Add(layoutTable);
-            MainPanel.Controls.Add(topPanel);
-        }
-
-        private Panel CreateStatCard(string title, string countStr, string pillText, Color pillBg, Color pillFg)
-        {
-            var card = new Panel
+            var lblTitle = new Label
             {
-                Height = 92,
-                Width = 380,
-                BackColor = Color.White,
-                Margin = new Padding(0, 0, 0, 14),
-                Cursor = Cursors.Hand
-            };
-            card.ApplyRoundedRegion(12);
-
-            card.Paint += (s, e) =>
-            {
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-
-                using (var pen = new Pen(UITheme.BorderColor, 1.2f))
-                {
-                    e.Graphics.DrawRoundedRectangle(pen, new Rectangle(0, 0, card.Width - 1, card.Height - 1), 12);
-                }
-
-                // Title
-                using (var font = new Font(UITheme.FontSans, 9F, FontStyle.Bold))
-                using (var brush = new SolidBrush(UITheme.TextMuted))
-                {
-                    e.Graphics.DrawString(title, font, brush, 18, 14);
-                }
-
-                // Count Number
-                using (var font = new Font(UITheme.FontSerif, 24F, FontStyle.Bold))
-                using (var brush = new SolidBrush(UITheme.TextDark))
-                {
-                    e.Graphics.DrawString(countStr, font, brush, 16, 38);
-                }
-
-                // Top-right Pill Badge
-                int pillWidth = 126;
-                UITheme.DrawStatusPill(e.Graphics, new Rectangle(card.Width - pillWidth - 16, 14, pillWidth, 24),
-                    pillText, pillBg, pillFg);
+                Text = "Recent Production Orders Needing Attention",
+                Font = new Font(UITheme.FontSerif, 12.5F, FontStyle.Bold),
+                ForeColor = UITheme.TextDark,
+                AutoSize = true,
+                Margin = new Padding(0, 0, 0, 2)
             };
 
-            card.Resize += (s, e) => card.Invalidate();
+            var lblSubtitle = new Label
+            {
+                Text = $"{data.RecentOrders.Count} orders actively progressing through shop fulfillment",
+                Font = new Font(UITheme.FontSans, 8.5F, FontStyle.Regular),
+                ForeColor = UITheme.TextMuted,
+                AutoSize = true,
+                Margin = Padding.Empty
+            };
 
+            headerLeft.Controls.Add(lblTitle);
+            headerLeft.Controls.Add(lblSubtitle);
+
+            var btnViewAll = new Label
+            {
+                Text = "View All Orders \u2192",
+                Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold),
+                ForeColor = UITheme.PrimaryMauve,
+                Dock = DockStyle.Right,
+                AutoSize = true,
+                Cursor = Cursors.Hand,
+                Margin = new Padding(0, 16, 0, 0)
+            };
+            btnViewAll.Click += (s, e) => Navigate("Orders");
+
+            headerPanel.Controls.Add(btnViewAll);
+            headerPanel.Controls.Add(headerLeft);
+            card.Controls.Add(headerPanel);
+
+            if (data.RecentOrders == null || data.RecentOrders.Count == 0)
+            {
+                var emptyLbl = new Label
+                {
+                    Text = "No production orders recorded for this period.",
+                    Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Italic),
+                    ForeColor = UITheme.TextMuted,
+                    Dock = DockStyle.Fill,
+                    TextAlign = ContentAlignment.MiddleCenter
+                };
+                card.Controls.Add(emptyLbl);
+                return card;
+            }
+
+            var grid = new DataGridView
+            {
+                Dock = DockStyle.Fill
+            };
+            UITheme.ApplyTableStyle(grid);
+            grid.RowTemplate.Height = 50;
+            grid.ColumnHeadersHeight = 42;
+
+            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "colRef", HeaderText = "ORDER REF", Width = 130, SortMode = DataGridViewColumnSortMode.NotSortable });
+            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "colCustomer", HeaderText = "CUSTOMER", Width = 170, SortMode = DataGridViewColumnSortMode.NotSortable });
+            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "colDetails", HeaderText = "CAKE SPECIFICATION", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, MinimumWidth = 180, SortMode = DataGridViewColumnSortMode.NotSortable });
+            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "colDate", HeaderText = "DELIVERY DATE", Width = 125, SortMode = DataGridViewColumnSortMode.NotSortable });
+            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "colAmount", HeaderText = "TOTAL", Width = 100, SortMode = DataGridViewColumnSortMode.NotSortable });
+            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "colStatus", HeaderText = "STATUS", Width = 125, SortMode = DataGridViewColumnSortMode.NotSortable });
+            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "colAction", HeaderText = "", Width = 80, SortMode = DataGridViewColumnSortMode.NotSortable, DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleRight } });
+
+            foreach (var item in data.RecentOrders)
+            {
+                int rowIdx = grid.Rows.Add(
+                    item.ReferenceNo,
+                    item.CustomerName,
+                    item.CakeDetails,
+                    item.DeliveryDate.ToString("MMM d, yyyy"),
+                    $"P{item.TotalAmount:N0}",
+                    item.Status,
+                    "View \u2192");
+                grid.Rows[rowIdx].Tag = item;
+            }
+
+            grid.CellPainting += (s, e) =>
+            {
+                if (e.RowIndex < 0 || e.Graphics == null) return;
+                var item = grid.Rows[e.RowIndex].Tag as ManagerPriorityOrderItem;
+                if (item == null) return;
+
+                e.PaintBackground(e.CellBounds, true);
+                var g = e.Graphics;
+                int px5 = 20;
+                int cellY = e.CellBounds.Top + (e.CellBounds.Height - 20) / 2;
+
+                if (e.ColumnIndex == 0) // REF
+                {
+                    using var font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold);
+                    using var brush = new SolidBrush(UITheme.PrimaryMauve);
+                    g.DrawString(item.ReferenceNo, font, brush, e.CellBounds.Left + px5, cellY);
+                    e.Handled = true;
+                }
+                else if (e.ColumnIndex == 1) // CUSTOMER
+                {
+                    using var font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold);
+                    g.DrawString(item.CustomerName, font, Brushes.Black, e.CellBounds.Left + px5, cellY);
+                    e.Handled = true;
+                }
+                else if (e.ColumnIndex == 2) // DETAILS
+                {
+                    using var font = new Font(UITheme.FontSans, 9.5F, FontStyle.Regular);
+                    var rect = new Rectangle(e.CellBounds.Left + px5, cellY - 2, Math.Max(0, e.CellBounds.Width - px5 - 10), 24);
+                    TextRenderer.DrawText(g, item.CakeDetails, font, rect, UITheme.TextDark,
+                        TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+                    e.Handled = true;
+                }
+                else if (e.ColumnIndex == 3) // DATE
+                {
+                    using var font = new Font(UITheme.FontSans, 9F, FontStyle.Regular);
+                    using var brush = new SolidBrush(UITheme.TextMuted);
+                    g.DrawString(item.DeliveryDate.ToString("MMM d, yyyy"), font, brush, e.CellBounds.Left + px5, cellY);
+                    e.Handled = true;
+                }
+                else if (e.ColumnIndex == 4) // TOTAL
+                {
+                    using var font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold);
+                    g.DrawString($"\u20B1{item.TotalAmount:N0}", font, Brushes.Black, e.CellBounds.Left + px5, cellY);
+                    e.Handled = true;
+                }
+                else if (e.ColumnIndex == 5) // STATUS
+                {
+                    Color bg = item.Status switch
+                    {
+                        "Ready" or "Completed" => UITheme.StatusGreenBg,
+                        "Processing" => UITheme.StatusYellowBg,
+                        _ => UITheme.StatusBlueBg
+                    };
+                    Color fg = item.Status switch
+                    {
+                        "Ready" or "Completed" => UITheme.StatusGreenFg,
+                        "Processing" => UITheme.StatusYellowFg,
+                        _ => UITheme.StatusBlueFg
+                    };
+                    UITheme.DrawStatusBadge(g, e.CellBounds, item.Status, bg, fg, showDot: true);
+                    e.Handled = true;
+                }
+                else if (e.ColumnIndex == 6) // ACTION
+                {
+                    UITheme.DrawActionLink(g, e.CellBounds, "View \u2192");
+                    e.Handled = true;
+                }
+            };
+
+            grid.CellClick += (s, e) => Navigate("Orders");
+
+            grid.CellMouseEnter += (s, e) =>
+            {
+                if (e.RowIndex >= 0 && e.ColumnIndex == 6)
+                    grid.Cursor = Cursors.Hand;
+                else
+                    grid.Cursor = Cursors.Default;
+            };
+
+            grid.ClearSelection();
+            card.Controls.Add(grid);
+            grid.BringToFront();
             return card;
         }
     }

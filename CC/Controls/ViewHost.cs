@@ -10,7 +10,7 @@ namespace CC.Controls
             if (host == null || form == null) return;
 
             // Close and dispose previous embedded form if any
-            if (host.Tag is Form previous)
+            if (host.Tag is Form previous && previous != form)
             {
                 try { previous.Close(); previous.Dispose(); } catch { }
                 host.Tag = null;
@@ -26,6 +26,26 @@ namespace CC.Controls
             host.Tag = form;
 
             form.Show();
+
+            // Deterministic data initialization:
+            // Embedded WinForms (TopLevel = false) can occasionally bypass or postpone Form.Load.
+            // Explicitly invoking INavigationAware guarantees data is retrieved reliably every time.
+            if (form is INavigationAware navAware)
+            {
+                _ = navAware.InitializeDataAsync();
+            }
+        }
+
+        // Cleanly close and dispose any hosted form inside a panel
+        public static void ClearHostedForm(Panel host)
+        {
+            if (host == null) return;
+
+            if (host.Tag is Form previous)
+            {
+                try { previous.Close(); previous.Dispose(); } catch { }
+                host.Tag = null;
+            }
         }
     }
 }

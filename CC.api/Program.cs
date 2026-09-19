@@ -8,17 +8,23 @@ builder.Logging.AddConsole();
 builder.Logging.AddDebug();
 
 // ========================================
-// Database Configuration
+// Database & Multi-Tenant Configuration
 // ========================================
+builder.Services.AddHttpContextAccessor();
+
 builder.Services.AddDbContext<MasterCrmDbContext>(options =>
     options.UseSqlServer(
         builder.Configuration.GetConnectionString("MasterCrm")
     ));
 
-builder.Services.AddDbContext<CrmDbContext>(options =>
-    options.UseSqlServer(
-        builder.Configuration.GetConnectionString("LocalCrm")
-    ));
+builder.Services.AddScoped<CC.api.Services.ITenantService, CC.api.Services.TenantService>();
+
+builder.Services.AddDbContext<CrmDbContext>((serviceProvider, options) =>
+{
+    var tenantService = serviceProvider.GetRequiredService<CC.api.Services.ITenantService>();
+    var connectionString = tenantService.GetTenantConnectionString();
+    options.UseSqlServer(connectionString);
+});
 
 
 // ========================================

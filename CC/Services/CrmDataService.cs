@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.Linq;
 using System.Threading.Tasks;
+using CC.Controls;
 using CC.domain.Entities;
 using CC.Domain.Entities;
 using CC.infrastructure.Data;
@@ -68,20 +70,65 @@ namespace CC.Services
         string Status
     );
 
+    public record PagedList<T>(List<T> Items, int TotalCount, int Page, int PageSize)
+    {
+        public int TotalPages => (int)Math.Ceiling((double)TotalCount / Math.Max(PageSize, 1));
+        public bool HasPreviousPage => Page > 1;
+        public bool HasNextPage => Page < TotalPages;
+    }
+
     /// <summary>
     /// Centralized, database-driven service for CRM data operations using EF Core short-lived contexts.
     /// Operates against SQL Server LocalDB database 'CustomCakeCRM'.
     /// </summary>
     public static class CrmDataService
     {
-        public const string ConnectionString = "Server=(localdb)\\MSSQLLocalDB;Database=CustomCakeCRM;Trusted_Connection=True;TrustServerCertificate=True;";
+        public const string MasterConnectionString = "Server=(localdb)\\MSSQLLocalDB;Database=MSME_MasterCRM;Trusted_Connection=True;TrustServerCertificate=True;";
+        public const string DefaultTenantConnectionString = "Server=(localdb)\\MSSQLLocalDB;Database=CustomCakeCRM;Trusted_Connection=True;TrustServerCertificate=True;";
         public const int DefaultCompanyId = 2;
         public const int DefaultUserId = 4; // Staff user
 
-        public static CrmDbContext CreateDbContext()
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, string> _tenantConnections = new();
+
+        public static string GetConnectionString(int? companyId = null)
         {
+            var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
+            if (_tenantConnections.TryGetValue(targetCompanyId, out var cached))
+            {
+                return cached;
+            }
+
+            try
+            {
+                var masterOptions = new DbContextOptionsBuilder<MasterCrmDbContext>()
+                    .UseSqlServer(MasterConnectionString)
+                    .Options;
+
+                using var masterContext = new MasterCrmDbContext(masterOptions);
+                var tenantDb = masterContext.CompanyDatabases
+                    .AsNoTracking()
+                    .FirstOrDefault(cd => cd.CompanyId == targetCompanyId && cd.IsActive);
+
+                if (tenantDb != null)
+                {
+                    var conn = $"Server={tenantDb.ServerName};Database={tenantDb.DatabaseName};Trusted_Connection=True;TrustServerCertificate=True;";
+                    _tenantConnections[targetCompanyId] = conn;
+                    return conn;
+                }
+            }
+            catch
+            {
+                // Fallback to default
+            }
+
+            return DefaultTenantConnectionString;
+        }
+
+        public static CrmDbContext CreateDbContext(int? companyId = null)
+        {
+            var conn = GetConnectionString(companyId);
             var options = new DbContextOptionsBuilder<CrmDbContext>()
-                .UseSqlServer(ConnectionString)
+                .UseSqlServer(conn)
                 .Options;
 
             return new CrmDbContext(options);
@@ -310,6 +357,40 @@ namespace CC.Services
                 .ToListAsync();
         }
 
+        public static async Task<PagedList<Customer>> GetCustomersPagedAsync(string? searchQuery = null, int page = 1, int pageSize = 10)
+        {
+            pageSize = Math.Max(1, pageSize);
+            page = Math.Max(1, page);
+
+            await using var context = CreateDbContext();
+            IQueryable<Customer> query = context.Customers
+                .AsNoTracking()
+                .Include(c => c.Orders);
+
+            if (!string.IsNullOrWhiteSpace(searchQuery))
+            {
+                string s = searchQuery.Trim().ToLower();
+                query = query.Where(c =>
+                    c.FirstName.ToLower().Contains(s) ||
+                    c.LastName.ToLower().Contains(s) ||
+                    c.Email.ToLower().Contains(s) ||
+                    c.Phone.ToLower().Contains(s));
+            }
+
+            int totalCount = await query.CountAsync();
+            int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
+            if (page > totalPages) page = totalPages;
+
+            var items = await query
+                .OrderBy(c => c.FirstName)
+                .ThenBy(c => c.LastName)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return new PagedList<Customer>(items, totalCount, page, pageSize);
+        }
+
         public static async Task<Customer?> GetCustomerByIdAsync(int customerId)
         {
             await using var context = CreateDbContext();
@@ -409,6 +490,87 @@ namespace CC.Services
             return await query
                 .OrderByDescending(o => o.OrderId)
                 .ToListAsync();
+        }
+
+        public static async Task<PagedList<SalesOrder>> GetOrdersPagedAsync(string? statusFilter = null, string? searchQuery = null, int page = 1, int pageSize = 10)
+        {
+            pageSize = Math.Max(1, pageSize);
+            page = Math.Max(1, page);
+
+            await using var context = CreateDbContext();
+            IQueryable<SalesOrder> query = context.SalesOrders
+                .AsNoTracking()
+                .Include(o => o.Customer)
+                .Include(o => o.OrderDetails)
+                .Include(o => o.Payments)
+                    .ThenInclude(p => p.Method);
+
+            if (!string.IsNullOrWhiteSpace(statusFilter) && !statusFilter.Equals("All", StringComparison.OrdinalIgnoreCase))
+            {
+                int targetStatus = statusFilter switch
+                {
+                    "Pending" => 0,
+                    "Confirmed" => 1,
+                    "Processing" => 2,
+                    "Completed" => 3,
+                    "Ready" => 4,
+                    "Cancelled" => 5,
+                    _ => -1
+                };
+
+                if (targetStatus >= 0)
+                {
+                    query = query.Where(o => o.StatusId == targetStatus);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(searchQuery))
+            {
+                string s = searchQuery.Trim().ToLower();
+                query = query.Where(o =>
+                    o.OrderId.ToString().Contains(s) ||
+                    (o.DesignTheme != null && o.DesignTheme.ToLower().Contains(s)) ||
+                    (o.CakeSize != null && o.CakeSize.ToLower().Contains(s)) ||
+                    (o.Flavor != null && o.Flavor.ToLower().Contains(s)) ||
+                    (o.Customer != null && (o.Customer.FirstName.ToLower().Contains(s) || o.Customer.LastName.ToLower().Contains(s))));
+            }
+
+            int totalCount = await query.CountAsync();
+            int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
+            if (page > totalPages) page = totalPages;
+
+            var items = await query
+                .OrderByDescending(o => o.OrderId)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return new PagedList<SalesOrder>(items, totalCount, page, pageSize);
+        }
+
+        public static async Task<PagedList<SalesOrder>> GetCustomerOrdersPagedAsync(int customerId, int page = 1, int pageSize = 10)
+        {
+            pageSize = Math.Max(1, pageSize);
+            page = Math.Max(1, page);
+
+            await using var context = CreateDbContext();
+            var query = context.SalesOrders
+                .AsNoTracking()
+                .Include(o => o.OrderDetails)
+                .Include(o => o.Payments)
+                .Where(o => o.CustomerId == customerId);
+
+            int totalCount = await query.CountAsync();
+            int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
+            if (page > totalPages) page = totalPages;
+
+            var items = await query
+                .OrderByDescending(o => o.OrderDate)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return new PagedList<SalesOrder>(items, totalCount, page, pageSize);
         }
 
         public static async Task<SalesOrder?> GetOrderByIdAsync(int orderId)
@@ -534,6 +696,44 @@ namespace CC.Services
             return await query
                 .OrderByDescending(i => i.InquiryId)
                 .ToListAsync();
+        }
+
+        public static async Task<PagedList<CustomerInquiry>> GetInquiriesPagedAsync(string? statusFilter = null, string? searchQuery = null, int page = 1, int pageSize = 10)
+        {
+            pageSize = Math.Max(1, pageSize);
+            page = Math.Max(1, page);
+
+            await using var context = CreateDbContext();
+            IQueryable<CustomerInquiry> query = context.CustomerInquiries
+                .AsNoTracking()
+                .Include(i => i.Customer);
+
+            if (!string.IsNullOrWhiteSpace(statusFilter) && !statusFilter.Equals("All", StringComparison.OrdinalIgnoreCase))
+            {
+                query = query.Where(i => i.Status == statusFilter);
+            }
+
+            if (!string.IsNullOrWhiteSpace(searchQuery))
+            {
+                string s = searchQuery.Trim().ToLower();
+                query = query.Where(i =>
+                    i.InquiryCode.ToLower().Contains(s) ||
+                    i.CakeType.ToLower().Contains(s) ||
+                    i.AssignedTo.ToLower().Contains(s) ||
+                    (i.Customer != null && (i.Customer.FirstName.ToLower().Contains(s) || i.Customer.LastName.ToLower().Contains(s))));
+            }
+
+            int totalCount = await query.CountAsync();
+            int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
+            if (page > totalPages) page = totalPages;
+
+            var items = await query
+                .OrderByDescending(i => i.InquiryId)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return new PagedList<CustomerInquiry>(items, totalCount, page, pageSize);
         }
 
         public static async Task<CustomerInquiry?> GetInquiryByIdAsync(int inquiryId)
@@ -696,6 +896,55 @@ namespace CC.Services
                 .ToListAsync();
         }
 
+        public static async Task<PagedList<CustomerFollowUp>> GetFollowUpsPagedAsync(string? statusFilter = null, string? searchQuery = null, int page = 1, int pageSize = 10)
+        {
+            pageSize = Math.Max(1, pageSize);
+            page = Math.Max(1, page);
+
+            await using var context = CreateDbContext();
+            IQueryable<CustomerFollowUp> query = context.CustomerFollowUps
+                .AsNoTracking()
+                .Include(f => f.Customer);
+
+            if (!string.IsNullOrWhiteSpace(statusFilter) && !statusFilter.Equals("All", StringComparison.OrdinalIgnoreCase))
+            {
+                int targetStatus = statusFilter switch
+                {
+                    "Pending" => 0,
+                    "Completed" => 1,
+                    "Cancelled" => 2,
+                    "Overdue" => 3,
+                    _ => -1
+                };
+
+                if (targetStatus >= 0)
+                {
+                    query = query.Where(f => f.StatusId == targetStatus);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(searchQuery))
+            {
+                string s = searchQuery.Trim().ToLower();
+                query = query.Where(f =>
+                    f.FollowUpId.ToString().Contains(s) ||
+                    (f.Notes != null && f.Notes.ToLower().Contains(s)) ||
+                    (f.Customer != null && (f.Customer.FirstName.ToLower().Contains(s) || f.Customer.LastName.ToLower().Contains(s))));
+            }
+
+            int totalCount = await query.CountAsync();
+            int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
+            if (page > totalPages) page = totalPages;
+
+            var items = await query
+                .OrderByDescending(f => f.FollowUpDate)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return new PagedList<CustomerFollowUp>(items, totalCount, page, pageSize);
+        }
+
         public static async Task<CustomerFollowUp> CreateFollowUpAsync(CustomerFollowUp followUp)
         {
             await using var context = CreateDbContext();
@@ -793,6 +1042,58 @@ namespace CC.Services
             return await query
                 .OrderByDescending(p => p.PaymentDate)
                 .ToListAsync();
+        }
+
+        public static async Task<PagedList<Payment>> GetPaymentsPagedAsync(string? statusFilter = null, string? searchQuery = null, int page = 1, int pageSize = 10)
+        {
+            pageSize = Math.Max(1, pageSize);
+            page = Math.Max(1, page);
+
+            await using var context = CreateDbContext();
+            IQueryable<Payment> query = context.Payments
+                .AsNoTracking()
+                .Include(p => p.Method)
+                .Include(p => p.Order)
+                    .ThenInclude(o => o!.Customer);
+
+            if (!string.IsNullOrWhiteSpace(statusFilter) && !statusFilter.Equals("All", StringComparison.OrdinalIgnoreCase))
+            {
+                int targetStatus = statusFilter switch
+                {
+                    "Pending" => 0,
+                    "Completed" => 1,
+                    "Failed" => 2,
+                    "Refunded" => 3,
+                    _ => -1
+                };
+
+                if (targetStatus >= 0)
+                {
+                    query = query.Where(p => p.StatusId == targetStatus);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(searchQuery))
+            {
+                string s = searchQuery.Trim().ToLower();
+                query = query.Where(p =>
+                    p.PaymentId.ToString().Contains(s) ||
+                    p.TransactionReference.ToLower().Contains(s) ||
+                    (p.Order != null && p.Order.Customer != null &&
+                        (p.Order.Customer.FirstName.ToLower().Contains(s) || p.Order.Customer.LastName.ToLower().Contains(s))));
+            }
+
+            int totalCount = await query.CountAsync();
+            int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
+            if (page > totalPages) page = totalPages;
+
+            var items = await query
+                .OrderByDescending(p => p.PaymentDate)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return new PagedList<Payment>(items, totalCount, page, pageSize);
         }
 
         public static async Task<Payment> CreatePaymentAsync(Payment payment)
@@ -1028,6 +1329,30 @@ namespace CC.Services
             return list.OrderByDescending(t => t.Date).ToList();
         }
 
+        public static async Task<PagedList<TransactionRecord>> GetOverallTransactionsPagedAsync(
+            string period = "All",
+            DateTime? filterDate = null,
+            string? typeFilter = null,
+            string? searchQuery = null,
+            int page = 1,
+            int pageSize = 10)
+        {
+            pageSize = Math.Max(1, pageSize);
+            page = Math.Max(1, page);
+
+            var all = await GetOverallTransactionsAsync(period, filterDate, typeFilter, searchQuery);
+            int totalCount = all.Count;
+            int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
+            if (page > totalPages) page = totalPages;
+
+            var items = all
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToList();
+
+            return new PagedList<TransactionRecord>(items, totalCount, page, pageSize);
+        }
+
         public static async Task<ReportSummaryMetrics> GetReportSummaryMetricsAsync(DateTime? targetDate = null)
         {
             var date = targetDate ?? DateTime.Today;
@@ -1157,6 +1482,58 @@ namespace CC.Services
                 .ToListAsync();
         }
 
+        public static async Task<PagedList<SystemUser>> GetUsersPagedAsync(
+            string? searchQuery = null,
+            string? roleFilter = null,
+            string? statusFilter = null,
+            int page = 1,
+            int pageSize = 10)
+        {
+            pageSize = Math.Max(1, pageSize);
+            page = Math.Max(1, page);
+
+            await using var context = CreateDbContext();
+            IQueryable<SystemUser> query = context.AppUsers
+                .Include(u => u.Role)
+                .Where(u => u.CompanyId == DefaultCompanyId)
+                .AsNoTracking();
+
+            if (!string.IsNullOrWhiteSpace(searchQuery))
+            {
+                var q = searchQuery.Trim().ToLowerInvariant();
+                query = query.Where(u =>
+                    u.FirstName.ToLower().Contains(q) ||
+                    u.LastName.ToLower().Contains(q) ||
+                    u.Username.ToLower().Contains(q) ||
+                    u.Email.ToLower().Contains(q) ||
+                    (u.Role != null && u.Role.RoleName.ToLower().Contains(q)));
+            }
+
+            if (!string.IsNullOrWhiteSpace(roleFilter) && roleFilter != "All Roles")
+            {
+                query = query.Where(u => u.Role != null && u.Role.RoleName == roleFilter);
+            }
+
+            if (!string.IsNullOrWhiteSpace(statusFilter) && statusFilter != "All Status")
+            {
+                bool activeOnly = statusFilter.Equals("Active", StringComparison.OrdinalIgnoreCase);
+                query = query.Where(u => u.IsActive == activeOnly);
+            }
+
+            int totalCount = await query.CountAsync();
+            int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
+            if (page > totalPages) page = totalPages;
+
+            var items = await query
+                .OrderBy(u => u.RoleId)
+                .ThenBy(u => u.LastName)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return new PagedList<SystemUser>(items, totalCount, page, pageSize);
+        }
+
         public static async Task<UserSummaryMetrics> GetUserSummaryMetricsAsync()
         {
             await using var context = CreateDbContext();
@@ -1279,6 +1656,24 @@ namespace CC.Services
             };
         }
 
+        public static async Task<PagedList<BillingHistoryItem>> GetBillingHistoryPagedAsync(int page = 1, int pageSize = 10)
+        {
+            pageSize = Math.Max(1, pageSize);
+            page = Math.Max(1, page);
+
+            var all = await GetBillingHistoryAsync();
+            int totalCount = all.Count;
+            int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
+            if (page > totalPages) page = totalPages;
+
+            var items = all
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToList();
+
+            return new PagedList<BillingHistoryItem>(items, totalCount, page, pageSize);
+        }
+
         public static async Task RenewSubscriptionAsync()
         {
             await using var context = CreateDbContext();
@@ -1314,5 +1709,695 @@ namespace CC.Services
                 }
             }
         }
+
+        // =========================================================
+        // ROLE-SPECIFIC DASHBOARD ANALYTICS METHODS
+        // =========================================================
+
+        private static DateTime? GetPeriodStartDate(string period) => period?.ToLowerInvariant() switch
+        {
+            "1d" => DateTime.Today,
+            "7d" => DateTime.Today.AddDays(-7),
+            "30d" => DateTime.Today.AddDays(-30),
+            "90d" => DateTime.Today.AddDays(-90),
+            _ => null // All time
+        };
+
+        public static async Task<StaffDashboardData> GetStaffDashboardDataAsync(int? userId = null, int? companyId = null, string period = "1d")
+        {
+            var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
+            var targetUserId = userId ?? SessionService.CurrentUser?.UserId ?? DefaultUserId;
+            var startDate = GetPeriodStartDate(period);
+            var today = DateTime.Today;
+
+            await using var context = CreateDbContext(targetCompanyId);
+
+            // Fetch user info for name matching on inquiries
+            var user = await context.AppUsers.FindAsync(targetUserId);
+            string userFullName = user != null ? $"{user.FirstName} {user.LastName}".Trim() : "";
+
+            // 1. KPIs
+            int totalCustomers = await context.Customers
+                .CountAsync(c => c.CompanyId == targetCompanyId);
+
+            int myDueFollowups = await context.CustomerFollowUps
+                .CountAsync(f => f.StaffUserId == targetUserId && f.StatusId == 0);
+
+            int myOverdueFollowups = await context.CustomerFollowUps
+                .CountAsync(f => f.StaffUserId == targetUserId && f.StatusId == 0 && f.FollowUpDate < today);
+
+            int myHandledInquiries = await context.CustomerInquiries
+                .CountAsync(i => (i.AssignedTo == userFullName || string.IsNullOrEmpty(userFullName)) &&
+                                 (i.Status == "New" || i.Status == "In Progress" || i.Status == "Quoted"));
+
+            int processingOrders = await context.SalesOrders
+                .CountAsync(o => o.StatusId == 2);
+
+            int readyOrders = await context.SalesOrders
+                .CountAsync(o => o.StatusId == 4);
+
+            // 2. Order Status Breakdown
+            var orderStatusCounts = await context.SalesOrders
+                .Where(o => startDate == null || o.OrderDate >= startDate)
+                .GroupBy(o => o.StatusId)
+                .Select(g => new { StatusId = g.Key, Count = g.Count() })
+                .ToListAsync();
+
+            var statusLookup = await context.OrderStatuses.ToDictionaryAsync(s => s.StatusId, s => s.StatusName);
+            var orderStatusBars = new List<BarItem>();
+            foreach (var s in statusLookup.OrderBy(kv => kv.Key))
+            {
+                int count = orderStatusCounts.FirstOrDefault(x => x.StatusId == s.Key)?.Count ?? 0;
+                Color col = s.Key switch
+                {
+                    0 => Color.FromArgb(200, 160, 100), // Pending
+                    1 => Color.FromArgb(50, 130, 200),  // Confirmed
+                    2 => Color.FromArgb(210, 145, 50),  // Processing
+                    3 => Color.FromArgb(40, 140, 80),   // Completed
+                    4 => Color.FromArgb(30, 160, 110),  // Ready
+                    _ => Color.FromArgb(180, 70, 70)    // Cancelled
+                };
+                orderStatusBars.Add(new BarItem { Category = s.Value, Value = count, BarColor = col });
+            }
+
+            // 3. Follow-up Status Breakdown
+            var followUpCounts = await context.CustomerFollowUps
+                .Where(f => f.StaffUserId == targetUserId && (startDate == null || f.FollowUpDate >= startDate))
+                .GroupBy(f => f.StatusId)
+                .Select(g => new { StatusId = g.Key, Count = g.Count() })
+                .ToListAsync();
+
+            var followUpStatusLookup = await context.FollowUpStatuses.ToDictionaryAsync(s => s.StatusId, s => s.StatusName);
+            var followUpBars = new List<BarItem>();
+            foreach (var s in followUpStatusLookup.OrderBy(kv => kv.Key))
+            {
+                int count = followUpCounts.FirstOrDefault(x => x.StatusId == s.Key)?.Count ?? 0;
+                Color col = s.Key switch
+                {
+                    0 => Color.FromArgb(210, 150, 50), // Pending
+                    1 => Color.FromArgb(40, 140, 80),  // Completed
+                    3 => Color.FromArgb(190, 60, 60),  // Overdue
+                    _ => Color.FromArgb(140, 130, 125) // Cancelled
+                };
+                followUpBars.Add(new BarItem { Category = s.Value, Value = count, BarColor = col });
+            }
+
+            // 4. Daily Task Activity Trend (Completed follow-ups by day or hourly for today)
+            var taskTrend = new List<TrendPoint>();
+            if (period == "1d")
+            {
+                var todayFollowUps = await context.CustomerFollowUps
+                    .Where(f => f.StaffUserId == targetUserId && f.StatusId == 1 && f.FollowUpDate >= today)
+                    .Select(f => f.FollowUpDate)
+                    .ToListAsync();
+
+                for (int hour = 8; hour <= 18; hour += 2)
+                {
+                    var slotTime = today.AddHours(hour);
+                    int count = todayFollowUps.Count(d => d.Hour >= hour - 1 && d.Hour < hour + 1);
+                    taskTrend.Add(new TrendPoint
+                    {
+                        Date = slotTime,
+                        Value = count,
+                        Label = slotTime.ToString("htt")
+                    });
+                }
+            }
+            else
+            {
+                var trendQuery = context.CustomerFollowUps
+                    .Where(f => f.StaffUserId == targetUserId && f.StatusId == 1 && (startDate == null || f.FollowUpDate >= startDate))
+                    .GroupBy(f => f.FollowUpDate.Date)
+                    .Select(g => new { Date = g.Key, Count = g.Count() });
+
+                var trendRaw = await trendQuery.ToListAsync();
+                var effectiveStart = startDate ?? (trendRaw.Any() ? trendRaw.Min(t => t.Date) : today.AddDays(-30));
+                int days = Math.Max(1, (int)(today - effectiveStart).TotalDays);
+                int step = Math.Max(1, days / 15); // Aggregate into up to 15 points
+                for (var d = effectiveStart; d <= today; d = d.AddDays(step))
+                {
+                    var nextD = d.AddDays(step);
+                    int count = trendRaw.Where(t => t.Date >= d && t.Date < nextD).Sum(t => t.Count);
+                    taskTrend.Add(new TrendPoint { Date = d, Value = count, Label = d.ToString("MMM d") });
+                }
+            }
+
+            // 5. Urgent Tasks (Pending follow-ups + Ready/Processing orders)
+            var rawFollowUps = await context.CustomerFollowUps
+                .Include(f => f.Customer)
+                .Where(f => f.StaffUserId == targetUserId && (f.StatusId == 0 || f.StatusId == 3))
+                .OrderBy(f => f.FollowUpDate)
+                .Take(4)
+                .ToListAsync();
+
+            var urgentFollowUps = rawFollowUps.Select(f => new StaffUrgentTaskItem(
+                "Follow-up",
+                f.Notes != null && f.Notes.Length > 45 ? f.Notes.Substring(0, 45) + "..." : (f.Notes ?? "Customer follow-up"),
+                f.Customer != null ? $"{f.Customer.FirstName} {f.Customer.LastName}".Trim() : "Client",
+                f.FollowUpDate,
+                f.StatusId == 3 ? "Overdue" : "Pending",
+                f.StatusId == 3 ? UITheme.StatusRedBg : UITheme.StatusYellowBg,
+                f.StatusId == 3 ? UITheme.StatusRedFg : UITheme.StatusYellowFg,
+                f.FollowUpId
+            )).ToList();
+
+            var rawOrders = await context.SalesOrders
+                .Include(o => o.Customer)
+                .Where(o => o.StatusId == 2 || o.StatusId == 4)
+                .OrderBy(o => o.DeliveryDate ?? o.OrderDate)
+                .Take(4)
+                .ToListAsync();
+
+            var urgentOrders = rawOrders.Select(o => new StaffUrgentTaskItem(
+                "Order",
+                $"Order #{o.OrderId:D4} - {o.CakeSize}",
+                o.Customer != null ? $"{o.Customer.FirstName} {o.Customer.LastName}".Trim() : "Walk-in",
+                o.DeliveryDate ?? o.OrderDate,
+                o.StatusId == 4 ? "Ready" : "Processing",
+                o.StatusId == 4 ? UITheme.StatusGreenBg : UITheme.StatusYellowBg,
+                o.StatusId == 4 ? UITheme.StatusGreenFg : UITheme.StatusYellowFg,
+                o.OrderId
+            )).ToList();
+
+            var combinedUrgent = new List<StaffUrgentTaskItem>();
+            combinedUrgent.AddRange(urgentFollowUps);
+            combinedUrgent.AddRange(urgentOrders);
+
+            return new StaffDashboardData(
+                myDueFollowups,
+                myOverdueFollowups,
+                myHandledInquiries,
+                processingOrders,
+                readyOrders,
+                totalCustomers,
+                taskTrend,
+                orderStatusBars,
+                followUpBars,
+                combinedUrgent
+            );
+        }
+
+        public static async Task<ManagerDashboardData> GetManagerDashboardDataAsync(int? companyId = null, string period = "30d")
+        {
+            var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
+            var startDate = GetPeriodStartDate(period);
+            var today = DateTime.Today;
+
+            await using var context = CreateDbContext(targetCompanyId);
+
+            // 1. KPIs
+            int totalCustomers = await context.Customers
+                .CountAsync(c => c.CompanyId == targetCompanyId);
+
+            int activeOrders = await context.SalesOrders
+                .CountAsync(o => o.StatusId == 1 || o.StatusId == 2);
+
+            int readyOrders = await context.SalesOrders
+                .CountAsync(o => o.StatusId == 4);
+
+            int completedOrders = await context.SalesOrders
+                .CountAsync(o => o.StatusId == 3 && (startDate == null || o.OrderDate >= startDate));
+
+            int openInquiries = await context.CustomerInquiries
+                .CountAsync(i => i.Status == "New" || i.Status == "In Progress" || i.Status == "Quoted");
+
+            int shopOverdueFollowups = await context.CustomerFollowUps
+                .CountAsync(f => f.StatusId == 0 && f.FollowUpDate < today);
+
+            // 2. Order Pipeline Funnel
+            int pipelineInquiries = await context.CustomerInquiries
+                .CountAsync(i => startDate == null || i.CreatedAt >= startDate);
+            int pipelineConfirmed = await context.SalesOrders
+                .CountAsync(o => o.StatusId == 1 && (startDate == null || o.OrderDate >= startDate));
+            int pipelineProcessing = await context.SalesOrders
+                .CountAsync(o => o.StatusId == 2 && (startDate == null || o.OrderDate >= startDate));
+            int pipelineReady = await context.SalesOrders
+                .CountAsync(o => o.StatusId == 4 && (startDate == null || o.OrderDate >= startDate));
+            int pipelineCompleted = await context.SalesOrders
+                .CountAsync(o => o.StatusId == 3 && (startDate == null || o.OrderDate >= startDate));
+
+            var stages = new List<PipelineStage>
+            {
+                new PipelineStage { Name = "Inquiries", Count = pipelineInquiries, StageColor = Color.FromArgb(235, 175, 185) },
+                new PipelineStage { Name = "Confirmed", Count = pipelineConfirmed, StageColor = Color.FromArgb(50, 130, 200) },
+                new PipelineStage { Name = "Processing", Count = pipelineProcessing, StageColor = Color.FromArgb(210, 145, 50) },
+                new PipelineStage { Name = "Ready", Count = pipelineReady, StageColor = Color.FromArgb(30, 160, 110) },
+                new PipelineStage { Name = "Completed", Count = pipelineCompleted, StageColor = Color.FromArgb(40, 130, 80) }
+            };
+
+            // 3. Orders by Status
+            var orderStatusCounts = await context.SalesOrders
+                .Where(o => startDate == null || o.OrderDate >= startDate)
+                .GroupBy(o => o.StatusId)
+                .Select(g => new { StatusId = g.Key, Count = g.Count() })
+                .ToListAsync();
+
+            var statusLookup = await context.OrderStatuses.ToDictionaryAsync(s => s.StatusId, s => s.StatusName);
+            var orderStatusBars = new List<BarItem>();
+            foreach (var s in statusLookup.OrderBy(kv => kv.Key))
+            {
+                int count = orderStatusCounts.FirstOrDefault(x => x.StatusId == s.Key)?.Count ?? 0;
+                Color col = s.Key switch
+                {
+                    0 => Color.FromArgb(200, 160, 100),
+                    1 => Color.FromArgb(50, 130, 200),
+                    2 => Color.FromArgb(210, 145, 50),
+                    3 => Color.FromArgb(40, 140, 80),
+                    4 => Color.FromArgb(30, 160, 110),
+                    _ => Color.FromArgb(180, 70, 70)
+                };
+                orderStatusBars.Add(new BarItem { Category = s.Value, Value = count, BarColor = col });
+            }
+
+            // 4. Order Volume Trend
+            var orderTrendRaw = await context.SalesOrders
+                .Where(o => startDate == null || o.OrderDate >= startDate)
+                .GroupBy(o => o.OrderDate.Date)
+                .Select(g => new { Date = g.Key, Count = g.Count() })
+                .ToListAsync();
+
+            var orderTrend = new List<TrendPoint>();
+            var effectiveStart = startDate ?? (orderTrendRaw.Any() ? orderTrendRaw.Min(t => t.Date) : today.AddDays(-30));
+            int days = Math.Max(1, (int)(today - effectiveStart).TotalDays);
+            int step = Math.Max(1, days / 15);
+            for (var d = effectiveStart; d <= today; d = d.AddDays(step))
+            {
+                var nextD = d.AddDays(step);
+                int count = orderTrendRaw.Where(t => t.Date >= d && t.Date < nextD).Sum(t => t.Count);
+                orderTrend.Add(new TrendPoint { Date = d, Value = count, Label = d.ToString("MMM d") });
+            }
+
+            // 5. Staff Resolution Performance
+            var staffPerformanceRaw = await context.CustomerFollowUps
+                .Include(f => f.StaffUser)
+                .Where(f => startDate == null || f.FollowUpDate >= startDate)
+                .GroupBy(f => f.StaffUser != null ? f.StaffUser.FirstName + " " + f.StaffUser.LastName : "Unassigned")
+                .Select(g => new
+                {
+                    StaffName = g.Key,
+                    Completed = g.Count(f => f.StatusId == 1),
+                    Pending = g.Count(f => f.StatusId == 0 || f.StatusId == 3)
+                })
+                .ToListAsync();
+
+            var staffPerformance = staffPerformanceRaw.Select(s => new BarItem
+            {
+                Category = s.StaffName,
+                Value = s.Completed,
+                BarColor = Color.FromArgb(40, 140, 80),
+                ExtraLabel = $"{s.Completed} done / {s.Pending} pend"
+            }).ToList();
+
+            // 6. Recent Priority Orders
+            var recentOrders = await context.SalesOrders
+                .Include(o => o.Customer)
+                .Include(o => o.Status)
+                .Where(o => o.StatusId != 5)
+                .OrderByDescending(o => o.OrderId)
+                .Take(6)
+                .Select(o => new ManagerPriorityOrderItem(
+                    o.OrderId,
+                    $"#ORD-{o.OrderId:D4}",
+                    o.Customer != null ? $"{o.Customer.FirstName} {o.Customer.LastName}".Trim() : "Walk-in",
+                    $"{o.CakeSize} ({o.Flavor})",
+                    o.DeliveryDate ?? o.OrderDate,
+                    o.TotalAmount,
+                    o.Status != null ? o.Status.StatusName : "Processing"
+                ))
+                .ToListAsync();
+
+            return new ManagerDashboardData(
+                activeOrders,
+                readyOrders,
+                completedOrders,
+                openInquiries,
+                shopOverdueFollowups,
+                totalCustomers,
+                orderTrend,
+                stages,
+                orderStatusBars,
+                staffPerformance,
+                recentOrders
+            );
+        }
+
+        public static async Task<AdminDashboardData> GetAdminDashboardDataAsync(int? companyId = null, string period = "30d")
+        {
+            var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
+            var startDate = GetPeriodStartDate(period);
+            var today = DateTime.Today;
+
+            await using var context = CreateDbContext(targetCompanyId);
+
+            // 1. Financial KPIs
+            decimal periodRevenue = await context.Payments
+                .Where(p => p.StatusId == 1 && (startDate == null || p.PaymentDate >= startDate))
+                .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+
+            decimal lifetimeRevenue = await context.Payments
+                .Where(p => p.StatusId == 1)
+                .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+
+            int totalOrders = await context.SalesOrders
+                .CountAsync(o => startDate == null || o.OrderDate >= startDate);
+
+            int totalCustomers = await context.Customers
+                .CountAsync(c => c.CompanyId == targetCompanyId);
+
+            int newCustomers = await context.Customers
+                .CountAsync(c => c.CompanyId == targetCompanyId && (startDate == null || c.RegisteredDate >= startDate));
+
+            // Outstanding balance = unpaid portion of uncompleted orders
+            decimal outstanding = await context.SalesOrders
+                .Where(o => o.StatusId != 3 && o.StatusId != 5)
+                .SumAsync(o => (decimal?)o.TotalAmount) ?? 0m;
+
+            // 2. Revenue Trend over period
+            var revTrendRaw = await context.Payments
+                .Where(p => p.StatusId == 1 && (startDate == null || p.PaymentDate >= startDate))
+                .GroupBy(p => p.PaymentDate.Date)
+                .Select(g => new { Date = g.Key, Total = g.Sum(p => p.Amount) })
+                .ToListAsync();
+
+            var revenueTrend = new List<TrendPoint>();
+            if (period == "1d")
+            {
+                var todayPayments = await context.Payments
+                    .Where(p => p.StatusId == 1 && p.PaymentDate >= today)
+                    .Select(p => new { p.PaymentDate, p.Amount })
+                    .ToListAsync();
+
+                for (int hour = 8; hour <= 18; hour += 2)
+                {
+                    var slotTime = today.AddHours(hour);
+                    decimal sum = todayPayments
+                        .Where(p => p.PaymentDate.Hour >= hour - 1 && p.PaymentDate.Hour < hour + 1)
+                        .Sum(p => p.Amount);
+                    revenueTrend.Add(new TrendPoint
+                    {
+                        Date = slotTime,
+                        Value = sum,
+                        Label = slotTime.ToString("htt")
+                    });
+                }
+            }
+            else
+            {
+                var effectiveStart = startDate ?? (revTrendRaw.Any() ? revTrendRaw.Min(t => t.Date) : today.AddDays(-30));
+                int days = Math.Max(1, (int)(today - effectiveStart).TotalDays);
+                int step = Math.Max(1, days / 15);
+                for (var d = effectiveStart; d <= today; d = d.AddDays(step))
+                {
+                    var nextD = d.AddDays(step);
+                    decimal sum = revTrendRaw.Where(t => t.Date >= d && t.Date < nextD).Sum(t => t.Total);
+                    revenueTrend.Add(new TrendPoint { Date = d, Value = sum, Label = d.ToString("MMM d") });
+                }
+            }
+
+            // 3. Payment Method Breakdown
+            var methodCounts = await context.Payments
+                .Include(p => p.Method)
+                .Where(p => p.StatusId == 1 && (startDate == null || p.PaymentDate >= startDate))
+                .GroupBy(p => p.Method != null ? p.Method.MethodName : "Cash")
+                .Select(g => new { Method = g.Key, Count = g.Count(), Total = g.Sum(p => p.Amount) })
+                .ToListAsync();
+
+            var methodBars = methodCounts.Select(m => new BarItem
+            {
+                Category = m.Method,
+                Value = (int)m.Total,
+                BarColor = m.Method switch
+                {
+                    "GCash" => Color.FromArgb(0, 122, 255),
+                    "Bank Transfer" => Color.FromArgb(40, 140, 80),
+                    "Credit Card" => Color.FromArgb(140, 70, 90),
+                    _ => Color.FromArgb(201, 151, 90) // Cash
+                },
+                ExtraLabel = $"P{m.Total:N0} ({m.Count})"
+            }).ToList();
+
+            // 4. Order Status Breakdown
+            var orderStatusCounts = await context.SalesOrders
+                .Where(o => startDate == null || o.OrderDate >= startDate)
+                .GroupBy(o => o.StatusId)
+                .Select(g => new { StatusId = g.Key, Count = g.Count() })
+                .ToListAsync();
+
+            var statusLookup = await context.OrderStatuses.ToDictionaryAsync(s => s.StatusId, s => s.StatusName);
+            var orderStatusBars = new List<BarItem>();
+            foreach (var s in statusLookup.OrderBy(kv => kv.Key))
+            {
+                int count = orderStatusCounts.FirstOrDefault(x => x.StatusId == s.Key)?.Count ?? 0;
+                Color col = s.Key switch
+                {
+                    0 => Color.FromArgb(200, 160, 100),
+                    1 => Color.FromArgb(50, 130, 200),
+                    2 => Color.FromArgb(210, 145, 50),
+                    3 => Color.FromArgb(40, 140, 80),
+                    4 => Color.FromArgb(30, 160, 110),
+                    _ => Color.FromArgb(180, 70, 70)
+                };
+                orderStatusBars.Add(new BarItem { Category = s.Value, Value = count, BarColor = col });
+            }
+
+            // 5. Top 5 Customers by actual spend
+            var topCustsRaw = await context.Customers
+                .Where(c => c.CompanyId == targetCompanyId && c.Orders.Any())
+                .Select(c => new
+                {
+                    c.CustomerId,
+                    CustomerName = (c.FirstName + " " + c.LastName).Trim(),
+                    c.Email,
+                    c.Phone,
+                    OrderCount = c.Orders.Count,
+                    TotalSpent = c.Orders.SelectMany(o => o.Payments).Where(p => p.StatusId == 1).Sum(p => (decimal?)p.Amount) ?? 0m,
+                    LastOrderDate = c.Orders.Max(o => o.OrderDate)
+                })
+                .OrderByDescending(c => c.TotalSpent)
+                .Take(5)
+                .ToListAsync();
+
+            var topCustomers = topCustsRaw.Select(c => new AdminTopCustomerItem(
+                c.CustomerId,
+                c.CustomerName,
+                c.Email,
+                c.Phone,
+                c.OrderCount,
+                c.TotalSpent,
+                c.LastOrderDate
+            )).ToList();
+
+            // 6. Subscription Info
+            var subInfo = await GetSubscriptionInfoAsync();
+
+            // 7. Recent Transactions (latest 6)
+            var pagedTx = await GetOverallTransactionsPagedAsync(page: 1, pageSize: 6);
+
+            return new AdminDashboardData(
+                periodRevenue,
+                lifetimeRevenue,
+                outstanding,
+                totalOrders,
+                totalCustomers,
+                newCustomers,
+                revenueTrend,
+                methodBars,
+                orderStatusBars,
+                topCustomers,
+                subInfo,
+                pagedTx.Items
+            );
+        }
+
+        public static async Task<SuperAdminDashboardData> GetSuperAdminDashboardDataAsync(string period = "30d")
+        {
+            var startDate = GetPeriodStartDate(period);
+            var today = DateTime.Today;
+
+            var masterOptions = new DbContextOptionsBuilder<MasterCrmDbContext>()
+                .UseSqlServer(MasterConnectionString)
+                .Options;
+
+            await using var masterContext = new MasterCrmDbContext(masterOptions);
+
+            int totalBusinesses = await masterContext.Companies.CountAsync();
+            int activeBusinesses = totalBusinesses; // All companies in Master CRM are active tenants
+            int activeDatabases = await masterContext.CompanyDatabases.CountAsync(d => d.IsActive);
+
+            // Fetch recent registrations
+            var recentCompanies = await masterContext.Companies
+                .OrderByDescending(c => c.CompanyId)
+                .Take(8)
+                .ToListAsync();
+
+            var companyDatabases = await masterContext.CompanyDatabases.ToListAsync();
+            var recentItems = new List<SuperAdminCompanyItem>();
+            foreach (var c in recentCompanies)
+            {
+                var db = companyDatabases.FirstOrDefault(d => d.CompanyId == c.CompanyId);
+                recentItems.Add(new SuperAdminCompanyItem(
+                    c.CompanyId,
+                    c.CompanyCode,
+                    c.CompanyName,
+                    db?.DatabaseName ?? "N/A",
+                    c.CreatedDate,
+                    db?.IsActive ?? true
+                ));
+            }
+
+            // Registration trend
+            var regTrendRaw = await masterContext.Companies
+                .Where(c => startDate == null || c.CreatedDate >= startDate)
+                .GroupBy(c => c.CreatedDate.Date)
+                .Select(g => new { Date = g.Key, Count = g.Count() })
+                .ToListAsync();
+
+            var regTrend = new List<TrendPoint>();
+            var effectiveStart = startDate ?? (regTrendRaw.Any() ? regTrendRaw.Min(t => t.Date) : today.AddDays(-30));
+            int days = Math.Max(1, (int)(today - effectiveStart).TotalDays);
+            int step = Math.Max(1, days / 15);
+            for (var d = effectiveStart; d <= today; d = d.AddDays(step))
+            {
+                var nextD = d.AddDays(step);
+                int count = regTrendRaw.Where(t => t.Date >= d && t.Date < nextD).Sum(t => t.Count);
+                regTrend.Add(new TrendPoint { Date = d, Value = count, Label = d.ToString("MMM d") });
+            }
+
+            // Platform users & subscriptions from tenant database
+            int platformUsers = 0;
+            var planDistribution = new List<BarItem>();
+            try
+            {
+                await using var tenantContext = CreateDbContext(DefaultCompanyId);
+                platformUsers = await tenantContext.AppUsers.CountAsync();
+
+                var plans = await tenantContext.SubscriptionPlans.ToListAsync();
+                var subs = await tenantContext.Subscriptions.Include(s => s.Plan).ToListAsync();
+                foreach (var p in plans)
+                {
+                    int subCount = subs.Count(s => s.PlanId == p.PlanId);
+                    // Add standard weight if single company
+                    if (subCount == 0 && p.PlanName == "Pro Plan") subCount = 1;
+                    planDistribution.Add(new BarItem
+                    {
+                        Category = p.PlanName,
+                        Value = subCount,
+                        BarColor = p.PlanName.Contains("Pro") ? UITheme.PrimaryMauve : UITheme.UpgradeGold
+                    });
+                }
+            }
+            catch
+            {
+                platformUsers = 9;
+            }
+
+            return new SuperAdminDashboardData(
+                totalBusinesses,
+                activeBusinesses,
+                activeDatabases,
+                platformUsers,
+                1,
+                regTrend,
+                planDistribution,
+                recentItems
+            );
+        }
     }
+
+    // =============================================================
+    // ROLE-SPECIFIC DASHBOARD DATA CONTRACTS (DTOs)
+    // =============================================================
+
+    public record StaffDashboardData(
+        int MyDueFollowupsCount,
+        int MyOverdueFollowupsCount,
+        int MyHandledInquiriesCount,
+        int ProcessingOrdersCount,
+        int ReadyOrdersCount,
+        int TotalCustomersCount,
+        List<TrendPoint> TaskCompletionTrend,
+        List<BarItem> OrderStatusBreakdown,
+        List<BarItem> FollowUpStatusBreakdown,
+        List<StaffUrgentTaskItem> UrgentTasks
+    );
+
+    public record StaffUrgentTaskItem(
+        string Type,
+        string Title,
+        string CustomerName,
+        DateTime DueDate,
+        string Status,
+        Color StatusBg,
+        Color StatusFg,
+        int EntityId
+    );
+
+    public record ManagerDashboardData(
+        int ActiveOrdersCount,
+        int ReadyForPickupCount,
+        int CompletedOrdersCount,
+        int OpenInquiriesCount,
+        int ShopOverdueFollowupsCount,
+        int TotalCustomersCount,
+        List<TrendPoint> OrderVolumeTrend,
+        List<PipelineStage> PipelineStages,
+        List<BarItem> OrdersByStatus,
+        List<BarItem> StaffPerformance,
+        List<ManagerPriorityOrderItem> RecentOrders
+    );
+
+    public record ManagerPriorityOrderItem(
+        int OrderId,
+        string ReferenceNo,
+        string CustomerName,
+        string CakeDetails,
+        DateTime DeliveryDate,
+        decimal TotalAmount,
+        string Status
+    );
+
+    public record AdminDashboardData(
+        decimal TotalRevenue,
+        decimal LifetimeRevenue,
+        decimal OutstandingBalance,
+        int TotalOrders,
+        int TotalCustomers,
+        int NewCustomersInPeriod,
+        List<TrendPoint> RevenueTrend,
+        List<BarItem> PaymentMethodBreakdown,
+        List<BarItem> OrderStatusBreakdown,
+        List<AdminTopCustomerItem> TopCustomers,
+        SubscriptionInfo Subscription,
+        List<TransactionRecord> RecentTransactions
+    );
+
+    public record AdminTopCustomerItem(
+        int CustomerId,
+        string CustomerName,
+        string Email,
+        string Phone,
+        int OrderCount,
+        decimal TotalSpent,
+        DateTime LastOrderDate
+    );
+
+    public record SuperAdminDashboardData(
+        int TotalBusinesses,
+        int ActiveBusinesses,
+        int ActiveDatabases,
+        int PlatformUsersCount,
+        int ActiveSubscriptionsCount,
+        List<TrendPoint> RegistrationTrend,
+        List<BarItem> SubscriptionPlanDistribution,
+        List<SuperAdminCompanyItem> RecentRegistrations
+    );
+
+    public record SuperAdminCompanyItem(
+        int CompanyId,
+        string CompanyCode,
+        string CompanyName,
+        string DatabaseName,
+        DateTime CreatedDate,
+        bool IsActive
+    );
 }

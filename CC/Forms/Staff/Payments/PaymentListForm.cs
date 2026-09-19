@@ -15,7 +15,7 @@ namespace CC.Forms.Staff.Payments
     /// <summary>
     /// Payments List Module Form implementing the List Panel Pattern specified in target mockup (media_1789365009186.png).
     /// </summary>
-    public class PaymentListForm : Form, ISearchable
+    public class PaymentListForm : Form, ISearchable, INavigationAware
     {
         private Panel topPanel = null!;
         private Label lblTitle = null!;
@@ -29,6 +29,9 @@ namespace CC.Forms.Staff.Payments
 
         private Panel tableCardPanel = null!;
         private DataGridView gridPayments = null!;
+        private PaginationControl pagination = null!;
+        private int currentPage = 1;
+        private const int PageSize = 10;
         private string activeFilter = "All";
         private string activeSearchQuery = string.Empty;
 
@@ -46,9 +49,9 @@ namespace CC.Forms.Staff.Payments
             Controls.Add(filterPillContainer);
             Controls.Add(searchWrapperPanel);
             Controls.Add(topPanel);
-
-            Load += async (s, e) => await RefreshGridAsync();
         }
+
+        public async Task InitializeDataAsync() => await RefreshGridAsync();
 
         private void InitializeComponent()
         {
@@ -65,6 +68,7 @@ namespace CC.Forms.Staff.Payments
         public async void Search(string query)
         {
             activeSearchQuery = query ?? string.Empty;
+            currentPage = 1;
             if (txtSearchBox != null && txtSearchBox.Text != activeSearchQuery)
             {
                 txtSearchBox.Text = activeSearchQuery;
@@ -224,6 +228,7 @@ namespace CC.Forms.Staff.Payments
                 btn.Click += async (s, e) =>
                 {
                     activeFilter = filterName;
+                    currentPage = 1;
                     UpdateFilterPillStyles();
                     await RefreshGridAsync();
                 };
@@ -299,7 +304,18 @@ namespace CC.Forms.Staff.Payments
             };
             gridPayments.CellMouseLeave += (s, e) => gridPayments.Cursor = Cursors.Default;
 
+            pagination = new PaginationControl
+            {
+                Dock = DockStyle.Bottom
+            };
+            pagination.PageChanged += async (newPage) =>
+            {
+                currentPage = newPage;
+                await RefreshGridAsync();
+            };
+
             tableCardPanel.Controls.Add(gridPayments);
+            tableCardPanel.Controls.Add(pagination);
         }
 
         private void GridPayments_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
@@ -480,7 +496,7 @@ namespace CC.Forms.Staff.Payments
             }
         }
 
-        private async Task RefreshGridAsync()
+        public async Task RefreshGridAsync()
         {
             try
             {
@@ -549,12 +565,24 @@ namespace CC.Forms.Staff.Payments
                     );
                 }
 
-                gridPayments.DataSource = query.ToList();
+                var totalCount = query.Count();
+                var totalPages = (int)Math.Ceiling(totalCount / (double)PageSize);
+                if (totalPages > 0 && currentPage > totalPages)
+                {
+                    currentPage = totalPages;
+                }
+
+                var pagedItems = query.Skip((currentPage - 1) * PageSize).Take(PageSize).ToList();
+
+                lblSubtitle.Text = $"{totalCount} payment records";
+                gridPayments.DataSource = pagedItems;
                 gridPayments.RowTemplate.Height = 68;
                 foreach (DataGridViewRow row in gridPayments.Rows)
                 {
                     row.Height = 68;
                 }
+
+                pagination.SetPagination(currentPage, PageSize, totalCount, "payments");
             }
             catch (Exception ex)
             {

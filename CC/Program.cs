@@ -25,6 +25,174 @@ namespace CC
                 System.Diagnostics.Debug.WriteLine($"DB Init warning: {ex.Message}");
             }
 
+            if (args.Length > 0 && args[0] == "--seed-demo-data")
+            {
+                bool force = args.Length > 1 && args[1] == "--force";
+                Console.WriteLine("Starting demo data seeding for CustomCakeCRM...");
+                var result = DatabaseSeeder.SeedDemoDataAsync(2, force).GetAwaiter().GetResult();
+                Console.WriteLine(result.Message);
+                return;
+            }
+
+            if (args.Length > 0 && args[0] == "--verify-db-counts")
+            {
+                Console.WriteLine("Verifying database row counts for CustomCakeCRM...");
+                DatabaseSeeder.PrintDatabaseCountsAsync(2).GetAwaiter().GetResult();
+                return;
+            }
+
+            if (args.Length > 0 && args[0] == "--test-nav")
+            {
+                Console.WriteLine("Running navigation diagnostic test...");
+                SessionService.CurrentUser = new CurrentUser { UserId = 4, FirstName = "Jerome", LastName = "Santos", Role = "Staff", CompanyId = 2 };
+                var form = new StaffDashboardForm();
+                form.Show();
+
+                void Pump(int ms = 500)
+                {
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    while (sw.ElapsedMilliseconds < ms)
+                    {
+                        Application.DoEvents();
+                        Thread.Sleep(20);
+                    }
+                }
+
+                System.Collections.Generic.IEnumerable<Control> GetAllControls(Control c)
+                {
+                    yield return c;
+                    foreach (Control child in c.Controls)
+                    foreach (var descendant in GetAllControls(child))
+                        yield return descendant;
+                }
+
+                Pump(1000);
+                Console.WriteLine($"[1. Init Dashboard] MainPanel controls: {form.MainPanel.Controls.Count}, Tag: {form.MainPanel.Tag?.GetType().Name ?? "null"}");
+
+                Console.WriteLine("Navigating to Customers...");
+                form.Navigate("Customers");
+                Pump(1000);
+                Console.WriteLine($"[2. Customers] MainPanel controls: {form.MainPanel.Controls.Count}, Tag: {form.MainPanel.Tag?.GetType().Name ?? "null"}");
+                if (form.MainPanel.Tag is CC.Forms.Staff.Customers.CustomerListForm clf)
+                {
+                    var dgv = clf.Controls.OfType<Control>().SelectMany(c => GetAllControls(c)).OfType<DataGridView>().FirstOrDefault();
+                    Console.WriteLine($"Found DataGridView: {dgv != null}, Rows: {dgv?.Rows.Count ?? -1}");
+                }
+
+                Console.WriteLine("Navigating to Dashboard...");
+                form.Navigate("Dashboard");
+                Pump(1500);
+                Console.WriteLine($"[3. Return Dashboard] MainPanel controls: {form.MainPanel.Controls.Count}, Tag: {form.MainPanel.Tag?.GetType().Name ?? "null"}");
+                var scrollPanel = form.MainPanel.Controls.OfType<Panel>().FirstOrDefault();
+                Console.WriteLine($"ScrollPanel controls: {scrollPanel?.Controls.Count ?? -1}");
+
+                Console.WriteLine("Navigating to Customers again...");
+                form.Navigate("Customers");
+                Pump(1000);
+                Console.WriteLine($"[4. Customers Again] MainPanel controls: {form.MainPanel.Controls.Count}, Tag: {form.MainPanel.Tag?.GetType().Name ?? "null"}");
+                if (form.MainPanel.Tag is CC.Forms.Staff.Customers.CustomerListForm clf2)
+                {
+                    var dgv = clf2.Controls.OfType<Control>().SelectMany(c => GetAllControls(c)).OfType<DataGridView>().FirstOrDefault();
+                    Console.WriteLine($"Found DataGridView: {dgv != null}, Rows: {dgv?.Rows.Count ?? -1}");
+                }
+
+                Console.WriteLine("Done test-nav.");
+                form.Close();
+                return;
+            }
+
+            if (args.Length > 0 && args[0] == "--test-analytics")
+            {
+                Console.WriteLine("Running automated validation for all role dashboard analytics...");
+                var staff = CrmDataService.GetStaffDashboardDataAsync(4, 2, "30d").GetAwaiter().GetResult();
+                Console.WriteLine($"[STAFF] Due: {staff.MyDueFollowupsCount}, Overdue: {staff.MyOverdueFollowupsCount}, Processing: {staff.ProcessingOrdersCount}, Ready: {staff.ReadyOrdersCount}, Trend Points: {staff.TaskCompletionTrend.Count}, Urgent Tasks: {staff.UrgentTasks.Count}");
+
+                var mgr = CrmDataService.GetManagerDashboardDataAsync(2, "30d").GetAwaiter().GetResult();
+                Console.WriteLine($"[MANAGER] Active: {mgr.ActiveOrdersCount}, Ready: {mgr.ReadyForPickupCount}, Stages: {mgr.PipelineStages.Count}, Staff Performance: {mgr.StaffPerformance.Count}, Recent Orders: {mgr.RecentOrders.Count}");
+
+                var adm = CrmDataService.GetAdminDashboardDataAsync(2, "30d").GetAwaiter().GetResult();
+                Console.WriteLine($"[ADMIN] Revenue: P{adm.TotalRevenue:N2}, Lifetime: P{adm.LifetimeRevenue:N2}, Orders: {adm.TotalOrders}, Top Custs: {adm.TopCustomers.Count}, Payment Methods: {adm.PaymentMethodBreakdown.Count}");
+
+                var super = CrmDataService.GetSuperAdminDashboardDataAsync("30d").GetAwaiter().GetResult();
+                Console.WriteLine($"[SUPER ADMIN] Businesses: {super.TotalBusinesses}, Databases: {super.ActiveDatabases}, Registrations: {super.RecentRegistrations.Count}");
+
+                string outputDir = @"C:\Users\user1\.gemini\antigravity\brain\7aee3b98-6126-4c32-b0bc-280b2549c485";
+
+                void PumpWait(Task? t)
+                {
+                    if (t == null) return;
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    while (!t.IsCompleted && sw.ElapsedMilliseconds < 5000)
+                    {
+                        Application.DoEvents();
+                        Thread.Sleep(20);
+                    }
+                }
+
+                // 1. Staff
+                SessionService.CurrentUser = new CurrentUser { UserId = 4, FirstName = "Jerome", LastName = "Santos", Role = "Staff", CompanyId = 2 };
+                var staffForm = new CC.Forms.Staff.StaffDashboardForm { Size = new Size(1366, 820), StartPosition = FormStartPosition.Manual, Location = new Point(50, 50) };
+                staffForm.Show();
+                PumpWait(staffForm.InitializationTask);
+                for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(20); }
+                using (var bmp = new Bitmap(staffForm.Width, staffForm.Height))
+                {
+                    staffForm.DrawToBitmap(bmp, new Rectangle(0, 0, staffForm.Width, staffForm.Height));
+                    bmp.Save(Path.Combine(outputDir, "screen_staff_dashboard.png"), ImageFormat.Png);
+                }
+                staffForm.Close();
+
+                // 2. Manager
+                SessionService.CurrentUser = new CurrentUser { UserId = 3, FirstName = "Camille", LastName = "Reyes", Role = "Manager", CompanyId = 2 };
+                var mgrForm = new CC.Forms.Manager.ManagerDashboardForm { Size = new Size(1366, 820), StartPosition = FormStartPosition.Manual, Location = new Point(50, 50) };
+                mgrForm.Show();
+                PumpWait(mgrForm.InitializationTask);
+                for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(20); }
+                using (var bmp = new Bitmap(mgrForm.Width, mgrForm.Height))
+                {
+                    mgrForm.DrawToBitmap(bmp, new Rectangle(0, 0, mgrForm.Width, mgrForm.Height));
+                    bmp.Save(Path.Combine(outputDir, "screen_manager_dashboard.png"), ImageFormat.Png);
+                }
+
+                mgrForm.ScrollToBottom();
+                for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(20); }
+                using (var bmpTable = new Bitmap(mgrForm.Width, mgrForm.Height))
+                {
+                    mgrForm.DrawToBitmap(bmpTable, new Rectangle(0, 0, mgrForm.Width, mgrForm.Height));
+                    bmpTable.Save(Path.Combine(outputDir, "screen_manager_dashboard_table.png"), ImageFormat.Png);
+                }
+                mgrForm.Close();
+
+                // 3. Admin
+                SessionService.CurrentUser = new CurrentUser { UserId = 2, FirstName = "Lea", LastName = "Abad", Role = "Admin", CompanyId = 2 };
+                var adminForm = new CC.Forms.Admin.AdminDashboardForm { Size = new Size(1366, 820), StartPosition = FormStartPosition.Manual, Location = new Point(50, 50) };
+                adminForm.Show();
+                PumpWait(adminForm.InitializationTask);
+                for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(20); }
+                using (var bmp = new Bitmap(adminForm.Width, adminForm.Height))
+                {
+                    adminForm.DrawToBitmap(bmp, new Rectangle(0, 0, adminForm.Width, adminForm.Height));
+                    bmp.Save(Path.Combine(outputDir, "screen_admin_dashboard.png"), ImageFormat.Png);
+                }
+                adminForm.Close();
+
+                // 4. Super Admin
+                SessionService.CurrentUser = new CurrentUser { UserId = 1, FirstName = "System", LastName = "SuperAdmin", Role = "SuperAdmin", CompanyId = 1 };
+                var superForm = new CC.Forms.SuperAdmin.SuperAdminDashboardForm { Size = new Size(1366, 820), StartPosition = FormStartPosition.Manual, Location = new Point(50, 50) };
+                superForm.Show();
+                PumpWait(superForm.InitializationTask);
+                for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(20); }
+                using (var bmp = new Bitmap(superForm.Width, superForm.Height))
+                {
+                    superForm.DrawToBitmap(bmp, new Rectangle(0, 0, superForm.Width, superForm.Height));
+                    bmp.Save(Path.Combine(outputDir, "screen_superadmin_dashboard.png"), ImageFormat.Png);
+                }
+                superForm.Close();
+
+                Console.WriteLine("All 4 role dashboards successfully captured with updated table styling!");
+                return;
+            }
+
             if (args.Length > 0 && args[0] == "--test-capture")
             {
                 SessionService.CurrentUser = new CurrentUser
@@ -57,23 +225,39 @@ namespace CC
                 loginForm.Close();
                 loginForm.Dispose();
 
+                void WaitForTask(Task? task)
+                {
+                    if (task == null) return;
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    while (!task.IsCompleted && sw.ElapsedMilliseconds < 10000)
+                    {
+                        Application.DoEvents();
+                        Thread.Sleep(20);
+                    }
+                }
+
                 var shell = new StaffDashboardForm();
                 shell.Size = new Size(1366, 820);
                 shell.StartPosition = FormStartPosition.Manual;
                 shell.Location = new Point(50, 50);
                 shell.Show();
                 Application.DoEvents();
-                Thread.Sleep(300);
+                WaitForTask(shell.InitializationTask);
+                for (int i = 0; i < 15; i++) { Application.DoEvents(); Thread.Sleep(20); }
 
                 void Capture(string filename)
                 {
-                    Application.DoEvents();
-                    Thread.Sleep(200);
+                    for (int i = 0; i < 25; i++)
+                    {
+                        Application.DoEvents();
+                        Thread.Sleep(30);
+                    }
                     using var bmp = new Bitmap(shell.Width, shell.Height);
                     shell.DrawToBitmap(bmp, new Rectangle(0, 0, shell.Width, shell.Height));
                     bmp.Save(Path.Combine(outputDir, filename), ImageFormat.Png);
                 }
 
+                Capture("screen_staff_dashboard.png");
                 Capture("screen_dashboard.png");
 
                 shell.Navigate("Customers");
@@ -208,7 +392,7 @@ namespace CC
 
                 if (shell.MainPanel.Controls.Count > 0 && shell.MainPanel.Controls[0] is CC.Forms.Staff.Orders.OrderListForm orderListForm && procOrder != null)
                 {
-                    orderListForm.ShowOrderDetailsAsync(procOrder.OrderId).GetAwaiter().GetResult();
+                    WaitForTask(orderListForm.ShowOrderDetailsAsync(procOrder.OrderId));
                     for (int i = 0; i < 15; i++) { Application.DoEvents(); Thread.Sleep(30); }
                     Capture("screen_order_details.png");
 
@@ -288,7 +472,8 @@ namespace CC
                 managerShell.Location = new Point(50, 50);
                 managerShell.Show();
                 Application.DoEvents();
-                Thread.Sleep(300);
+                WaitForTask(managerShell.InitializationTask);
+                for (int i = 0; i < 15; i++) { Application.DoEvents(); Thread.Sleep(20); }
 
                 void CaptureMgr(string filename)
                 {
@@ -301,6 +486,8 @@ namespace CC
                     managerShell.DrawToBitmap(bmp, new Rectangle(0, 0, managerShell.Width, managerShell.Height));
                     bmp.Save(Path.Combine(outputDir, filename), ImageFormat.Png);
                 }
+
+                CaptureMgr("screen_manager_dashboard.png");
 
                 managerShell.Navigate("Customers");
                 CaptureMgr("screen_manager_customers.png");
@@ -326,7 +513,8 @@ namespace CC
                 adminShell.Location = new Point(50, 50);
                 adminShell.Show();
                 Application.DoEvents();
-                Thread.Sleep(300);
+                WaitForTask(adminShell.InitializationTask);
+                for (int i = 0; i < 15; i++) { Application.DoEvents(); Thread.Sleep(20); }
 
                 void CaptureAdmin(string filename)
                 {
@@ -340,6 +528,8 @@ namespace CC
                     bmp.Save(Path.Combine(outputDir, filename), ImageFormat.Png);
                 }
 
+                CaptureAdmin("screen_admin_dashboard.png");
+
                 adminShell.Navigate("User Management");
                 CaptureAdmin("screen_admin_users.png");
 
@@ -350,6 +540,32 @@ namespace CC
                 CaptureAdmin("screen_admin_reports.png");
 
                 adminShell.Close();
+
+                // Capture Super Admin Dashboard
+                SessionService.CurrentUser = new CurrentUser
+                {
+                    UserId = 1,
+                    FirstName = "System",
+                    LastName = "SuperAdmin",
+                    Role = "SuperAdmin",
+                    CompanyId = 1
+                };
+
+                var superShell = new CC.Forms.SuperAdmin.SuperAdminDashboardForm();
+                superShell.Size = new Size(1366, 820);
+                superShell.StartPosition = FormStartPosition.Manual;
+                superShell.Location = new Point(50, 50);
+                superShell.Show();
+                Application.DoEvents();
+                WaitForTask(superShell.InitializationTask);
+                for (int i = 0; i < 25; i++) { Application.DoEvents(); Thread.Sleep(30); }
+                using (var bmpSuper = new Bitmap(superShell.Width, superShell.Height))
+                {
+                    superShell.DrawToBitmap(bmpSuper, new Rectangle(0, 0, superShell.Width, superShell.Height));
+                    bmpSuper.Save(Path.Combine(outputDir, "screen_superadmin_dashboard.png"), ImageFormat.Png);
+                }
+                superShell.Close();
+
                 Environment.Exit(0);
                 return;
             }

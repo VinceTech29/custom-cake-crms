@@ -24,7 +24,7 @@ namespace CC.Controls
         private const string IconFontName = "Segoe MDL2 Assets";
         private readonly Dictionary<string, Button> _navButtons = new Dictionary<string, Button>();
         private FlowLayoutPanel _navFlow = null!;
-        private string _activeKey = "Customers";
+        private string _activeKey = "Dashboard";
 
         // Session Information
         private string _companyName = "Custom Cake CRMS";

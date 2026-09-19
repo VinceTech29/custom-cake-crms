@@ -14,7 +14,7 @@ namespace CC.Forms.Staff.FollowUps
     /// <summary>
     /// Follow-ups List Module Form implementing the List Panel Pattern specified in target mockup (media_1789365009186.png).
     /// </summary>
-    public class FollowUpListForm : Form, ISearchable
+    public class FollowUpListForm : Form, ISearchable, INavigationAware
     {
         private Panel topPanel = null!;
         private Label lblTitle = null!;
@@ -28,6 +28,9 @@ namespace CC.Forms.Staff.FollowUps
 
         private Panel tableCardPanel = null!;
         private DataGridView gridFollowUps = null!;
+        private PaginationControl pagination = null!;
+        private int currentPage = 1;
+        private const int PageSize = 10;
         private string activeFilter = "All";
         private string activeSearchQuery = string.Empty;
 
@@ -44,9 +47,9 @@ namespace CC.Forms.Staff.FollowUps
             Controls.Add(filterPillContainer);
             Controls.Add(searchWrapperPanel);
             Controls.Add(topPanel);
-
-            Load += async (s, e) => await RefreshGridAsync();
         }
+
+        public async Task InitializeDataAsync() => await RefreshGridAsync();
 
         private void InitializeComponent()
         {
@@ -63,6 +66,7 @@ namespace CC.Forms.Staff.FollowUps
         public void Search(string query)
         {
             activeSearchQuery = query ?? string.Empty;
+            currentPage = 1;
             if (txtSearchBox != null && txtSearchBox.Text != activeSearchQuery)
             {
                 txtSearchBox.Text = activeSearchQuery;
@@ -222,6 +226,7 @@ namespace CC.Forms.Staff.FollowUps
                 btn.Click += (s, e) =>
                 {
                     activeFilter = filterName;
+                    currentPage = 1;
                     UpdateFilterPillStyles();
                     _ = RefreshGridAsync();
                 };
@@ -291,7 +296,18 @@ namespace CC.Forms.Staff.FollowUps
             };
             gridFollowUps.CellMouseLeave += (s, e) => gridFollowUps.Cursor = Cursors.Default;
 
+            pagination = new PaginationControl
+            {
+                Dock = DockStyle.Bottom
+            };
+            pagination.PageChanged += async (newPage) =>
+            {
+                currentPage = newPage;
+                await RefreshGridAsync();
+            };
+
             tableCardPanel.Controls.Add(gridFollowUps);
+            tableCardPanel.Controls.Add(pagination);
         }
 
         private void GridFollowUps_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
@@ -434,15 +450,23 @@ namespace CC.Forms.Staff.FollowUps
         {
             try
             {
-                var list = await CrmDataService.GetFollowUpsAsync(activeFilter, activeSearchQuery);
-                lblSubtitle.Text = $"{list.Count} scheduled follow-ups";
+                var paged = await CrmDataService.GetFollowUpsPagedAsync(activeFilter, activeSearchQuery, currentPage, PageSize);
+                if (paged.TotalPages > 0 && currentPage > paged.TotalPages)
+                {
+                    currentPage = paged.TotalPages;
+                    paged = await CrmDataService.GetFollowUpsPagedAsync(activeFilter, activeSearchQuery, currentPage, PageSize);
+                }
+
+                lblSubtitle.Text = $"{paged.TotalCount} scheduled follow-ups";
                 gridFollowUps.DataSource = null;
-                gridFollowUps.DataSource = list;
+                gridFollowUps.DataSource = paged.Items;
                 gridFollowUps.RowTemplate.Height = 68;
                 foreach (DataGridViewRow row in gridFollowUps.Rows)
                 {
                     row.Height = 68;
                 }
+
+                pagination.SetPagination(paged.Page, paged.PageSize, paged.TotalCount, "follow-ups");
             }
             catch (Exception ex)
             {

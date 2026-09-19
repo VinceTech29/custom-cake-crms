@@ -21,7 +21,7 @@ namespace CC.Forms.Admin.Subscription
     /// - Billing History table with Paid badge pills and Download invoice buttons
     /// - Renew and Upgrade / Downgrade actions
     /// </summary>
-    public class SubscriptionForm : Form
+    public class SubscriptionForm : Form, INavigationAware
     {
         private Panel topPanel = null!;
         private Label lblTitle = null!;
@@ -42,6 +42,9 @@ namespace CC.Forms.Admin.Subscription
         private Panel featuresCard = null!;
         private Panel billingHistoryCard = null!;
         private DataGridView gridBillingHistory = null!;
+        private PaginationControl pagination = null!;
+        private int currentPage = 1;
+        private const int PageSize = 10;
 
         private SubscriptionInfo currentSub = null!;
         private List<BillingHistoryItem> billingItems = new List<BillingHistoryItem>();
@@ -54,13 +57,9 @@ namespace CC.Forms.Admin.Subscription
 
             Controls.Add(mainContentPanel);
             Controls.Add(topPanel);
-
-            Load += async (s, e) => await RefreshDataAsync();
-            VisibleChanged += async (s, e) =>
-            {
-                if (Visible) await RefreshDataAsync();
-            };
         }
+
+        public async Task InitializeDataAsync() => await RefreshDataAsync();
 
         private void InitializeComponent()
         {
@@ -526,7 +525,7 @@ namespace CC.Forms.Admin.Subscription
             billingHistoryCard = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 280,
+                Height = 340,
                 BackColor = Color.White,
                 Padding = new Padding(24, 20, 24, 16),
                 Margin = new Padding(0, 16, 0, 20)
@@ -624,7 +623,18 @@ namespace CC.Forms.Admin.Subscription
             gridBillingHistory.CellPainting += GridBillingHistory_CellPainting;
             gridBillingHistory.CellClick += GridBillingHistory_CellClick;
 
+            pagination = new PaginationControl
+            {
+                Dock = DockStyle.Bottom
+            };
+            pagination.PageChanged += async (newPage) =>
+            {
+                currentPage = newPage;
+                await RefreshDataAsync();
+            };
+
             billingHistoryCard.Controls.Add(gridBillingHistory);
+            billingHistoryCard.Controls.Add(pagination);
         }
 
         private void GridBillingHistory_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
@@ -860,7 +870,14 @@ namespace CC.Forms.Admin.Subscription
             try
             {
                 currentSub = await CrmDataService.GetSubscriptionInfoAsync();
-                billingItems = await CrmDataService.GetBillingHistoryAsync();
+                var paged = await CrmDataService.GetBillingHistoryPagedAsync(currentPage, PageSize);
+                if (paged.TotalPages > 0 && currentPage > paged.TotalPages)
+                {
+                    currentPage = paged.TotalPages;
+                    paged = await CrmDataService.GetBillingHistoryPagedAsync(currentPage, PageSize);
+                }
+
+                billingItems = paged.Items;
 
                 // Update Current Plan Card
                 lblPlanName.Text = currentSub.PlanName;
@@ -878,6 +895,8 @@ namespace CC.Forms.Admin.Subscription
                     int rowIdx = gridBillingHistory.Rows.Add();
                     gridBillingHistory.Rows[rowIdx].Tag = item;
                 }
+
+                pagination.SetPagination(paged.Page, paged.PageSize, paged.TotalCount, "invoices");
             }
             catch (Exception ex)
             {

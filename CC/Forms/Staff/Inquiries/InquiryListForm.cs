@@ -19,7 +19,7 @@ namespace CC.Forms.Staff.Inquiries
     /// - DataGridView with custom cell painting for status badges and "Update Status" action buttons
     /// - Complete CRUD workflow integration
     /// </summary>
-    public class InquiryListForm : Form
+    public class InquiryListForm : Form, INavigationAware
     {
         private Panel topPanel = null!;
         private Label lblTitle = null!;
@@ -39,6 +39,9 @@ namespace CC.Forms.Staff.Inquiries
 
         private Panel tableCardPanel = null!;
         private DataGridView gridInquiries = null!;
+        private PaginationControl pagination = null!;
+        private int currentPage = 1;
+        private const int PageSize = 10;
 
         private string activeFilter = "All";
         private string activeSearchQuery = string.Empty;
@@ -55,9 +58,9 @@ namespace CC.Forms.Staff.Inquiries
             Controls.Add(searchFilterPanel);
             Controls.Add(kpiTable);
             Controls.Add(topPanel);
-
-            Load += async (s, e) => await RefreshGridAsync();
         }
+
+        public async Task InitializeDataAsync() => await RefreshGridAsync();
 
         private void InitializeComponent()
         {
@@ -297,6 +300,7 @@ namespace CC.Forms.Staff.Inquiries
             txtSearchBox.TextChanged += (s, e) =>
             {
                 activeSearchQuery = txtSearchBox.Text;
+                currentPage = 1;
                 _ = RefreshGridAsync();
             };
             searchPill.Controls.Add(txtSearchBox);
@@ -346,6 +350,7 @@ namespace CC.Forms.Staff.Inquiries
                 btn.Click += (s, e) =>
                 {
                     activeFilter = filterName;
+                    currentPage = 1;
                     UpdateFilterPillStyles();
                     _ = RefreshGridAsync();
                 };
@@ -433,7 +438,18 @@ namespace CC.Forms.Staff.Inquiries
             };
             gridInquiries.CellMouseLeave += (s, e) => gridInquiries.Cursor = Cursors.Default;
 
+            pagination = new PaginationControl
+            {
+                Dock = DockStyle.Bottom
+            };
+            pagination.PageChanged += async (newPage) =>
+            {
+                currentPage = newPage;
+                await RefreshGridAsync();
+            };
+
             tableCardPanel.Controls.Add(gridInquiries);
+            tableCardPanel.Controls.Add(pagination);
         }
 
         private void GridInquiries_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
@@ -642,18 +658,26 @@ namespace CC.Forms.Staff.Inquiries
                 lblCountApproved.Text = allInquiries.Count(i => i.Status.Equals("Approved", StringComparison.OrdinalIgnoreCase)).ToString();
                 lblCountConverted.Text = allInquiries.Count(i => i.Status.Equals("Converted", StringComparison.OrdinalIgnoreCase)).ToString();
 
-                // 2. Filtered list from database
-                var list = await CrmDataService.GetInquiriesAsync(activeFilter, activeSearchQuery);
-                lblSubtitle.Text = $"{list.Count} total inquiries";
+                // 2. Filtered list from database with pagination
+                var paged = await CrmDataService.GetInquiriesPagedAsync(activeFilter, activeSearchQuery, currentPage, PageSize);
+                if (paged.TotalPages > 0 && currentPage > paged.TotalPages)
+                {
+                    currentPage = paged.TotalPages;
+                    paged = await CrmDataService.GetInquiriesPagedAsync(activeFilter, activeSearchQuery, currentPage, PageSize);
+                }
+
+                lblSubtitle.Text = $"{paged.TotalCount} total inquiries";
 
                 gridInquiries.RowTemplate.Height = 68;
                 gridInquiries.DataSource = null;
-                gridInquiries.DataSource = list;
+                gridInquiries.DataSource = paged.Items;
 
                 foreach (DataGridViewRow row in gridInquiries.Rows)
                 {
                     row.Height = 68;
                 }
+
+                pagination.SetPagination(paged.Page, paged.PageSize, paged.TotalCount, "inquiries");
             }
             catch (Exception ex)
             {
