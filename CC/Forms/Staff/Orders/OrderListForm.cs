@@ -531,7 +531,15 @@ namespace CC.Forms.Staff.Orders
             using var form = new OrderForm();
             if (form.ShowDialog(this.FindForm() ?? this) == DialogResult.OK)
             {
+                txtSearchBox.Text = string.Empty;
+                activeSearchQuery = string.Empty;
+                activeFilter = "All";
+                currentPage = 1;
                 await RefreshGridAsync();
+                if (gridOrders.Rows.Count > 0)
+                {
+                    UITheme.HighlightNewRow(gridOrders, 0);
+                }
             }
         }
 

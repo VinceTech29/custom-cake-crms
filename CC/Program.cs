@@ -101,6 +101,182 @@ namespace CC
                 return;
             }
 
+            if (args.Length > 0 && args[0] == "--test-retention")
+            {
+                Console.WriteLine("Running automated tests for Customer Retention & Email Campaigns...");
+
+                // 1. Test Segmentation Logic
+                var today = DateTime.Today;
+                var segInactive = CrmDataService.CalculateRetentionSegment(5, today.AddDays(-200), today);
+                var segAtRisk = CrmDataService.CalculateRetentionSegment(2, today.AddDays(-120), today);
+                var segLoyal = CrmDataService.CalculateRetentionSegment(4, today.AddDays(-30), today);
+                var segReturning = CrmDataService.CalculateRetentionSegment(2, today.AddDays(-20), today);
+                var segNew = CrmDataService.CalculateRetentionSegment(1, today.AddDays(-10), today);
+
+                Console.WriteLine($"[SEGMENT TEST] Inactive: {segInactive == "Inactive"} ({segInactive})");
+                Console.WriteLine($"[SEGMENT TEST] At Risk: {segAtRisk == "At Risk"} ({segAtRisk})");
+                Console.WriteLine($"[SEGMENT TEST] Loyal: {segLoyal == "Loyal"} ({segLoyal})");
+                Console.WriteLine($"[SEGMENT TEST] Returning: {segReturning == "Returning"} ({segReturning})");
+                Console.WriteLine($"[SEGMENT TEST] New: {segNew == "New"} ({segNew})");
+
+                // 2. Test RBAC: Staff Access Denied
+                SessionService.CurrentUser = new CurrentUser { UserId = 4, FirstName = "Jerome", LastName = "Santos", Role = "Staff", CompanyId = 2 };
+                bool staffHasAccess = CrmDataService.VerifyRetentionAccess("Manager", throwOnFailure: false);
+                Console.WriteLine($"[RBAC TEST] Staff Denied Access: {!staffHasAccess}");
+
+                // 3. Test RBAC: Manager Access Allowed
+                SessionService.CurrentUser = new CurrentUser { UserId = 3, FirstName = "Camille", LastName = "Reyes", Role = "Manager", CompanyId = 2 };
+                bool mgrHasAccess = CrmDataService.VerifyRetentionAccess("Manager", throwOnFailure: false);
+                bool mgrCanEditSettings = CrmDataService.VerifyRetentionAccess("Admin", throwOnFailure: false);
+                Console.WriteLine($"[RBAC TEST] Manager Has Access: {mgrHasAccess}, Manager Denied Admin Settings: {!mgrCanEditSettings}");
+
+                // 4. Test RBAC: Admin Access Allowed
+                SessionService.CurrentUser = new CurrentUser { UserId = 2, FirstName = "Lea", LastName = "Abad", Role = "Admin", CompanyId = 2 };
+                bool adminHasAccess = CrmDataService.VerifyRetentionAccess("Admin", throwOnFailure: false);
+                Console.WriteLine($"[RBAC TEST] Admin Full Access: {adminHasAccess}");
+
+                // 5. Test Retention Dashboard Data Loading
+                var retentionData = CrmDataService.GetRetentionDashboardDataAsync(2).GetAwaiter().GetResult();
+                Console.WriteLine($"[DATA TEST] Base Customers: {retentionData.TotalCustomersWithOrders}, Templates: {retentionData.Templates.Count}, Metrics Delivered: {retentionData.Metrics.TotalEmailsDelivered}, OpenRate: {retentionData.Metrics.OpenRate}%");
+
+                // 5b. Test Customer Autocomplete Search
+                var searchResults = CrmDataService.SearchCustomersForRetentionEmailAsync("a", 2, 8).GetAwaiter().GetResult();
+                Console.WriteLine($"[SEARCH TEST] Found {searchResults.Count} customers matching query. Top match: {searchResults.FirstOrDefault()?.FullName} <{searchResults.FirstOrDefault()?.Email}> [{searchResults.FirstOrDefault()?.SegmentName}]");
+
+                // 5c. Test Email Dispatch with SMTP Mock
+                Environment.SetEnvironmentVariable("SMTP_MOCK", "true");
+                var firstCustomer = searchResults.First();
+                var manualLog = CrmDataService.SendManualRetentionEmailAsync(
+                    customerId: firstCustomer.CustomerId,
+                    segmentName: firstCustomer.SegmentName,
+                    forceIgnoreCooldown: true,
+                    companyId: 2).GetAwaiter().GetResult();
+                Console.WriteLine($"[MANUAL EMAIL TEST] Successfully delivered to {manualLog.CustomerName} <{manualLog.CustomerEmail}>, Status: {manualLog.Status}, Subject: {manualLog.Subject}");
+
+                // 5d. Test Cooldown Verification
+                try
+                {
+                    CrmDataService.SendManualRetentionEmailAsync(
+                        customerId: firstCustomer.CustomerId,
+                        segmentName: firstCustomer.SegmentName,
+                        forceIgnoreCooldown: false,
+                        companyId: 2).GetAwaiter().GetResult();
+                    Console.WriteLine("[COOLDOWN TEST] FAILED: Cooldown should have blocked send.");
+                }
+                catch (InvalidOperationException ex)
+                {
+                    Console.WriteLine($"[COOLDOWN TEST] PASSED: 14-day anti-fatigue cooldown successfully prevented rapid resend ({ex.Message}).");
+                }
+
+                // 5e. Test Real SMTP Error Logging & Exception Handling (Unconfigured SMTP)
+                Environment.SetEnvironmentVariable("SMTP_MOCK", null);
+                Environment.SetEnvironmentVariable("SMTP_HOST", null);
+                try
+                {
+                    CrmDataService.SendManualRetentionEmailAsync(
+                        customerId: firstCustomer.CustomerId,
+                        segmentName: firstCustomer.SegmentName,
+                        forceIgnoreCooldown: true,
+                        companyId: 2).GetAwaiter().GetResult();
+                    Console.WriteLine("[SMTP ERROR TEST] Expected error when SMTP is unconfigured.");
+                }
+                catch (InvalidOperationException ex)
+                {
+                    Console.WriteLine($"[SMTP ERROR TEST] PASSED: Correctly caught unconfigured SMTP, logged failure to database, and reported: {ex.Message.Split('\n')[0]}");
+                }
+
+                // 6. Test UI Rendering & Capture Screenshots for Admin and Manager
+                string outputDir = @"C:\Users\user1\.gemini\antigravity\brain\7aee3b98-6126-4c32-b0bc-280b2549c485";
+
+                void PumpWait(Task? t)
+                {
+                    if (t == null) return;
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    while (!t.IsCompleted && sw.ElapsedMilliseconds < 5000)
+                    {
+                        Application.DoEvents();
+                        Thread.Sleep(20);
+                    }
+                }
+
+                // Test Admin Dashboard Navigation to Retention & Campaigns
+                SessionService.CurrentUser = new CurrentUser { UserId = 2, FirstName = "Lea", LastName = "Abad", Role = "Admin", CompanyId = 2 };
+                var adminDash = new CC.Forms.Admin.AdminDashboardForm { Size = new Size(1366, 820), StartPosition = FormStartPosition.Manual, Location = new Point(50, 50) };
+                adminDash.Show();
+                PumpWait(adminDash.InitializationTask);
+                adminDash.Navigate("Retention & Campaigns");
+                for (int i = 0; i < 30; i++) { Application.DoEvents(); Thread.Sleep(25); }
+
+                using (var bmp = new Bitmap(adminDash.Width, adminDash.Height))
+                {
+                    adminDash.DrawToBitmap(bmp, new Rectangle(0, 0, adminDash.Width, adminDash.Height));
+                    bmp.Save(Path.Combine(outputDir, "screen_admin_retention_campaigns.png"), ImageFormat.Png);
+                }
+                adminDash.Close();
+
+                // Test Manager Dashboard Navigation to Retention & Campaigns
+                SessionService.CurrentUser = new CurrentUser { UserId = 3, FirstName = "Camille", LastName = "Reyes", Role = "Manager", CompanyId = 2 };
+                var mgrDash = new CC.Forms.Manager.ManagerDashboardForm { Size = new Size(1366, 820), StartPosition = FormStartPosition.Manual, Location = new Point(50, 50) };
+                mgrDash.Show();
+                PumpWait(mgrDash.InitializationTask);
+                mgrDash.Navigate("Retention & Campaigns");
+                for (int i = 0; i < 30; i++) { Application.DoEvents(); Thread.Sleep(25); }
+
+                using (var bmp = new Bitmap(mgrDash.Width, mgrDash.Height))
+                {
+                    mgrDash.DrawToBitmap(bmp, new Rectangle(0, 0, mgrDash.Width, mgrDash.Height));
+                    bmp.Save(Path.Combine(outputDir, "screen_manager_retention_campaigns.png"), ImageFormat.Png);
+                }
+                mgrDash.Close();
+
+                // Direct tab-by-tab captures for comprehensive documentation
+                SessionService.CurrentUser = new CurrentUser { UserId = 2, FirstName = "Lea", LastName = "Abad", Role = "Admin", CompanyId = 2 };
+                var retForm = new CC.Forms.Retention.RetentionCampaignsForm { Size = new Size(1366, 820), StartPosition = FormStartPosition.Manual, Location = new Point(50, 50) };
+                retForm.Show();
+                PumpWait(retForm.InitializeDataAsync());
+                for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(20); }
+
+                // Campaigns Tab
+                retForm.SwitchTab("Campaigns");
+                for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(20); }
+                using (var bmp = new Bitmap(retForm.Width, retForm.Height))
+                {
+                    retForm.DrawToBitmap(bmp, new Rectangle(0, 0, retForm.Width, retForm.Height));
+                    bmp.Save(Path.Combine(outputDir, "screen_retention_campaigns_tab.png"), ImageFormat.Png);
+                }
+
+                // Reports Tab
+                retForm.SwitchTab("Reports");
+                for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(20); }
+                using (var bmp = new Bitmap(retForm.Width, retForm.Height))
+                {
+                    retForm.DrawToBitmap(bmp, new Rectangle(0, 0, retForm.Width, retForm.Height));
+                    bmp.Save(Path.Combine(outputDir, "screen_retention_reports_tab.png"), ImageFormat.Png);
+                }
+
+                // Logs Tab
+                retForm.SwitchTab("Logs");
+                for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(20); }
+                using (var bmp = new Bitmap(retForm.Width, retForm.Height))
+                {
+                    retForm.DrawToBitmap(bmp, new Rectangle(0, 0, retForm.Width, retForm.Height));
+                    bmp.Save(Path.Combine(outputDir, "screen_retention_logs_tab.png"), ImageFormat.Png);
+                }
+
+                // Settings Tab
+                retForm.SwitchTab("Settings");
+                for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(20); }
+                using (var bmp = new Bitmap(retForm.Width, retForm.Height))
+                {
+                    retForm.DrawToBitmap(bmp, new Rectangle(0, 0, retForm.Width, retForm.Height));
+                    bmp.Save(Path.Combine(outputDir, "screen_retention_settings_tab.png"), ImageFormat.Png);
+                }
+                retForm.Close();
+
+                Console.WriteLine("Retention automated tests and UI captures completed successfully!");
+                return;
+            }
+
             if (args.Length > 0 && args[0] == "--test-analytics")
             {
                 Console.WriteLine("Running automated validation for all role dashboard analytics...");

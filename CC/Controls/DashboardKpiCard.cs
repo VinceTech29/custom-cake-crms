@@ -55,9 +55,9 @@ namespace CC.Controls
             DoubleBuffered = true;
             BackColor = Color.White;
             Cursor = Cursors.Hand;
-            Padding = new Padding(20, 16, 20, 16);
-            Height = 135;
-            MinimumSize = new Size(180, 130);
+            Padding = new Padding(18, 14, 18, 14);
+            Height = 142;
+            MinimumSize = new Size(170, 135);
 
             MouseEnter += (s, e) => { _isHovered = true; Invalidate(); };
             MouseLeave += (s, e) => { _isHovered = false; Invalidate(); };
@@ -117,15 +117,20 @@ namespace CC.Controls
             using (var valFont = new Font(UITheme.FontSerif, 24F, FontStyle.Bold))
             using (var valBrush = new SolidBrush(UITheme.TextDark))
             {
-                g.DrawString(_value, valFont, valBrush, 16, 44);
+                g.DrawString(_value, valFont, valBrush, 16, 42);
             }
 
             // Subtitle
             if (!string.IsNullOrWhiteSpace(_subtitle))
             {
-                using var subFont = new Font(UITheme.FontSans, 8.5F, FontStyle.Regular);
-                using var subBrush = new SolidBrush(Color.FromArgb(145, 135, 128));
-                g.DrawString(_subtitle, subFont, subBrush, 20, 96);
+                using var subFont = new Font(UITheme.FontSans, 8F, FontStyle.Regular);
+                using var subBrush = new SolidBrush(Color.FromArgb(135, 125, 118));
+                var sfSub = new StringFormat
+                {
+                    Trimming = StringTrimming.EllipsisCharacter,
+                    LineAlignment = StringAlignment.Near
+                };
+                g.DrawString(_subtitle, subFont, subBrush, new RectangleF(16, 86, Width - 32, Math.Max(28, Height - 88)), sfSub);
             }
         }
     }

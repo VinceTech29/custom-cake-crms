@@ -33,6 +33,7 @@ namespace CC.Forms.Admin
         {
             PageTitle = "Business Admin Dashboard";
             SidebarCtrl.AddNavItem("Reports", "\uE9F9");
+            SidebarCtrl.AddNavItem("Retention & Campaigns", "\uE715");
             SidebarCtrl.AddNavItem("User Management", "\uE716");
             SidebarCtrl.AddNavItem("Subscription", "\uE8C7");
             SidebarCtrl.SetActiveItem("Dashboard");
@@ -67,6 +68,9 @@ namespace CC.Forms.Admin
                     break;
                 case "Reports":
                     ViewHost.ShowFormInPanel(MainPanel, new ReportListForm());
+                    break;
+                case "Retention & Campaigns":
+                    ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Retention.RetentionCampaignsForm());
                     break;
                 case "User Management":
                     ViewHost.ShowFormInPanel(MainPanel, new UserListForm());

@@ -30,6 +30,7 @@ namespace CC.Domain.Entities
         public string? CakePreferences { get; set; }
 
         public string? Notes { get; set; }
+        public bool IsUnsubscribed { get; set; } = false;
 
         // Navigation
         public Company? Company { get; set; }

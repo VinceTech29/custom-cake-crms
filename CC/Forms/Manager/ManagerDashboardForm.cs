@@ -25,6 +25,7 @@ namespace CC.Forms.Manager
         {
             PageTitle = "Manager Dashboard";
             SidebarCtrl.AddNavItem("Reports", "\uE9F9");
+            SidebarCtrl.AddNavItem("Retention & Campaigns", "\uE715");
             SidebarCtrl.SetActiveItem("Dashboard");
             BuildDashboardShell();
             InitializationTask = LoadDashboardDataAsync();
@@ -57,6 +58,9 @@ namespace CC.Forms.Manager
                     break;
                 case "Reports":
                     CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Manager.Reports.ReportListForm());
+                    break;
+                case "Retention & Campaigns":
+                    CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Retention.RetentionCampaignsForm());
                     break;
             }
         }

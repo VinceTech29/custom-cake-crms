@@ -54,6 +54,9 @@ namespace CC.Forms.Staff
                 case "Follow-ups":
                     CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Staff.FollowUps.FollowUpListForm());
                     break;
+                case "Retention & Campaigns":
+                    MessageBox.Show("You do not have permission to access this feature.", "Access Denied", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    break;
             }
         }
 

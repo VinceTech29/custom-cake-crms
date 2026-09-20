@@ -159,7 +159,16 @@ namespace CC.Forms.Admin.Users
                 using var modal = new UserModal();
                 if (modal.ShowDialog(this.FindForm() ?? this) == DialogResult.OK)
                 {
+                    txtSearchBox.Text = string.Empty;
+                    activeSearchQuery = string.Empty;
+                    cmbRoleFilter.SelectedIndex = 0;
+                    cmbStatusFilter.SelectedIndex = 0;
+                    currentPage = 1;
                     await RefreshDataAsync();
+                    if (gridUsers.Rows.Count > 0)
+                    {
+                        UITheme.HighlightNewRow(gridUsers, 0);
+                    }
                 }
             };
 

@@ -321,6 +321,9 @@ namespace CC.Services
                     await context.SaveChangesAsync();
                 }
 
+                // 8. Retention Email Templates, Settings & Logs
+                await EnsureRetentionTablesAndSeedsAsync(context);
+
                 // Operational data (Customers, Orders, Inquiries, Follow-ups, Payments)
                 // is NOT seeded — users create all records via the CRUD UI.
             }
@@ -352,8 +355,7 @@ namespace CC.Services
             }
 
             return await query
-                .OrderBy(c => c.FirstName)
-                .ThenBy(c => c.LastName)
+                .OrderByDescending(c => c.CustomerId)
                 .ToListAsync();
         }
 
@@ -382,8 +384,7 @@ namespace CC.Services
             if (page > totalPages) page = totalPages;
 
             var items = await query
-                .OrderBy(c => c.FirstName)
-                .ThenBy(c => c.LastName)
+                .OrderByDescending(c => c.CustomerId)
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
                 .ToListAsync();
@@ -892,7 +893,7 @@ namespace CC.Services
             }
 
             return await query
-                .OrderByDescending(f => f.FollowUpDate)
+                .OrderByDescending(f => f.FollowUpId)
                 .ToListAsync();
         }
 
@@ -937,7 +938,7 @@ namespace CC.Services
             if (page > totalPages) page = totalPages;
 
             var items = await query
-                .OrderByDescending(f => f.FollowUpDate)
+                .OrderByDescending(f => f.FollowUpId)
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
                 .ToListAsync();
@@ -1040,7 +1041,7 @@ namespace CC.Services
             }
 
             return await query
-                .OrderByDescending(p => p.PaymentDate)
+                .OrderByDescending(p => p.PaymentId)
                 .ToListAsync();
         }
 
@@ -1088,7 +1089,7 @@ namespace CC.Services
             if (page > totalPages) page = totalPages;
 
             var items = await query
-                .OrderByDescending(p => p.PaymentDate)
+                .OrderByDescending(p => p.PaymentId)
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
                 .ToListAsync();
@@ -1477,8 +1478,7 @@ namespace CC.Services
             }
 
             return await query
-                .OrderBy(u => u.RoleId)
-                .ThenBy(u => u.LastName)
+                .OrderByDescending(u => u.UserId)
                 .ToListAsync();
         }
 
@@ -1525,8 +1525,7 @@ namespace CC.Services
             if (page > totalPages) page = totalPages;
 
             var items = await query
-                .OrderBy(u => u.RoleId)
-                .ThenBy(u => u.LastName)
+                .OrderByDescending(u => u.UserId)
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
                 .ToListAsync();
@@ -2302,7 +2301,1162 @@ namespace CC.Services
                 recentItems
             );
         }
+
+        // =========================================================
+        // CUSTOMER RETENTION & EMAIL CAMPAIGNS (ADMIN & MANAGER ONLY)
+        // =========================================================
+
+        public static bool VerifyRetentionAccess(string requiredRole = "Manager", bool throwOnFailure = false)
+        {
+            var role = SessionService.CurrentUser?.Role;
+            bool hasAccess = role == "Business Admin" || role == "Admin" || role == "Manager";
+            if (requiredRole == "Admin")
+            {
+                hasAccess = role == "Business Admin" || role == "Admin";
+            }
+
+            if (!hasAccess)
+            {
+                _ = RecordAuditLogAsync(
+                    userId: SessionService.CurrentUser?.UserId ?? 0,
+                    actionType: "UNAUTHORIZED_ACCESS_ATTEMPT",
+                    actionDesc: $"Blocked unauthorized access attempt to Retention & Campaigns feature by '{SessionService.CurrentUser?.Username ?? "Unknown"}' with role '{role ?? "None"}'"
+                );
+
+                if (throwOnFailure)
+                {
+                    throw new UnauthorizedAccessException("You do not have permission to access this feature.");
+                }
+            }
+
+            return hasAccess;
+        }
+
+        public static async Task RecordAuditLogAsync(int userId, string actionType, string actionDesc, int? companyId = null)
+        {
+            try
+            {
+                await using var context = CreateDbContext(companyId);
+                var log = new SystemAuditLog
+                {
+                    UserId = userId > 0 ? userId : DefaultUserId,
+                    ActionType = actionType,
+                    ActionDescription = actionDesc,
+                    Timestamp = DateTime.UtcNow
+                };
+                context.SystemAuditLogs.Add(log);
+                await context.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[RecordAuditLogAsync] {ex.Message}");
+            }
+        }
+
+        public static async Task EnsureRetentionTablesAndSeedsAsync(CrmDbContext context)
+        {
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"
+                    IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'RetentionEmailTemplates')
+                    BEGIN
+                        CREATE TABLE RetentionEmailTemplates (
+                            TemplateId INT IDENTITY(1,1) PRIMARY KEY,
+                            SegmentName NVARCHAR(50) NOT NULL,
+                            Subject NVARCHAR(255) NOT NULL,
+                            PreviewText NVARCHAR(255) NOT NULL,
+                            BodyText NVARCHAR(MAX) NOT NULL,
+                            OfferDescription NVARCHAR(255) NOT NULL,
+                            DiscountPercent DECIMAL(5,2) NOT NULL,
+                            ValidityDays INT NOT NULL DEFAULT 14,
+                            IsActive BIT NOT NULL DEFAULT 1,
+                            UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                            UpdatedBy NVARCHAR(100) NOT NULL DEFAULT 'System'
+                        );
+                    END;
+
+                    IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'RetentionEmailLogs')
+                    BEGIN
+                        CREATE TABLE RetentionEmailLogs (
+                            LogId INT IDENTITY(1,1) PRIMARY KEY,
+                            CompanyId INT NOT NULL,
+                            CustomerId INT NOT NULL,
+                            CustomerName NVARCHAR(150) NOT NULL,
+                            CustomerEmail NVARCHAR(150) NOT NULL,
+                            SegmentName NVARCHAR(50) NOT NULL,
+                            Subject NVARCHAR(255) NOT NULL,
+                            BodySent NVARCHAR(MAX) NOT NULL,
+                            SentDate DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                            SentBy NVARCHAR(100) NOT NULL DEFAULT 'System',
+                            Status NVARCHAR(50) NOT NULL DEFAULT 'Delivered',
+                            OpenedDate DATETIME2 NULL,
+                            ClickedDate DATETIME2 NULL,
+                            ConvertedOrderId INT NULL,
+                            ConvertedOrderAmount DECIMAL(18,2) NULL
+                        );
+                    END;
+
+                    IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'RetentionSettings')
+                    BEGIN
+                        CREATE TABLE RetentionSettings (
+                            SettingId INT IDENTITY(1,1) PRIMARY KEY,
+                            CompanyId INT NOT NULL,
+                            ActiveDaysThreshold INT NOT NULL DEFAULT 90,
+                            AtRiskDaysThreshold INT NOT NULL DEFAULT 180,
+                            LoyalMinOrders INT NOT NULL DEFAULT 3,
+                            CooldownDays INT NOT NULL DEFAULT 14,
+                            AutoSendingEnabled BIT NOT NULL DEFAULT 1,
+                            LastRecalculatedAt DATETIME2 NULL,
+                            LastRecalculatedBy NVARCHAR(100) NOT NULL DEFAULT 'System',
+                            UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                            UpdatedBy NVARCHAR(100) NOT NULL DEFAULT 'System'
+                        );
+                    END;
+
+                    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Customers') AND name = 'IsUnsubscribed')
+                    BEGIN
+                        ALTER TABLE Customers ADD IsUnsubscribed BIT NOT NULL DEFAULT 0;
+                    END;
+
+                    IF EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('RetentionEmailLogs') AND name = 'Status' AND max_length < 1000)
+                    BEGIN
+                        ALTER TABLE RetentionEmailLogs ALTER COLUMN Status NVARCHAR(500) NOT NULL;
+                    END;
+
+                    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('RetentionSettings') AND name = 'SmtpHost')
+                    BEGIN
+                        ALTER TABLE RetentionSettings ADD SmtpHost NVARCHAR(150) NULL;
+                        ALTER TABLE RetentionSettings ADD SmtpPort INT NOT NULL DEFAULT 587;
+                        ALTER TABLE RetentionSettings ADD SmtpUsername NVARCHAR(150) NULL;
+                        ALTER TABLE RetentionSettings ADD SmtpPassword NVARCHAR(255) NULL;
+                        ALTER TABLE RetentionSettings ADD SmtpFromEmail NVARCHAR(150) NULL;
+                        ALTER TABLE RetentionSettings ADD SmtpFromName NVARCHAR(150) NULL;
+                        ALTER TABLE RetentionSettings ADD SmtpEnableSsl BIT NOT NULL DEFAULT 1;
+                        ALTER TABLE RetentionSettings ADD SmtpMockMode BIT NOT NULL DEFAULT 1;
+                    END;
+                ");
+
+                if (!await context.RetentionEmailTemplates.AnyAsync())
+                {
+                    var templates = new List<RetentionEmailTemplate>
+                    {
+                        new RetentionEmailTemplate
+                        {
+                            SegmentName = "New",
+                            Subject = "Thank you for your first order!",
+                            PreviewText = "We hope you loved your cake. Here's a treat for next time.",
+                            BodyText = "Hi {{customer_name}},\r\n\r\nThank you for choosing us for your very first cake! It was our pleasure to be part of your celebration.\r\n\r\nWe would love to bake for you again. Enjoy 5% off your next order, just mention this email when you place it. This offer is valid for 14 days.\r\n\r\n[ Order Your Next Cake ]\r\n\r\nWarmly,\r\nThe Cake Shop Team\r\n\r\nFooter: Contact us at [shop phone/email] | Unsubscribe",
+                            OfferDescription = "5% off next order (valid 14 days)",
+                            DiscountPercent = 5,
+                            ValidityDays = 14,
+                            IsActive = true,
+                            UpdatedBy = "System"
+                        },
+                        new RetentionEmailTemplate
+                        {
+                            SegmentName = "Returning",
+                            Subject = "We'd love to bake your next cake!",
+                            PreviewText = "Thanks for coming back. What are we celebrating next?",
+                            BodyText = "Hi {{customer_name}},\r\n\r\nThank you for coming back to us! It means a lot that you chose us again.\r\n\r\nGot another birthday, anniversary, or special moment coming up? We'd love to create your next cake. Order early so we can get everything just right for you.\r\n\r\n[ Order Your Next Cake ]\r\n\r\nWarmly,\r\nThe Cake Shop Team\r\n\r\nFooter: Contact us at [shop phone/email] | Unsubscribe",
+                            OfferDescription = "Early booking invitation (valid 14 days)",
+                            DiscountPercent = 0,
+                            ValidityDays = 14,
+                            IsActive = true,
+                            UpdatedBy = "System"
+                        },
+                        new RetentionEmailTemplate
+                        {
+                            SegmentName = "Loyal",
+                            Subject = "Thank you for being a loyal customer!",
+                            PreviewText = "A special thank-you, just for you.",
+                            BodyText = "Hi {{customer_name}},\r\n\r\nThank you for being a loyal customer! Your support has made every celebration with you extra special for our team.\r\n\r\nAs our thank-you, enjoy 10% off your next order, just mention this email when you place it. This exclusive offer is valid for 14 days.\r\n\r\n[ Claim Your Loyalty Offer ]\r\n\r\nWarmly,\r\nThe Cake Shop Team\r\n\r\nFooter: Contact us at [shop phone/email] | Unsubscribe",
+                            OfferDescription = "10% off loyalty reward (valid 14 days)",
+                            DiscountPercent = 10,
+                            ValidityDays = 14,
+                            IsActive = true,
+                            UpdatedBy = "System"
+                        },
+                        new RetentionEmailTemplate
+                        {
+                            SegmentName = "At Risk",
+                            Subject = "We miss you, {{customer_name}}!",
+                            PreviewText = "Here's something special for your next order.",
+                            BodyText = "Hi {{customer_name}},\r\n\r\nWe miss you! It's been a little while since your last cake, and we'd love to see you again.\r\n\r\nHere's something special for your next order: enjoy 10% off, just mention this email when you place it. This offer is valid for 14 days.\r\n\r\n[ Order Your Cake Now ]\r\n\r\nWarmly,\r\nThe Cake Shop Team\r\n\r\nFooter: Contact us at [shop phone/email] | Unsubscribe",
+                            OfferDescription = "10% off win-back offer (valid 14 days)",
+                            DiscountPercent = 10,
+                            ValidityDays = 14,
+                            IsActive = true,
+                            UpdatedBy = "System"
+                        },
+                        new RetentionEmailTemplate
+                        {
+                            SegmentName = "Inactive",
+                            Subject = "It's been a while, {{customer_name}}!",
+                            PreviewText = "Come celebrate with us again.",
+                            BodyText = "Hi {{customer_name}},\r\n\r\nIt's been a while, come celebrate with us again! We've missed being part of your special moments.\r\n\r\nTo welcome you back, enjoy 15% off your next order, just mention this email when you place it. This offer is valid for 14 days.\r\n\r\n[ Come Celebrate With Us ]\r\n\r\nWarmly,\r\nThe Cake Shop Team\r\n\r\nFooter: Contact us at [shop phone/email] | Unsubscribe",
+                            OfferDescription = "15% off re-engagement offer (valid 14 days)",
+                            DiscountPercent = 15,
+                            ValidityDays = 14,
+                            IsActive = true,
+                            UpdatedBy = "System"
+                        }
+                    };
+
+                    await context.RetentionEmailTemplates.AddRangeAsync(templates);
+                    await context.SaveChangesAsync();
+                }
+
+                if (!await context.RetentionSettings.AnyAsync())
+                {
+                    context.RetentionSettings.Add(new RetentionSetting
+                    {
+                        CompanyId = DefaultCompanyId,
+                        ActiveDaysThreshold = 90,
+                        AtRiskDaysThreshold = 180,
+                        LoyalMinOrders = 3,
+                        CooldownDays = 14,
+                        AutoSendingEnabled = true,
+                        LastRecalculatedAt = DateTime.UtcNow,
+                        LastRecalculatedBy = "System",
+                        UpdatedBy = "System"
+                    });
+                    await context.SaveChangesAsync();
+                }
+
+                if (!await context.RetentionEmailLogs.AnyAsync())
+                {
+                    var seededCustomers = await context.Customers
+                        .Include(c => c.Orders)
+                        .Take(25)
+                        .ToListAsync();
+
+                    var logs = new List<RetentionEmailLog>();
+                    var random = new Random(42);
+                    var segmentsList = new[] { "New", "Returning", "Loyal", "At Risk", "Inactive" };
+
+                    foreach (var c in seededCustomers)
+                    {
+                        string seg = segmentsList[random.Next(segmentsList.Length)];
+                        var sentDate = DateTime.UtcNow.AddDays(-random.Next(5, 45));
+                        bool isOpened = random.Next(100) < 65;
+                        bool isClicked = isOpened && random.Next(100) < 40;
+                        bool isConverted = isClicked && random.Next(100) < 50;
+
+                        logs.Add(new RetentionEmailLog
+                        {
+                            CompanyId = DefaultCompanyId,
+                            CustomerId = c.CustomerId,
+                            CustomerName = $"{c.FirstName} {c.LastName}".Trim(),
+                            CustomerEmail = c.Email,
+                            SegmentName = seg,
+                            Subject = seg switch
+                            {
+                                "New" => "Thank you for your first order!",
+                                "Returning" => "We'd love to bake your next cake!",
+                                "Loyal" => "Thank you for being a loyal customer!",
+                                "At Risk" => $"We miss you, {c.FirstName}!",
+                                _ => $"It's been a while, {c.FirstName}!"
+                            },
+                            BodySent = $"Personalized retention campaign for {c.FirstName}.",
+                            SentDate = sentDate,
+                            SentBy = "CampaignEngine",
+                            Status = isClicked ? "Clicked" : (isOpened ? "Opened" : "Delivered"),
+                            OpenedDate = isOpened ? sentDate.AddHours(random.Next(1, 12)) : null,
+                            ClickedDate = isClicked ? sentDate.AddHours(random.Next(13, 24)) : null,
+                            ConvertedOrderId = isConverted ? c.Orders.FirstOrDefault()?.OrderId : null,
+                            ConvertedOrderAmount = isConverted ? 4500m : null
+                        });
+                    }
+
+                    await context.RetentionEmailLogs.AddRangeAsync(logs);
+                    await context.SaveChangesAsync();
+                }
+
+                // Ensure a realistic distribution across all 5 retention segments (New, Returning, Loyal, At Risk, Inactive)
+                var hasOlderOrders = await context.SalesOrders.AnyAsync(o => o.StatusId == 3 && o.OrderDate < DateTime.Today.AddDays(-90));
+                if (!hasOlderOrders)
+                {
+                    var completedOrders = await context.SalesOrders
+                        .Where(o => o.StatusId == 3)
+                        .OrderBy(o => o.OrderId)
+                        .Take(35)
+                        .ToListAsync();
+
+                    // 15 orders -> Inactive (200 - 245 days ago)
+                    for (int i = 0; i < Math.Min(15, completedOrders.Count); i++)
+                    {
+                        completedOrders[i].OrderDate = DateTime.Today.AddDays(-200 - (i * 3));
+                        if (completedOrders[i].DeliveryDate.HasValue)
+                            completedOrders[i].DeliveryDate = completedOrders[i].OrderDate.AddDays(3);
+                    }
+                    // Next 20 orders -> At Risk (100 - 160 days ago)
+                    for (int i = 15; i < Math.Min(35, completedOrders.Count); i++)
+                    {
+                        completedOrders[i].OrderDate = DateTime.Today.AddDays(-100 - ((i - 15) * 3));
+                        if (completedOrders[i].DeliveryDate.HasValue)
+                            completedOrders[i].DeliveryDate = completedOrders[i].OrderDate.AddDays(3);
+                    }
+                    await context.SaveChangesAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[EnsureRetentionTablesAndSeedsAsync] {ex.Message}");
+            }
+        }
+
+        public static string CalculateRetentionSegment(
+            int completedOrdersCount,
+            DateTime? lastCompletedOrderDate,
+            DateTime today,
+            int activeThreshold = 90,
+            int atRiskThreshold = 180,
+            int loyalMinOrders = 3)
+        {
+            if (completedOrdersCount <= 0 || lastCompletedOrderDate == null)
+            {
+                return "Prospect";
+            }
+
+            int daysSince = Math.Max(0, (int)(today.Date - lastCompletedOrderDate.Value.Date).TotalDays);
+
+            // Priority 1: Inactive (last completed order > 180 days ago)
+            if (daysSince > atRiskThreshold)
+            {
+                return "Inactive";
+            }
+
+            // Priority 2: At Risk (last completed order 91–180 days ago)
+            if (daysSince > activeThreshold && daysSince <= atRiskThreshold)
+            {
+                return "At Risk";
+            }
+
+            // Priority 3: Loyal (3+ completed orders AND last order <= 90 days ago)
+            if (completedOrdersCount >= loyalMinOrders && daysSince <= activeThreshold)
+            {
+                return "Loyal";
+            }
+
+            // Priority 4: Returning (exactly 2 completed orders AND last order <= 90 days ago)
+            if (completedOrdersCount == 2 && daysSince <= activeThreshold)
+            {
+                return "Returning";
+            }
+
+            // Priority 5: New (exactly 1 completed order placed <= 90 days ago)
+            if (completedOrdersCount == 1 && daysSince <= activeThreshold)
+            {
+                return "New";
+            }
+
+            return "Inactive";
+        }
+
+        public static async Task<RetentionDashboardData> GetRetentionDashboardDataAsync(
+            int? companyId = null,
+            string? selectedSegment = null)
+        {
+            VerifyRetentionAccess("Manager", throwOnFailure: true);
+
+            var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
+            var today = DateTime.Today;
+
+            await using var context = CreateDbContext(targetCompanyId);
+            await EnsureRetentionTablesAndSeedsAsync(context);
+
+            var settings = await context.RetentionSettings
+                .FirstOrDefaultAsync(s => s.CompanyId == targetCompanyId)
+                ?? new RetentionSetting { CompanyId = targetCompanyId };
+
+            var templates = await context.RetentionEmailTemplates
+                .OrderBy(t => t.TemplateId)
+                .ToListAsync();
+
+            var customers = await context.Customers
+                .Where(c => c.CompanyId == targetCompanyId)
+                .Include(c => c.Orders)
+                .ToListAsync();
+
+            var emailLogs = await context.RetentionEmailLogs
+                .Where(l => l.CompanyId == targetCompanyId)
+                .OrderByDescending(l => l.SentDate)
+                .ToListAsync();
+
+            var lastEmailByCustomer = emailLogs
+                .GroupBy(l => l.CustomerId)
+                .ToDictionary(g => g.Key, g => g.First());
+
+            var allItems = new List<RetentionCustomerItem>();
+            foreach (var c in customers)
+            {
+                var completedOrders = c.Orders.Where(o => o.StatusId == 3).ToList();
+                int completedCount = completedOrders.Count;
+                DateTime? lastOrderDate = completedOrders.Any()
+                    ? completedOrders.Max(o => o.DeliveryDate ?? o.OrderDate)
+                    : null;
+
+                string segment = CalculateRetentionSegment(
+                    completedCount,
+                    lastOrderDate,
+                    today,
+                    settings.ActiveDaysThreshold,
+                    settings.AtRiskDaysThreshold,
+                    settings.LoyalMinOrders);
+
+                int daysSince = lastOrderDate.HasValue
+                    ? Math.Max(0, (int)(today.Date - lastOrderDate.Value.Date).TotalDays)
+                    : 999;
+
+                DateTime? lastSent = null;
+                string lastStatus = "Never Sent";
+                bool cooldownPassed = true;
+
+                if (lastEmailByCustomer.TryGetValue(c.CustomerId, out var lastLog))
+                {
+                    lastSent = lastLog.SentDate;
+                    lastStatus = lastLog.Status;
+                    int daysSinceEmail = (int)(today.Date - lastLog.SentDate.Date).TotalDays;
+                    cooldownPassed = daysSinceEmail >= settings.CooldownDays;
+                }
+
+                bool eligible = completedCount > 0 && !string.IsNullOrWhiteSpace(c.Email) && cooldownPassed;
+
+                allItems.Add(new RetentionCustomerItem(
+                    c.CustomerId,
+                    $"{c.FirstName} {c.LastName}".Trim(),
+                    c.Email,
+                    c.Phone,
+                    completedCount,
+                    lastOrderDate,
+                    daysSince,
+                    segment,
+                    lastSent,
+                    lastStatus,
+                    eligible
+                ));
+            }
+
+            var validBase = allItems.Where(i => i.SegmentName != "Prospect").ToList();
+            int totalBase = Math.Max(1, validBase.Count);
+
+            var summaryMap = new Dictionary<string, RetentionSegmentSummary>
+            {
+                ["New"] = new RetentionSegmentSummary(
+                    "New",
+                    validBase.Count(i => i.SegmentName == "New"),
+                    Math.Round((double)validBase.Count(i => i.SegmentName == "New") / totalBase * 100, 1),
+                    "5% off next order (valid 14d)",
+                    "Thank-you + encourage 2nd purchase",
+                    Color.FromArgb(41, 128, 185)
+                ),
+                ["Returning"] = new RetentionSegmentSummary(
+                    "Returning",
+                    validBase.Count(i => i.SegmentName == "Returning"),
+                    Math.Round((double)validBase.Count(i => i.SegmentName == "Returning") / totalBase * 100, 1),
+                    "Early booking reminder",
+                    "Encourage repeat purchase habit",
+                    Color.FromArgb(39, 174, 96)
+                ),
+                ["Loyal"] = new RetentionSegmentSummary(
+                    "Loyal",
+                    validBase.Count(i => i.SegmentName == "Loyal"),
+                    Math.Round((double)validBase.Count(i => i.SegmentName == "Loyal") / totalBase * 100, 1),
+                    "10% off loyalty reward (valid 14d)",
+                    "Appreciation & exclusive rewards",
+                    Color.FromArgb(142, 68, 173)
+                ),
+                ["At Risk"] = new RetentionSegmentSummary(
+                    "At Risk",
+                    validBase.Count(i => i.SegmentName == "At Risk"),
+                    Math.Round((double)validBase.Count(i => i.SegmentName == "At Risk") / totalBase * 100, 1),
+                    "10% off win-back offer (valid 14d)",
+                    "Win-back reminder & churn prevention",
+                    Color.FromArgb(230, 126, 34)
+                ),
+                ["Inactive"] = new RetentionSegmentSummary(
+                    "Inactive",
+                    validBase.Count(i => i.SegmentName == "Inactive"),
+                    Math.Round((double)validBase.Count(i => i.SegmentName == "Inactive") / totalBase * 100, 1),
+                    "15% off welcome-back offer (valid 14d)",
+                    "Re-engagement greeting",
+                    Color.FromArgb(192, 57, 43)
+                )
+            };
+
+            var displayCustomers = validBase;
+            if (!string.IsNullOrWhiteSpace(selectedSegment) && selectedSegment != "All")
+            {
+                displayCustomers = validBase.Where(i => i.SegmentName == selectedSegment).ToList();
+            }
+
+            int deliveredCount = emailLogs.Count;
+            int openedCount = emailLogs.Count(l => l.OpenedDate.HasValue || l.Status == "Opened" || l.Status == "Clicked");
+            int clickedCount = emailLogs.Count(l => l.ClickedDate.HasValue || l.Status == "Clicked");
+            int repeatCount = emailLogs.Count(l => l.ConvertedOrderId.HasValue);
+            int winBackDelivered = emailLogs.Count(l => l.SegmentName == "At Risk" || l.SegmentName == "Inactive");
+            int winBackConverted = emailLogs.Count(l => (l.SegmentName == "At Risk" || l.SegmentName == "Inactive") && l.ConvertedOrderId.HasValue);
+            decimal retainedRev = emailLogs.Sum(l => l.ConvertedOrderAmount ?? 0m);
+
+            double openRate = deliveredCount > 0 ? Math.Round((double)openedCount / deliveredCount * 100, 1) : 0;
+            double clickRate = openedCount > 0 ? Math.Round((double)clickedCount / openedCount * 100, 1) : 0;
+            double repeatRate = deliveredCount > 0 ? Math.Round((double)repeatCount / deliveredCount * 100, 1) : 0;
+            double winBackRate = winBackDelivered > 0 ? Math.Round((double)winBackConverted / winBackDelivered * 100, 1) : 0;
+
+            var metrics = new RetentionMetrics(
+                deliveredCount,
+                openRate,
+                clickRate,
+                repeatRate,
+                winBackRate,
+                retainedRev
+            );
+
+            var auditLogs = await context.SystemAuditLogs
+                .OrderByDescending(l => l.Timestamp)
+                .Take(25)
+                .ToListAsync();
+
+            return new RetentionDashboardData(
+                validBase.Count,
+                summaryMap,
+                displayCustomers.OrderByDescending(i => i.LastCompletedOrderDate ?? DateTime.MinValue).ThenByDescending(i => i.CustomerId).ToList(),
+                templates,
+                settings,
+                metrics,
+                emailLogs.Take(50).ToList(),
+                auditLogs
+            );
+        }
+
+        public static async Task<int> RecalculateCustomerSegmentsAsync(int? companyId = null)
+        {
+            VerifyRetentionAccess("Manager", throwOnFailure: true);
+
+            var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
+            string currentUser = SessionService.CurrentUser?.Username ?? "Manager";
+            string role = SessionService.CurrentUser?.Role ?? "Manager";
+
+            await using var context = CreateDbContext(targetCompanyId);
+            var setting = await context.RetentionSettings.FirstOrDefaultAsync(s => s.CompanyId == targetCompanyId);
+            if (setting != null)
+            {
+                setting.LastRecalculatedAt = DateTime.UtcNow;
+                setting.LastRecalculatedBy = currentUser;
+                await context.SaveChangesAsync();
+            }
+
+            int count = await context.Customers.CountAsync(c => c.CompanyId == targetCompanyId);
+
+            await RecordAuditLogAsync(
+                userId: SessionService.CurrentUser?.UserId ?? 0,
+                actionType: "SEGMENT_RECALCULATION",
+                actionDesc: $"Triggered dynamic customer retention segmentation for {count} customer(s) by {currentUser} ({role})"
+            );
+
+            return count;
+        }
+
+        public static async Task<(int sent, int skipped)> SendCampaignForSegmentAsync(
+            string segmentName,
+            int? companyId = null,
+            List<int>? targetCustomerIds = null)
+        {
+            VerifyRetentionAccess("Manager", throwOnFailure: true);
+
+            var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
+            var today = DateTime.Today;
+            string currentUser = SessionService.CurrentUser?.Username ?? "Manager";
+            string role = SessionService.CurrentUser?.Role ?? "Manager";
+
+            await using var context = CreateDbContext(targetCompanyId);
+            var settings = await context.RetentionSettings.FirstOrDefaultAsync(s => s.CompanyId == targetCompanyId)
+                ?? new RetentionSetting { CompanyId = targetCompanyId };
+
+            var template = await context.RetentionEmailTemplates
+                .FirstOrDefaultAsync(t => t.SegmentName == segmentName && t.IsActive);
+
+            if (template == null)
+            {
+                throw new InvalidOperationException($"No active template found for segment '{segmentName}'.");
+            }
+
+            var customers = await context.Customers
+                .Where(c => c.CompanyId == targetCompanyId)
+                .Include(c => c.Orders)
+                .ToListAsync();
+
+            var recentLogs = await context.RetentionEmailLogs
+                .Where(l => l.CompanyId == targetCompanyId)
+                .GroupBy(l => l.CustomerId)
+                .Select(g => new { CustomerId = g.Key, LastSent = g.Max(l => l.SentDate) })
+                .ToDictionaryAsync(x => x.CustomerId, x => x.LastSent);
+
+            int sentCount = 0;
+            int skippedCount = 0;
+
+            foreach (var c in customers)
+            {
+                if (targetCustomerIds != null && !targetCustomerIds.Contains(c.CustomerId))
+                    continue;
+
+                var completedOrders = c.Orders.Where(o => o.StatusId == 3).ToList();
+                if (!completedOrders.Any()) continue;
+
+                var lastOrder = completedOrders.Max(o => o.DeliveryDate ?? o.OrderDate);
+                string currentSeg = CalculateRetentionSegment(
+                    completedOrders.Count,
+                    lastOrder,
+                    today,
+                    settings.ActiveDaysThreshold,
+                    settings.AtRiskDaysThreshold,
+                    settings.LoyalMinOrders);
+
+                if (currentSeg != segmentName) continue;
+
+                if (recentLogs.TryGetValue(c.CustomerId, out var lastSent))
+                {
+                    if ((today - lastSent.Date).TotalDays < settings.CooldownDays)
+                    {
+                        skippedCount++;
+                        continue;
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(c.Email))
+                {
+                    skippedCount++;
+                    continue;
+                }
+
+                string personalizedBody = template.BodyText.Replace("{{customer_name}}", c.FirstName.Trim());
+                string personalizedSubject = template.Subject.Replace("{{customer_name}}", c.FirstName.Trim());
+
+                context.RetentionEmailLogs.Add(new RetentionEmailLog
+                {
+                    CompanyId = targetCompanyId,
+                    CustomerId = c.CustomerId,
+                    CustomerName = $"{c.FirstName} {c.LastName}".Trim(),
+                    CustomerEmail = c.Email,
+                    SegmentName = segmentName,
+                    Subject = personalizedSubject,
+                    BodySent = personalizedBody,
+                    SentDate = DateTime.UtcNow,
+                    SentBy = currentUser,
+                    Status = "Delivered"
+                });
+
+                sentCount++;
+            }
+
+            await context.SaveChangesAsync();
+
+            await RecordAuditLogAsync(
+                userId: SessionService.CurrentUser?.UserId ?? 0,
+                actionType: "CAMPAIGN_SEND",
+                actionDesc: $"Campaign for segment '{segmentName}' sent to {sentCount} customer(s), {skippedCount} skipped (cooldown/unsubscribed) by {currentUser} ({role})"
+            );
+
+            return (sentCount, skippedCount);
+        }
+
+        public class RetentionCustomerSearchResult
+        {
+            public int CustomerId { get; set; }
+            public string FirstName { get; set; } = string.Empty;
+            public string LastName { get; set; } = string.Empty;
+            public string FullName => $"{FirstName} {LastName}".Trim();
+            public string Email { get; set; } = string.Empty;
+            public string Phone { get; set; } = string.Empty;
+            public string SegmentName { get; set; } = "New";
+            public bool IsUnsubscribed { get; set; }
+            public bool EligibleToSend { get; set; } = true;
+            public int CooldownDaysRemaining { get; set; }
+            public int CompletedOrdersCount { get; set; }
+        }
+
+        public static async Task<List<RetentionCustomerSearchResult>> SearchCustomersForRetentionEmailAsync(
+            string query,
+            int? companyId = null,
+            int limit = 8)
+        {
+            VerifyRetentionAccess("Manager", throwOnFailure: true);
+
+            if (string.IsNullOrWhiteSpace(query))
+                return new List<RetentionCustomerSearchResult>();
+
+            var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
+            string q = query.Trim().ToLower();
+            var today = DateTime.Today;
+
+            await using var context = CreateDbContext(targetCompanyId);
+            var settings = await context.RetentionSettings.FirstOrDefaultAsync(s => s.CompanyId == targetCompanyId)
+                ?? new RetentionSetting { CompanyId = targetCompanyId };
+
+            var matchedCustomers = await context.Customers
+                .AsNoTracking()
+                .Include(c => c.Orders)
+                .Where(c => c.CompanyId == targetCompanyId &&
+                    (c.FirstName.ToLower().Contains(q) ||
+                     c.LastName.ToLower().Contains(q) ||
+                     c.Email.ToLower().Contains(q) ||
+                     c.Phone.ToLower().Contains(q)))
+                .Take(limit * 2)
+                .ToListAsync();
+
+            var results = new List<RetentionCustomerSearchResult>();
+            foreach (var c in matchedCustomers)
+            {
+                var completedOrders = c.Orders.Where(o => o.StatusId == 3).ToList();
+                DateTime? lastOrder = completedOrders.Any()
+                    ? (DateTime?)completedOrders.Max(o => o.DeliveryDate ?? o.OrderDate)
+                    : null;
+
+                string segmentName = CalculateRetentionSegment(
+                    completedOrders.Count,
+                    lastOrder,
+                    today,
+                    settings.ActiveDaysThreshold,
+                    settings.AtRiskDaysThreshold,
+                    settings.LoyalMinOrders);
+
+                if (segmentName == "Prospect") segmentName = "New";
+
+                var lastLog = await context.RetentionEmailLogs
+                    .AsNoTracking()
+                    .Where(l => l.CompanyId == targetCompanyId && l.CustomerId == c.CustomerId && (l.Status == "Delivered" || l.Status == "Opened" || l.Status == "Clicked"))
+                    .OrderByDescending(l => l.SentDate)
+                    .FirstOrDefaultAsync();
+
+                bool inCooldown = false;
+                int daysRemaining = 0;
+                if (lastLog != null)
+                {
+                    int daysSince = (int)(today - lastLog.SentDate.Date).TotalDays;
+                    if (daysSince < settings.CooldownDays)
+                    {
+                        inCooldown = true;
+                        daysRemaining = settings.CooldownDays - daysSince;
+                    }
+                }
+
+                bool eligible = !c.IsUnsubscribed && !inCooldown && !string.IsNullOrWhiteSpace(c.Email);
+
+                results.Add(new RetentionCustomerSearchResult
+                {
+                    CustomerId = c.CustomerId,
+                    FirstName = c.FirstName,
+                    LastName = c.LastName,
+                    Email = c.Email,
+                    Phone = c.Phone,
+                    SegmentName = segmentName,
+                    IsUnsubscribed = c.IsUnsubscribed,
+                    EligibleToSend = eligible,
+                    CooldownDaysRemaining = daysRemaining,
+                    CompletedOrdersCount = completedOrders.Count
+                });
+
+                if (results.Count >= limit) break;
+            }
+
+            return results;
+        }
+
+        public static async Task<RetentionEmailLog> SendIndividualRetentionEmailAsync(
+            int customerId,
+            bool forceIgnoreCooldown = false,
+            string? overrideSubject = null,
+            string? overrideBody = null,
+            int? companyId = null)
+        {
+            VerifyRetentionAccess("Manager", throwOnFailure: true);
+
+            var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
+            var today = DateTime.Today;
+            string currentUser = SessionService.CurrentUser?.Username ?? "Manager";
+            string role = SessionService.CurrentUser?.Role ?? "Manager";
+
+            await using var context = CreateDbContext(targetCompanyId);
+            var settings = await context.RetentionSettings.FirstOrDefaultAsync(s => s.CompanyId == targetCompanyId)
+                ?? new RetentionSetting { CompanyId = targetCompanyId };
+
+            var customer = await context.Customers
+                .Include(c => c.Orders)
+                .FirstOrDefaultAsync(c => c.CustomerId == customerId && c.CompanyId == targetCompanyId);
+
+            if (customer == null)
+            {
+                throw new InvalidOperationException($"Customer with ID {customerId} not found.");
+            }
+
+            if (customer.IsUnsubscribed)
+            {
+                throw new InvalidOperationException($"Customer '{customer.FirstName} {customer.LastName}' has unsubscribed from emails.");
+            }
+
+            if (string.IsNullOrWhiteSpace(customer.Email) || !EmailService.ValidateEmail(customer.Email))
+            {
+                throw new InvalidOperationException($"Customer '{customer.FirstName} {customer.LastName}' does not have a valid email address ('{customer.Email}').");
+            }
+
+            var completedOrders = customer.Orders.Where(o => o.StatusId == 3).ToList();
+            DateTime? lastOrder = completedOrders.Any()
+                ? (DateTime?)completedOrders.Max(o => o.DeliveryDate ?? o.OrderDate)
+                : null;
+
+            string segmentName = CalculateRetentionSegment(
+                completedOrders.Count,
+                lastOrder,
+                today,
+                settings.ActiveDaysThreshold,
+                settings.AtRiskDaysThreshold,
+                settings.LoyalMinOrders);
+
+            if (segmentName == "Prospect")
+            {
+                segmentName = "New";
+            }
+
+            if (!forceIgnoreCooldown)
+            {
+                var lastLog = await context.RetentionEmailLogs
+                    .Where(l => l.CompanyId == targetCompanyId && l.CustomerId == customerId && (l.Status == "Delivered" || l.Status == "Opened" || l.Status == "Clicked"))
+                    .OrderByDescending(l => l.SentDate)
+                    .FirstOrDefaultAsync();
+
+                if (lastLog != null && (today - lastLog.SentDate.Date).TotalDays < settings.CooldownDays)
+                {
+                    int daysLeft = settings.CooldownDays - (int)(today - lastLog.SentDate.Date).TotalDays;
+                    throw new InvalidOperationException($"Customer is currently in the 14-day anti-fatigue cooldown ({daysLeft} day(s) remaining). Enable cooldown override to send anyway.");
+                }
+            }
+
+            var template = await context.RetentionEmailTemplates
+                .FirstOrDefaultAsync(t => t.SegmentName == segmentName && t.IsActive);
+
+            string subject = overrideSubject ?? template?.Subject ?? $"Exclusive Offer from Sweet Story for {customer.FirstName}";
+            string body = overrideBody ?? template?.BodyText ?? $"Hi {customer.FirstName},\n\nWe appreciate you being our customer!";
+
+            subject = subject.Replace("{{customer_name}}", customer.FirstName.Trim());
+            body = body.Replace("{{customer_name}}", customer.FirstName.Trim());
+
+            string status = "Delivered";
+            string? failureReason = null;
+
+            try
+            {
+                await EmailService.SendEmailAsync(customer.Email, customer.FirstName, subject, body);
+            }
+            catch (Exception ex)
+            {
+                status = $"Failed: {ex.Message}";
+                failureReason = ex.Message;
+            }
+
+            var emailLog = new RetentionEmailLog
+            {
+                CompanyId = targetCompanyId,
+                CustomerId = customer.CustomerId,
+                CustomerName = $"{customer.FirstName} {customer.LastName}".Trim(),
+                CustomerEmail = customer.Email,
+                SegmentName = segmentName,
+                Subject = subject,
+                BodySent = body,
+                SentDate = DateTime.UtcNow,
+                SentBy = currentUser,
+                Status = status.Length > 450 ? status.Substring(0, 447) + "..." : status
+            };
+
+            context.RetentionEmailLogs.Add(emailLog);
+            await context.SaveChangesAsync();
+
+            if (failureReason != null)
+            {
+                await RecordAuditLogAsync(
+                    userId: SessionService.CurrentUser?.UserId ?? 0,
+                    actionType: "EMAIL_SEND_FAILED",
+                    actionDesc: $"Failed sending retention email ({segmentName}) to '{customer.FirstName} {customer.LastName}' <{customer.Email}> by {currentUser}: {failureReason}"
+                );
+                throw new InvalidOperationException($"Email could not be sent to {customer.FirstName} {customer.LastName}. Please check the email settings.\n\nError details: {failureReason}");
+            }
+
+            await RecordAuditLogAsync(
+                userId: SessionService.CurrentUser?.UserId ?? 0,
+                actionType: "MANUAL_EMAIL_SEND",
+                actionDesc: $"Manual retention email ({segmentName}) dispatched to '{customer.FirstName} {customer.LastName}' <{customer.Email}> by {currentUser} ({role}) {(forceIgnoreCooldown ? "[Cooldown Override]" : "")}"
+            );
+
+            return emailLog;
+        }
+
+        public static async Task<RetentionEmailLog> SendManualRetentionEmailAsync(
+            int customerId,
+            string segmentName,
+            bool forceIgnoreCooldown = false,
+            string? overrideSubject = null,
+            string? overrideBody = null,
+            int? companyId = null)
+        {
+            VerifyRetentionAccess("Manager", throwOnFailure: true);
+
+            var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
+            var today = DateTime.Today;
+            string currentUser = SessionService.CurrentUser?.Username ?? "Manager";
+            string role = SessionService.CurrentUser?.Role ?? "Manager";
+
+            await using var context = CreateDbContext(targetCompanyId);
+            var settings = await context.RetentionSettings.FirstOrDefaultAsync(s => s.CompanyId == targetCompanyId)
+                ?? new RetentionSetting { CompanyId = targetCompanyId };
+
+            var customer = await context.Customers
+                .Include(c => c.Orders)
+                .FirstOrDefaultAsync(c => c.CustomerId == customerId && c.CompanyId == targetCompanyId);
+
+            if (customer == null)
+            {
+                throw new InvalidOperationException("Customer was not found in the database. Only registered customers may be emailed.");
+            }
+
+            if (customer.IsUnsubscribed)
+            {
+                throw new InvalidOperationException($"Customer '{customer.FirstName} {customer.LastName}' has unsubscribed from emails.");
+            }
+
+            if (string.IsNullOrWhiteSpace(customer.Email) || !EmailService.ValidateEmail(customer.Email))
+            {
+                throw new InvalidOperationException($"Customer '{customer.FirstName} {customer.LastName}' does not have a valid email address ('{customer.Email}').");
+            }
+
+            if (!forceIgnoreCooldown)
+            {
+                var lastLog = await context.RetentionEmailLogs
+                    .Where(l => l.CompanyId == targetCompanyId && l.CustomerId == customerId && (l.Status == "Delivered" || l.Status == "Opened" || l.Status == "Clicked"))
+                    .OrderByDescending(l => l.SentDate)
+                    .FirstOrDefaultAsync();
+
+                if (lastLog != null && (today - lastLog.SentDate.Date).TotalDays < settings.CooldownDays)
+                {
+                    int daysLeft = settings.CooldownDays - (int)(today - lastLog.SentDate.Date).TotalDays;
+                    throw new InvalidOperationException($"Customer '{customer.FirstName} {customer.LastName}' received an email within the 14-day anti-fatigue cooldown ({daysLeft} day(s) remaining).");
+                }
+            }
+
+            var template = await context.RetentionEmailTemplates
+                .FirstOrDefaultAsync(t => t.SegmentName == segmentName && t.IsActive);
+
+            string subject = overrideSubject ?? template?.Subject ?? $"Exclusive Offer from Sweet Story for {customer.FirstName}";
+            string body = overrideBody ?? template?.BodyText ?? $"Hi {customer.FirstName},\n\nWe appreciate you being our customer!";
+
+            subject = subject.Replace("{{customer_name}}", customer.FirstName.Trim());
+            body = body.Replace("{{customer_name}}", customer.FirstName.Trim());
+
+            string status = "Delivered";
+            string? failureReason = null;
+
+            try
+            {
+                await EmailService.SendEmailAsync(customer.Email, customer.FirstName, subject, body);
+            }
+            catch (Exception ex)
+            {
+                status = $"Failed: {ex.Message}";
+                failureReason = ex.Message;
+            }
+
+            var emailLog = new RetentionEmailLog
+            {
+                CompanyId = targetCompanyId,
+                CustomerId = customer.CustomerId,
+                CustomerName = $"{customer.FirstName} {customer.LastName}".Trim(),
+                CustomerEmail = customer.Email.Trim(),
+                SegmentName = segmentName,
+                Subject = subject,
+                BodySent = body,
+                SentDate = DateTime.UtcNow,
+                SentBy = currentUser,
+                Status = status.Length > 450 ? status.Substring(0, 447) + "..." : status
+            };
+
+            context.RetentionEmailLogs.Add(emailLog);
+            await context.SaveChangesAsync();
+
+            if (failureReason != null)
+            {
+                await RecordAuditLogAsync(
+                    userId: SessionService.CurrentUser?.UserId ?? 0,
+                    actionType: "EMAIL_SEND_FAILED",
+                    actionDesc: $"Failed sending retention email ({segmentName}) to '{customer.FirstName} {customer.LastName}' <{customer.Email}> by {currentUser}: {failureReason}"
+                );
+                throw new InvalidOperationException($"Email could not be sent to {customer.FirstName} {customer.LastName}. Please check the email settings.\n\nError details: {failureReason}");
+            }
+
+            await RecordAuditLogAsync(
+                userId: SessionService.CurrentUser?.UserId ?? 0,
+                actionType: "MANUAL_EMAIL_SEND",
+                actionDesc: $"Manual retention email ({segmentName}) dispatched to '{customer.FirstName} {customer.LastName}' <{customer.Email}> by {currentUser} ({role}) {(forceIgnoreCooldown ? "[Cooldown Override]" : "")}"
+            );
+
+            return emailLog;
+        }
+
+        public static async Task<RetentionEmailLog> SendTestRetentionEmailAsync(
+            string recipientEmail,
+            string recipientName,
+            string segmentName,
+            int? companyId = null)
+        {
+            VerifyRetentionAccess("Manager", throwOnFailure: true);
+
+            var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
+            string currentUser = SessionService.CurrentUser?.Username ?? "Manager";
+
+            await using var context = CreateDbContext(targetCompanyId);
+            var customer = await context.Customers.FirstOrDefaultAsync(c => c.Email == recipientEmail && c.CompanyId == targetCompanyId);
+            if (customer != null)
+            {
+                return await SendManualRetentionEmailAsync(customer.CustomerId, segmentName, forceIgnoreCooldown: true, companyId: targetCompanyId);
+            }
+
+            var template = await context.RetentionEmailTemplates
+                .FirstOrDefaultAsync(t => t.SegmentName == segmentName && t.IsActive);
+
+            string cleanName = string.IsNullOrWhiteSpace(recipientName) ? "Valued Customer" : recipientName.Trim();
+            string subject = (template?.Subject ?? "Exclusive Offer from Sweet Story").Replace("{{customer_name}}", cleanName);
+            string body = (template?.BodyText ?? "We appreciate you being our customer!").Replace("{{customer_name}}", cleanName);
+
+            string status = "Delivered";
+            string? failureReason = null;
+            try
+            {
+                await EmailService.SendEmailAsync(recipientEmail, cleanName, subject, body);
+            }
+            catch (Exception ex)
+            {
+                status = $"Failed: {ex.Message}";
+                failureReason = ex.Message;
+            }
+
+            var emailLog = new RetentionEmailLog
+            {
+                CompanyId = targetCompanyId,
+                CustomerId = 0,
+                CustomerName = cleanName,
+                CustomerEmail = recipientEmail.Trim(),
+                SegmentName = segmentName,
+                Subject = subject,
+                BodySent = body,
+                SentDate = DateTime.UtcNow,
+                SentBy = currentUser,
+                Status = status
+            };
+
+            context.RetentionEmailLogs.Add(emailLog);
+            await context.SaveChangesAsync();
+
+            if (failureReason != null)
+            {
+                throw new InvalidOperationException($"Email could not be sent to {recipientEmail}. Please check the email settings.\n\nError details: {failureReason}");
+            }
+
+            return emailLog;
+        }
+
+        public static async Task ToggleAutoSendingAsync(bool enabled, int? companyId = null)
+        {
+            VerifyRetentionAccess("Manager", throwOnFailure: true);
+
+            var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
+            string currentUser = SessionService.CurrentUser?.Username ?? "System";
+            string role = SessionService.CurrentUser?.Role ?? "System";
+
+            await using var context = CreateDbContext(targetCompanyId);
+            var setting = await context.RetentionSettings.FirstOrDefaultAsync(s => s.CompanyId == targetCompanyId);
+            if (setting == null)
+            {
+                setting = new RetentionSetting { CompanyId = targetCompanyId };
+                context.RetentionSettings.Add(setting);
+            }
+
+            setting.AutoSendingEnabled = enabled;
+            setting.UpdatedAt = DateTime.UtcNow;
+            setting.UpdatedBy = currentUser;
+            await context.SaveChangesAsync();
+
+            await RecordAuditLogAsync(
+                userId: SessionService.CurrentUser?.UserId ?? 0,
+                actionType: "AUTOSEND_TOGGLE",
+                actionDesc: $"Automatic scheduled sending was {(enabled ? "ENABLED" : "DISABLED")} by {currentUser} ({role})"
+            );
+        }
+
+        public static async Task UpdateRetentionSettingsAsync(
+            int activeThreshold,
+            int atRiskThreshold,
+            int cooldownDays,
+            int? companyId = null)
+        {
+            VerifyRetentionAccess("Admin", throwOnFailure: true);
+
+            var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
+            string currentUser = SessionService.CurrentUser?.Username ?? "Admin";
+            string role = SessionService.CurrentUser?.Role ?? "Admin";
+
+            await using var context = CreateDbContext(targetCompanyId);
+            var setting = await context.RetentionSettings.FirstOrDefaultAsync(s => s.CompanyId == targetCompanyId);
+            if (setting == null)
+            {
+                setting = new RetentionSetting { CompanyId = targetCompanyId };
+                context.RetentionSettings.Add(setting);
+            }
+
+            setting.ActiveDaysThreshold = activeThreshold;
+            setting.AtRiskDaysThreshold = atRiskThreshold;
+            setting.CooldownDays = cooldownDays;
+            setting.UpdatedAt = DateTime.UtcNow;
+            setting.UpdatedBy = currentUser;
+            await context.SaveChangesAsync();
+
+            await RecordAuditLogAsync(
+                userId: SessionService.CurrentUser?.UserId ?? 0,
+                actionType: "THRESHOLD_CHANGE",
+                actionDesc: $"Segment thresholds updated to Active: {activeThreshold}d, At-Risk: {atRiskThreshold}d, Cooldown: {cooldownDays}d by {currentUser} ({role})"
+            );
+        }
+
+        public static async Task UpdateRetentionTemplateAsync(
+            int templateId,
+            string subject,
+            string body,
+            string offer,
+            decimal discount,
+            int? companyId = null)
+        {
+            VerifyRetentionAccess("Admin", throwOnFailure: true);
+
+            string currentUser = SessionService.CurrentUser?.Username ?? "Admin";
+            string role = SessionService.CurrentUser?.Role ?? "Admin";
+
+            await using var context = CreateDbContext(companyId);
+            var t = await context.RetentionEmailTemplates.FindAsync(templateId);
+            if (t != null)
+            {
+                t.Subject = subject;
+                t.BodyText = body;
+                t.OfferDescription = offer;
+                t.DiscountPercent = discount;
+                t.UpdatedAt = DateTime.UtcNow;
+                t.UpdatedBy = currentUser;
+                await context.SaveChangesAsync();
+
+                await RecordAuditLogAsync(
+                    userId: SessionService.CurrentUser?.UserId ?? 0,
+                    actionType: "TEMPLATE_EDIT",
+                    actionDesc: $"Email template for '{t.SegmentName}' updated by {currentUser} ({role})"
+                );
+            }
+        }
     }
+
 
     // =============================================================
     // ROLE-SPECIFIC DASHBOARD DATA CONTRACTS (DTOs)
@@ -2399,5 +3553,48 @@ namespace CC.Services
         string DatabaseName,
         DateTime CreatedDate,
         bool IsActive
+    );
+
+    public record RetentionCustomerItem(
+        int CustomerId,
+        string CustomerName,
+        string Email,
+        string Phone,
+        int CompletedOrdersCount,
+        DateTime? LastCompletedOrderDate,
+        int DaysSinceLastOrder,
+        string SegmentName,
+        DateTime? LastEmailSentDate,
+        string LastEmailStatus,
+        bool EligibleToSend
+    );
+
+    public record RetentionSegmentSummary(
+        string SegmentName,
+        int CustomerCount,
+        double PercentageOfBase,
+        string OfferSummary,
+        string EmailPurpose,
+        Color ThemeColor
+    );
+
+    public record RetentionMetrics(
+        int TotalEmailsDelivered,
+        double OpenRate,
+        double ClickRate,
+        double RepeatOrderRate,
+        double WinBackRate,
+        decimal TotalRetainedRevenue
+    );
+
+    public record RetentionDashboardData(
+        int TotalCustomersWithOrders,
+        Dictionary<string, RetentionSegmentSummary> SegmentSummaries,
+        List<RetentionCustomerItem> CurrentSegmentCustomers,
+        List<RetentionEmailTemplate> Templates,
+        RetentionSetting Settings,
+        RetentionMetrics Metrics,
+        List<RetentionEmailLog> RecentEmailLogs,
+        List<SystemAuditLog> AuditLogs
     );
 }

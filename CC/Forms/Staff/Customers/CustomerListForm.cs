@@ -474,7 +474,14 @@ namespace CC.Forms.Staff.Customers
 
             if (form.ShowDialog(this.FindForm() ?? this) == DialogResult.OK)
             {
+                txtSearchBox.Text = string.Empty;
+                activeSearchQuery = string.Empty;
+                currentPage = 1;
                 await LoadCustomersAsync();
+                if (gridCustomers.Rows.Count > 0)
+                {
+                    UITheme.HighlightNewRow(gridCustomers, 0);
+                }
             }
         }
 

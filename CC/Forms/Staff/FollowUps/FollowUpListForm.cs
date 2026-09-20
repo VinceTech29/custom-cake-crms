@@ -442,7 +442,15 @@ namespace CC.Forms.Staff.FollowUps
             using var form = new FollowUpForm();
             if (form.ShowDialog(this.FindForm() ?? this) == DialogResult.OK)
             {
+                txtSearchBox.Text = string.Empty;
+                activeSearchQuery = string.Empty;
+                activeFilter = "All";
+                currentPage = 1;
                 await RefreshGridAsync();
+                if (gridFollowUps.Rows.Count > 0)
+                {
+                    UITheme.HighlightNewRow(gridFollowUps, 0);
+                }
             }
         }
 

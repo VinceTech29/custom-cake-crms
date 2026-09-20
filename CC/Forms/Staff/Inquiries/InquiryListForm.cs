@@ -643,7 +643,15 @@ namespace CC.Forms.Staff.Inquiries
             using var form = new InquiryForm();
             if (form.ShowDialog(this.FindForm() ?? this) == DialogResult.OK)
             {
+                txtSearchBox.Text = string.Empty;
+                activeSearchQuery = string.Empty;
+                activeFilter = "All";
+                currentPage = 1;
                 await RefreshGridAsync();
+                if (gridInquiries.Rows.Count > 0)
+                {
+                    UITheme.HighlightNewRow(gridInquiries, 0);
+                }
             }
         }
 

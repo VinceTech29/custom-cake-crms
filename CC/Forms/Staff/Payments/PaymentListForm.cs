@@ -482,6 +482,10 @@ namespace CC.Forms.Staff.Payments
                     if (f.ShowDialog(this.FindForm() ?? this) == DialogResult.OK)
                     {
                         await RefreshGridAsync();
+                        if (gridPayments.Rows.Count > 0)
+                        {
+                            UITheme.HighlightNewRow(gridPayments, 0);
+                        }
                     }
                 }
             }
@@ -492,7 +496,15 @@ namespace CC.Forms.Staff.Payments
             using var form = new PaymentForm();
             if (form.ShowDialog(this.FindForm() ?? this) == DialogResult.OK)
             {
+                txtSearchBox.Text = string.Empty;
+                activeSearchQuery = string.Empty;
+                activeFilter = "All";
+                currentPage = 1;
                 await RefreshGridAsync();
+                if (gridPayments.Rows.Count > 0)
+                {
+                    UITheme.HighlightNewRow(gridPayments, 0);
+                }
             }
         }
 

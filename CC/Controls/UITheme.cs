@@ -443,5 +443,38 @@ namespace CC.Controls
                 }
             }
         }
+
+        /// <summary>
+        /// Briefly highlights the specified row (e.g. newly added record) with a soft warm tint for durationMs (default 3 seconds).
+        /// </summary>
+        public static void HighlightNewRow(DataGridView grid, int rowIndex = 0, int durationMs = 3000)
+        {
+            if (grid == null || grid.IsDisposed || grid.Rows.Count <= rowIndex || rowIndex < 0) return;
+            try
+            {
+                var row = grid.Rows[rowIndex];
+                var originalColor = row.DefaultCellStyle.BackColor;
+                // Soft warm gold/amber highlight #FEF3C7
+                row.DefaultCellStyle.BackColor = Color.FromArgb(254, 243, 199);
+                grid.InvalidateRow(rowIndex);
+
+                var timer = new System.Windows.Forms.Timer { Interval = durationMs };
+                timer.Tick += (s, e) =>
+                {
+                    timer.Stop();
+                    timer.Dispose();
+                    if (!grid.IsDisposed && row.Index >= 0 && row.Index < grid.Rows.Count)
+                    {
+                        row.DefaultCellStyle.BackColor = originalColor;
+                        grid.InvalidateRow(row.Index);
+                    }
+                };
+                timer.Start();
+            }
+            catch
+            {
+                // Graceful fallback
+            }
+        }
     }
 }
