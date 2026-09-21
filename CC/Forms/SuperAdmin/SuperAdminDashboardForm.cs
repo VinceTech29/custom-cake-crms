@@ -165,13 +165,13 @@ namespace CC.Forms.SuperAdmin
             topPanel.Controls.Add(titleStack);
             rootLayout.Controls.Add(topPanel, 0, 0);
 
-            // 2. 4 KPI STAT CARDS
+            // 2. 8 KPI STAT CARDS (4x2 GRID)
             var kpiTable = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
-                Height = 145,
+                Height = 290,
                 ColumnCount = 4,
-                RowCount = 1,
+                RowCount = 2,
                 BackColor = Color.Transparent,
                 Margin = new Padding(0, 0, 0, 20)
             };
@@ -179,27 +179,20 @@ namespace CC.Forms.SuperAdmin
             kpiTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25F));
             kpiTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25F));
             kpiTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25F));
+            kpiTable.RowStyles.Add(new RowStyle(SizeType.Percent, 50F));
+            kpiTable.RowStyles.Add(new RowStyle(SizeType.Percent, 50F));
 
+            // Row 1: Platform Infrastructure, Users & System Health
             var cardBusinesses = new DashboardKpiCard
             {
                 Dock = DockStyle.Fill,
                 Title = "Total Businesses",
                 Value = data.TotalBusinesses.ToString(),
                 Subtitle = $"Active: {data.ActiveBusinesses} tenants",
-                Margin = new Padding(0, 0, 8, 0)
+                Margin = new Padding(0, 0, 6, 6)
             };
             cardBusinesses.SetBadge("Master CRM", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
             cardBusinesses.CardClicked += (s, e) => Navigate("Businesses");
-
-            var cardSubs = new DashboardKpiCard
-            {
-                Dock = DockStyle.Fill,
-                Title = "Active Subscriptions",
-                Value = data.ActiveSubscriptionsCount.ToString(),
-                Subtitle = $"{data.ExpiringSubscriptionsCount} expiring \u00B7 {data.ExpiredSubscriptionsCount} expired",
-                Margin = new Padding(4, 0, 8, 0)
-            };
-            cardSubs.SetBadge("Platform", UITheme.PrimaryMauve, Color.FromArgb(245, 235, 240));
 
             var cardUsers = new DashboardKpiCard
             {
@@ -207,25 +200,86 @@ namespace CC.Forms.SuperAdmin
                 Title = "Platform Users",
                 Value = data.PlatformUsersCount.ToString(),
                 Subtitle = "Across all registered tenants",
-                Margin = new Padding(4, 0, 8, 0)
+                Margin = new Padding(6, 0, 6, 6)
             };
             cardUsers.SetBadge("Access", Color.FromArgb(50, 130, 200), Color.FromArgb(235, 243, 250));
-            cardUsers.CardClicked += (s, e) => Navigate("Platform Users");
+            cardUsers.CardClicked += (s, e) => Navigate("Users");
 
             var cardDatabases = new DashboardKpiCard
             {
                 Dock = DockStyle.Fill,
                 Title = "Tenant Databases",
                 Value = data.ActiveDatabases.ToString(),
-                Subtitle = "Master DB mapped routing instances",
-                Margin = new Padding(4, 0, 0, 0)
+                Subtitle = "Dedicated SQL DB instances",
+                Margin = new Padding(6, 0, 6, 6)
             };
-            cardDatabases.SetBadge("DB-per-Tenant", UITheme.UpgradeGold, Color.FromArgb(253, 248, 238));
+            cardDatabases.SetBadge("Multi-Tenant", UITheme.UpgradeGold, Color.FromArgb(253, 248, 238));
+            cardDatabases.CardClicked += (s, e) => Navigate("System Monitoring & Backups");
+
+            var cardBackups = new DashboardKpiCard
+            {
+                Dock = DockStyle.Fill,
+                Title = "Database Backups",
+                Value = $"{data.TotalBackupsCount} Files",
+                Subtitle = "Native SQL multi-tenant archives",
+                Margin = new Padding(6, 0, 0, 6)
+            };
+            cardBackups.SetBadge("System Health", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
+            cardBackups.CardClicked += (s, e) => Navigate("System Monitoring & Backups");
+
+            // Row 2: Subscriptions, Commercial Revenue & Compliance
+            var cardSubs = new DashboardKpiCard
+            {
+                Dock = DockStyle.Fill,
+                Title = "Active Subscriptions",
+                Value = data.ActiveSubscriptionsCount.ToString(),
+                Subtitle = "Active tenant accounts",
+                Margin = new Padding(0, 6, 6, 0)
+            };
+            cardSubs.SetBadge("Platform", UITheme.PrimaryMauve, Color.FromArgb(245, 235, 240));
+            cardSubs.CardClicked += (s, e) => Navigate("Subscriptions");
+
+            var cardExpiring = new DashboardKpiCard
+            {
+                Dock = DockStyle.Fill,
+                Title = "Expiring Plans (30d)",
+                Value = data.ExpiringSubscriptionsCount.ToString(),
+                Subtitle = $"{data.ExpiredSubscriptionsCount} expired accounts",
+                Margin = new Padding(6, 6, 6, 0)
+            };
+            cardExpiring.SetBadge("Renewal Alert", UITheme.StatusYellowFg, UITheme.StatusYellowBg);
+            cardExpiring.CardClicked += (s, e) => Navigate("Subscriptions");
+
+            var cardMrr = new DashboardKpiCard
+            {
+                Dock = DockStyle.Fill,
+                Title = "Est. Monthly Revenue",
+                Value = $"P{data.EstimatedMonthlyRevenue:N0}",
+                Subtitle = "Active subscription MRR",
+                Margin = new Padding(6, 6, 6, 0)
+            };
+            cardMrr.SetBadge("MRR", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
+            cardMrr.CardClicked += (s, e) => Navigate("Subscriptions");
+
+            var cardTerms = new DashboardKpiCard
+            {
+                Dock = DockStyle.Fill,
+                Title = "Terms Compliance",
+                Value = $"{data.TermsAcceptancesCount} Signed",
+                Subtitle = "User acceptances logged",
+                Margin = new Padding(6, 6, 0, 0)
+            };
+            cardTerms.SetBadge("Compliance", UITheme.PrimaryMauve, Color.FromArgb(245, 235, 240));
+            cardTerms.CardClicked += (s, e) => Navigate("Terms & Conditions");
 
             kpiTable.Controls.Add(cardBusinesses, 0, 0);
-            kpiTable.Controls.Add(cardSubs, 1, 0);
-            kpiTable.Controls.Add(cardUsers, 2, 0);
-            kpiTable.Controls.Add(cardDatabases, 3, 0);
+            kpiTable.Controls.Add(cardUsers, 1, 0);
+            kpiTable.Controls.Add(cardDatabases, 2, 0);
+            kpiTable.Controls.Add(cardBackups, 3, 0);
+            kpiTable.Controls.Add(cardSubs, 0, 1);
+            kpiTable.Controls.Add(cardExpiring, 1, 1);
+            kpiTable.Controls.Add(cardMrr, 2, 1);
+            kpiTable.Controls.Add(cardTerms, 3, 1);
             rootLayout.Controls.Add(kpiTable, 0, 1);
 
             // 3. ANALYTICS CHARTS (2 Columns: Registration Trend & Subscription Plans)

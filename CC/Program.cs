@@ -573,17 +573,17 @@ namespace CC
                     // 10. Dashboard Data Calculations & Tenant Scoping
                     Console.WriteLine("[TEST 10] Testing Real Database Dashboard Calculations & Tenant Scoping...");
                     var superData = CrmDataService.GetSuperAdminDashboardDataAsync("30d").GetAwaiter().GetResult();
-                    Console.WriteLine($"  -> Super Admin: TotalBiz={superData.TotalBusinesses}, ActiveBiz={superData.ActiveBusinesses}, Users={superData.PlatformUsersCount}, RegTrends={superData.RegistrationTrend.Count} pts, Plans={superData.SubscriptionPlanDistribution.Count}");
+                    Console.WriteLine($"  -> Super Admin: TotalBiz={superData.TotalBusinesses}, ActiveBiz={superData.ActiveBusinesses}, Users={superData.PlatformUsersCount}, Backups={superData.TotalBackupsCount}, MRR=P{superData.EstimatedMonthlyRevenue:N0}, TermsAcceptances={superData.TermsAcceptancesCount}");
 
                     var adminData30 = CrmDataService.GetAdminDashboardDataAsync(2, "30d").GetAwaiter().GetResult();
                     var adminData7 = CrmDataService.GetAdminDashboardDataAsync(2, "7d").GetAwaiter().GetResult();
-                    Console.WriteLine($"  -> Business Admin: 30d Rev=P{adminData30.TotalRevenue:N2} ({adminData30.TotalOrders} orders), 7d Rev=P{adminData7.TotalRevenue:N2}, TopCusts={adminData30.TopCustomers.Count}, Channels={adminData30.PaymentMethodBreakdown.Count}");
+                    Console.WriteLine($"  -> Business Admin: 30d Rev=P{adminData30.TotalRevenue:N2} ({adminData30.TotalOrders} orders, AOV=P{adminData30.AverageOrderValue:N0}), CollectionRate={adminData30.CollectionRate:0.#}%, ActiveOrders={adminData30.ActiveOrdersCount}");
 
                     var mgrData = CrmDataService.GetManagerDashboardDataAsync(2, "30d").GetAwaiter().GetResult();
-                    Console.WriteLine($"  -> Manager: ActiveOrders={mgrData.ActiveOrdersCount}, Inquiries={mgrData.OpenInquiriesCount}, OverdueTasks={mgrData.ShopOverdueFollowupsCount}, Pipeline={mgrData.PipelineStages.Count} stages, RecentOrders={mgrData.RecentOrders.Count}");
+                    Console.WriteLine($"  -> Manager: ActiveOrders={mgrData.ActiveOrdersCount} (Val=P{mgrData.ActivePipelineValue:N0}), DueToday={mgrData.TodayDeliveriesCount}, Completed={mgrData.CompletedOrdersCount}, Inquiries={mgrData.OpenInquiriesCount}");
 
                     var staffData = CrmDataService.GetStaffDashboardDataAsync(4, 2, "1d").GetAwaiter().GetResult();
-                    Console.WriteLine($"  -> Staff: DueFollowups={staffData.MyDueFollowupsCount}, Overdue={staffData.MyOverdueFollowupsCount}, Processing={staffData.ProcessingOrdersCount}, UrgentTasks={staffData.UrgentTasks.Count}");
+                    Console.WriteLine($"  -> Staff: DueFollowups={staffData.MyDueFollowupsCount}, HandledInquiries={staffData.MyHandledInquiriesCount}, TodayDueOrders={staffData.TodayDueOrdersCount}, Completed={staffData.CompletedOrdersCount}");
 
                     // 11. UI Screen Captures for all 4 Dashboards
                     Console.WriteLine("[TEST 11] Generating UI Visual Captures for Walkthrough...");

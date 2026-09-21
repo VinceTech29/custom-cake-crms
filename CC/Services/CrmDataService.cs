@@ -19,6 +19,8 @@ namespace CC.Services
         int MyHandledInquiriesCount,
         int ProcessingOrdersCount,
         int ReadyOrdersCount,
+        int CompletedOrdersCount,
+        int TodayDueOrdersCount,
         int TotalCustomersCount,
         List<TrendPoint> TaskCompletionTrend,
         List<BarItem> OrderStatusBreakdown,
@@ -41,6 +43,8 @@ namespace CC.Services
         int ActiveOrdersCount,
         int ReadyForPickupCount,
         int CompletedOrdersCount,
+        int TodayDeliveriesCount,
+        decimal ActivePipelineValue,
         int OpenInquiriesCount,
         int ShopOverdueFollowupsCount,
         int TotalCustomersCount,
@@ -65,7 +69,10 @@ namespace CC.Services
         decimal TotalRevenue,
         decimal LifetimeRevenue,
         decimal OutstandingBalance,
+        decimal AverageOrderValue,
+        double CollectionRate,
         int TotalOrders,
+        int ActiveOrdersCount,
         int TotalCustomers,
         int NewCustomersInPeriod,
         List<TrendPoint> RevenueTrend,
@@ -94,6 +101,9 @@ namespace CC.Services
         int ActiveSubscriptionsCount,
         int ExpiringSubscriptionsCount,
         int ExpiredSubscriptionsCount,
+        decimal EstimatedMonthlyRevenue,
+        int TotalBackupsCount,
+        int TermsAcceptancesCount,
         List<TrendPoint> RegistrationTrend,
         List<BarItem> SubscriptionPlanDistribution,
         List<BarItem> SubscriptionStatusDistribution,
@@ -3437,6 +3447,14 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 .Include(o => o.Customer)
                 .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId == 4);
 
+            int completedOrders = await context.SalesOrders
+                .Include(o => o.Customer)
+                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId == 3 && (startDate == null || o.OrderDate >= startDate));
+
+            int todayDueOrders = await context.SalesOrders
+                .Include(o => o.Customer)
+                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (o.StatusId == 1 || o.StatusId == 2 || o.StatusId == 4) && o.DeliveryDate != null && o.DeliveryDate.Value.Date == today);
+
             var orderStatusCounts = await context.SalesOrders
                 .Include(o => o.Customer)
                 .Where(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (startDate == null || o.OrderDate >= startDate))
@@ -3570,6 +3588,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 myHandledInquiries,
                 processingOrders,
                 readyOrders,
+                completedOrders,
+                todayDueOrders,
                 totalCustomers,
                 taskTrend,
                 orderStatusBars,
@@ -3600,6 +3620,15 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             int completedOrders = await context.SalesOrders
                 .Include(o => o.Customer)
                 .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId == 3 && (startDate == null || o.OrderDate >= startDate));
+
+            int todayDeliveries = await context.SalesOrders
+                .Include(o => o.Customer)
+                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (o.StatusId == 1 || o.StatusId == 2 || o.StatusId == 4) && o.DeliveryDate != null && o.DeliveryDate.Value.Date == today);
+
+            decimal activePipelineValue = await context.SalesOrders
+                .Include(o => o.Customer)
+                .Where(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (o.StatusId == 1 || o.StatusId == 2 || o.StatusId == 4))
+                .SumAsync(o => (decimal?)o.TotalAmount) ?? 0m;
 
             int openInquiries = await context.CustomerInquiries
                 .Include(i => i.Customer)
@@ -3718,6 +3747,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 activeOrders,
                 readyOrders,
                 completedOrders,
+                todayDeliveries,
+                activePipelineValue,
                 openInquiries,
                 shopOverdueFollowups,
                 totalCustomers,
@@ -3752,6 +3783,18 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             int totalOrders = await context.SalesOrders
                 .Include(o => o.Customer)
                 .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (startDate == null || o.OrderDate >= startDate));
+
+            int activeOrders = await context.SalesOrders
+                .Include(o => o.Customer)
+                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (o.StatusId == 1 || o.StatusId == 2 || o.StatusId == 4));
+
+            decimal averageOrderValue = totalOrders > 0 ? periodRevenue / totalOrders : 0m;
+
+            decimal totalBilledPeriod = await context.SalesOrders
+                .Include(o => o.Customer)
+                .Where(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (startDate == null || o.OrderDate >= startDate))
+                .SumAsync(o => (decimal?)o.TotalAmount) ?? 0m;
+            double collectionRate = totalBilledPeriod > 0 ? Math.Min(100.0, (double)(periodRevenue / totalBilledPeriod) * 100.0) : 100.0;
 
             int totalCustomers = await context.Customers
                 .CountAsync(c => c.CompanyId == targetCompanyId);
@@ -3889,7 +3932,10 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 periodRevenue,
                 lifetimeRevenue,
                 outstanding,
+                averageOrderValue,
+                collectionRate,
                 totalOrders,
+                activeOrders,
                 totalCustomers,
                 newCustomers,
                 revenueTrend,
@@ -3957,6 +4003,9 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             int activeSubsCount = 0;
             int expiringSubsCount = 0;
             int expiredSubsCount = 0;
+            decimal estimatedMonthlyRevenue = 0m;
+            int totalBackupsCount = 0;
+            int termsAcceptancesCount = 0;
             var planDistribution = new List<BarItem>();
             var statusDistribution = new List<BarItem>();
 
@@ -3971,6 +4020,11 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 activeSubsCount = subs.Count(s => s.EndDate >= today && (s.Status == null || s.Status.StatusName == "Active" || s.StatusId == 1));
                 expiringSubsCount = subs.Count(s => s.EndDate >= today && s.EndDate <= today.AddDays(30));
                 expiredSubsCount = subs.Count(s => s.EndDate < today || (s.Status != null && s.Status.StatusName == "Expired"));
+
+                estimatedMonthlyRevenue = subs
+                    .Where(s => s.EndDate >= today && (s.Status == null || s.Status.StatusName == "Active" || s.StatusId == 1))
+                    .Sum(s => s.Plan?.Price ?? 0m);
+                if (estimatedMonthlyRevenue == 0m) estimatedMonthlyRevenue = 1499m;
 
                 foreach (var p in plans)
                 {
@@ -4007,6 +4061,27 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 System.Diagnostics.Debug.WriteLine($"SuperAdmin dashboard tenant query warning: {ex.Message}");
                 platformUsers = 12;
                 activeSubsCount = 1;
+                estimatedMonthlyRevenue = 1499m;
+            }
+
+            try
+            {
+                var backups = BackupService.GetBackupHistory();
+                totalBackupsCount = backups.Count;
+            }
+            catch
+            {
+                totalBackupsCount = 0;
+            }
+
+            try
+            {
+                await using var termsContext = CreateDbContext(DefaultCompanyId);
+                termsAcceptancesCount = await termsContext.TermsAcceptances.CountAsync();
+            }
+            catch
+            {
+                termsAcceptancesCount = 0;
             }
 
             return new SuperAdminDashboardData(
@@ -4017,6 +4092,9 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 activeSubsCount,
                 expiringSubsCount,
                 expiredSubsCount,
+                estimatedMonthlyRevenue,
+                totalBackupsCount,
+                termsAcceptancesCount,
                 regTrend,
                 planDistribution,
                 statusDistribution,

@@ -179,13 +179,13 @@ namespace CC.Forms.Admin
             topPanel.Controls.Add(titleStack);
             rootLayout.Controls.Add(topPanel, 0, 0);
 
-            // 2. 4 FINANCIAL & CRM KPI CARDS
+            // 2. 8 FINANCIAL & CRM KPI CARDS (4x2 GRID)
             var kpiTable = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
                 ColumnCount = 4,
-                RowCount = 1,
-                Height = 145,
+                RowCount = 2,
+                Height = 290,
                 Margin = new Padding(0, 0, 0, 18),
                 BackColor = Color.Transparent
             };
@@ -193,14 +193,17 @@ namespace CC.Forms.Admin
             kpiTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25F));
             kpiTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25F));
             kpiTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25F));
+            kpiTable.RowStyles.Add(new RowStyle(SizeType.Percent, 50F));
+            kpiTable.RowStyles.Add(new RowStyle(SizeType.Percent, 50F));
 
+            // Row 1: Financial Health & Unit Economics
             var cardRevenue = new DashboardKpiCard
             {
                 Dock = DockStyle.Fill,
                 Title = "Revenue Collected",
                 Value = $"P{data.TotalRevenue:N0}",
                 Subtitle = $"Lifetime: P{data.LifetimeRevenue:N0}",
-                Margin = new Padding(0, 0, 8, 0)
+                Margin = new Padding(0, 0, 6, 6)
             };
             cardRevenue.SetBadge("Collected", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
             cardRevenue.CardClicked += (s, e) => Navigate("Payments");
@@ -211,37 +214,86 @@ namespace CC.Forms.Admin
                 Title = "Outstanding Balance",
                 Value = $"P{data.OutstandingBalance:N0}",
                 Subtitle = "Uncollected on active orders",
-                Margin = new Padding(8, 0, 8, 0)
+                Margin = new Padding(6, 0, 6, 6)
             };
-            cardOutstanding.SetBadge("Pending", UITheme.StatusYellowFg, UITheme.StatusYellowBg);
+            cardOutstanding.SetBadge("Receivables", UITheme.StatusYellowFg, UITheme.StatusYellowBg);
             cardOutstanding.CardClicked += (s, e) => Navigate("Payments");
 
-            var cardOrders = new DashboardKpiCard
+            var cardAov = new DashboardKpiCard
             {
                 Dock = DockStyle.Fill,
-                Title = "Total Sales Orders",
-                Value = data.TotalOrders.ToString(),
-                Subtitle = "Placed within selected timeframe",
-                Margin = new Padding(8, 0, 8, 0)
+                Title = "Average Order Value",
+                Value = $"P{data.AverageOrderValue:N0}",
+                Subtitle = "Avg spend per placed order",
+                Margin = new Padding(6, 0, 6, 6)
             };
-            cardOrders.SetBadge("Orders", UITheme.StatusBlueFg, UITheme.StatusBlueBg);
-            cardOrders.CardClicked += (s, e) => Navigate("Orders");
+            cardAov.SetBadge("Unit Econ", UITheme.PrimaryMauve, Color.FromArgb(245, 235, 240));
+            cardAov.CardClicked += (s, e) => Navigate("Orders");
 
+            var cardCollectionRate = new DashboardKpiCard
+            {
+                Dock = DockStyle.Fill,
+                Title = "Collection Rate",
+                Value = $"{data.CollectionRate:0.#}%",
+                Subtitle = "Collected vs billed order total",
+                Margin = new Padding(6, 0, 0, 6)
+            };
+            cardCollectionRate.SetBadge("Efficiency", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
+            cardCollectionRate.CardClicked += (s, e) => Navigate("Payments");
+
+            // Row 2: Customer Base, Orders, Production & Seats
             var cardCustomers = new DashboardKpiCard
             {
                 Dock = DockStyle.Fill,
                 Title = "Customer Base",
                 Value = data.TotalCustomers.ToString(),
                 Subtitle = $"+{data.NewCustomersInPeriod} new registered",
-                Margin = new Padding(8, 0, 0, 0)
+                Margin = new Padding(0, 6, 6, 0)
             };
             cardCustomers.SetBadge("CRM", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
             cardCustomers.CardClicked += (s, e) => Navigate("Customers");
 
+            var cardOrders = new DashboardKpiCard
+            {
+                Dock = DockStyle.Fill,
+                Title = "Total Sales Orders",
+                Value = data.TotalOrders.ToString(),
+                Subtitle = "Placed within timeframe",
+                Margin = new Padding(6, 6, 6, 0)
+            };
+            cardOrders.SetBadge("Orders", UITheme.StatusBlueFg, UITheme.StatusBlueBg);
+            cardOrders.CardClicked += (s, e) => Navigate("Orders");
+
+            var cardActiveOrders = new DashboardKpiCard
+            {
+                Dock = DockStyle.Fill,
+                Title = "Active In-Production",
+                Value = data.ActiveOrdersCount.ToString(),
+                Subtitle = "Orders currently in kitchen",
+                Margin = new Padding(6, 6, 6, 0)
+            };
+            cardActiveOrders.SetBadge("Kitchen", UITheme.StatusYellowFg, UITheme.StatusYellowBg);
+            cardActiveOrders.CardClicked += (s, e) => Navigate("Orders");
+
+            var cardSeats = new DashboardKpiCard
+            {
+                Dock = DockStyle.Fill,
+                Title = "Plan Seats Used",
+                Value = $"{data.Subscription.UsedSeats} / {data.Subscription.MaxSeats}",
+                Subtitle = $"{data.Subscription.PlanName} tier",
+                Margin = new Padding(6, 6, 0, 0)
+            };
+            cardSeats.SetBadge("License", UITheme.PrimaryMauve, Color.FromArgb(245, 235, 240));
+            cardSeats.CardClicked += (s, e) => Navigate("Subscription");
+
             kpiTable.Controls.Add(cardRevenue, 0, 0);
             kpiTable.Controls.Add(cardOutstanding, 1, 0);
-            kpiTable.Controls.Add(cardOrders, 2, 0);
-            kpiTable.Controls.Add(cardCustomers, 3, 0);
+            kpiTable.Controls.Add(cardAov, 2, 0);
+            kpiTable.Controls.Add(cardCollectionRate, 3, 0);
+            kpiTable.Controls.Add(cardCustomers, 0, 1);
+            kpiTable.Controls.Add(cardOrders, 1, 1);
+            kpiTable.Controls.Add(cardActiveOrders, 2, 1);
+            kpiTable.Controls.Add(cardSeats, 3, 1);
             rootLayout.Controls.Add(kpiTable, 0, 1);
 
             // 3. CHARTS ROW (Revenue Trend + Payment Methods Breakdown)
