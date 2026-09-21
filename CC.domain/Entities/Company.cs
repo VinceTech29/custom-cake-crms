@@ -28,5 +28,7 @@ namespace CC.Domain.Entities
 
         public ICollection<Subscription> Subscriptions { get; set; } = new List<Subscription>();
         public string CompanyCode { get; set; } = string.Empty;
+
+        public bool IsActive { get; set; } = true;
     }
 }
