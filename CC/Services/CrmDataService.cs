@@ -1088,20 +1088,32 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
 
             if (!string.IsNullOrWhiteSpace(statusFilter) && !statusFilter.Equals("All", StringComparison.OrdinalIgnoreCase))
             {
-                int targetStatus = statusFilter switch
+                if (statusFilter.Equals("Active", StringComparison.OrdinalIgnoreCase))
                 {
-                    "Pending" => 0,
-                    "Confirmed" => 1,
-                    "Processing" => 2,
-                    "Completed" => 3,
-                    "Ready" => 4,
-                    "Cancelled" => 5,
-                    _ => -1
-                };
+                    query = query.Where(o => o.StatusId == 1 || o.StatusId == 2 || o.StatusId == 4);
+                }
+                else if (statusFilter.Equals("Today", StringComparison.OrdinalIgnoreCase))
+                {
+                    var today = DateTime.UtcNow.Date;
+                    query = query.Where(o => o.DeliveryDate.HasValue && o.DeliveryDate.Value.Date == today);
+                }
+                else
+                {
+                    int targetStatus = statusFilter switch
+                    {
+                        "Pending" => 0,
+                        "Confirmed" => 1,
+                        "Processing" => 2,
+                        "Completed" => 3,
+                        "Ready" => 4,
+                        "Cancelled" => 5,
+                        _ => -1
+                    };
 
-                if (targetStatus >= 0)
-                {
-                    query = query.Where(o => o.StatusId == targetStatus);
+                    if (targetStatus >= 0)
+                    {
+                        query = query.Where(o => o.StatusId == targetStatus);
+                    }
                 }
             }
 
@@ -1496,18 +1508,29 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
 
             if (!string.IsNullOrWhiteSpace(statusFilter) && !statusFilter.Equals("All", StringComparison.OrdinalIgnoreCase))
             {
-                int targetStatus = statusFilter switch
+                var today = DateTime.UtcNow.Date;
+                if (statusFilter.Equals("Due", StringComparison.OrdinalIgnoreCase))
                 {
-                    "Pending" => 0,
-                    "Completed" => 1,
-                    "Cancelled" => 2,
-                    "Overdue" => 3,
-                    _ => -1
-                };
+                    query = query.Where(f => f.StatusId == 0 || f.StatusId == 3);
+                }
+                else if (statusFilter.Equals("Overdue", StringComparison.OrdinalIgnoreCase))
+                {
+                    query = query.Where(f => f.StatusId == 3 || (f.StatusId == 0 && f.FollowUpDate.Date < today));
+                }
+                else
+                {
+                    int targetStatus = statusFilter switch
+                    {
+                        "Pending" => 0,
+                        "Completed" => 1,
+                        "Cancelled" => 2,
+                        _ => -1
+                    };
 
-                if (targetStatus >= 0)
-                {
-                    query = query.Where(f => f.StatusId == targetStatus);
+                    if (targetStatus >= 0)
+                    {
+                        query = query.Where(f => f.StatusId == targetStatus);
+                    }
                 }
             }
 

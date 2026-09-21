@@ -49,6 +49,15 @@ namespace CC.Forms.Staff.FollowUps
             Controls.Add(topPanel);
         }
 
+        public FollowUpListForm(string? initialFilter = null) : this()
+        {
+            if (!string.IsNullOrWhiteSpace(initialFilter))
+            {
+                activeFilter = initialFilter;
+                UpdateFilterPillStyles();
+            }
+        }
+
         public async Task InitializeDataAsync() => await RefreshGridAsync();
 
         private void InitializeComponent()
@@ -206,7 +215,7 @@ namespace CC.Forms.Staff.FollowUps
                 BackColor = Color.Transparent
             };
 
-            string[] filters = new[] { "All", "Pending", "Completed", "Cancelled" };
+            string[] filters = new[] { "All", "Due", "Overdue", "Pending", "Completed", "Cancelled" };
 
             foreach (var filterName in filters)
             {

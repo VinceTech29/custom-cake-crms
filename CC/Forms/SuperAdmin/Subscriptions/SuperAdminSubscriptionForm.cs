@@ -62,6 +62,22 @@ namespace CC.Forms.SuperAdmin.Subscriptions
             };
         }
 
+        public SuperAdminSubscriptionForm(int initialTab = 0, string? initialStatus = null) : this()
+        {
+            if (initialTab == 1)
+            {
+                SwitchTab(1);
+            }
+            if (!string.IsNullOrWhiteSpace(initialStatus))
+            {
+                int idx = cmbStatusFilter.FindStringExact(initialStatus);
+                if (idx >= 0)
+                {
+                    cmbStatusFilter.SelectedIndex = idx;
+                }
+            }
+        }
+
         private void InitializeComponent()
         {
             SuspendLayout();
@@ -344,7 +360,7 @@ namespace CC.Forms.SuperAdmin.Subscriptions
                 Width = 160,
                 Height = 36
             };
-            cmbStatusFilter.Items.AddRange(new object[] { "All Status", "Active", "Expired", "Suspended" });
+            cmbStatusFilter.Items.AddRange(new object[] { "All Status", "Active", "Expiring", "Expired", "Suspended" });
             cmbStatusFilter.SelectedIndex = 0;
             cmbStatusFilter.SelectedIndexChanged += async (s, e) => await RefreshCompanySubscriptionsAsync();
 
@@ -725,6 +741,8 @@ namespace CC.Forms.SuperAdmin.Subscriptions
             var filtered = _companySubsList;
             if (filter == "Active")
                 filtered = filtered.Where(s => s.StatusName.Equals("Active", StringComparison.OrdinalIgnoreCase) && s.EndDate >= DateTime.UtcNow).ToList();
+            else if (filter == "Expiring")
+                filtered = filtered.Where(s => s.EndDate >= DateTime.UtcNow && s.EndDate <= DateTime.UtcNow.AddDays(30)).ToList();
             else if (filter == "Expired")
                 filtered = filtered.Where(s => s.EndDate < DateTime.UtcNow || s.StatusName.Equals("Expired", StringComparison.OrdinalIgnoreCase)).ToList();
             else if (filter == "Suspended")

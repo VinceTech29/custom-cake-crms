@@ -31,9 +31,11 @@ namespace CC.Forms.Manager
             InitializationTask = LoadDashboardDataAsync();
         }
 
-        protected override void OnNavigationRequested(string key)
+        protected override void OnNavigationRequested(string key, object? filterContext)
         {
-            base.OnNavigationRequested(key);
+            base.OnNavigationRequested(key, filterContext);
+
+            string? filterStr = filterContext as string;
 
             switch (key)
             {
@@ -48,13 +50,13 @@ namespace CC.Forms.Manager
                     CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Staff.Inquiries.InquiryListForm());
                     break;
                 case "Orders":
-                    CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Staff.Orders.OrderListForm());
+                    CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Staff.Orders.OrderListForm(filterStr));
                     break;
                 case "Payments":
-                    CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Staff.Payments.PaymentListForm());
+                    CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Staff.Payments.PaymentListForm(filterStr));
                     break;
                 case "Follow-ups":
-                    CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Staff.FollowUps.FollowUpListForm());
+                    CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Staff.FollowUps.FollowUpListForm(filterStr));
                     break;
                 case "Reports":
                     CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Manager.Reports.ReportListForm());
@@ -200,7 +202,7 @@ namespace CC.Forms.Manager
                 Margin = new Padding(0, 0, 6, 6)
             };
             cardActive.SetBadge("In Progress", UITheme.StatusBlueFg, UITheme.StatusBlueBg);
-            cardActive.CardClicked += (s, e) => Navigate("Orders");
+            cardActive.CardClicked += (s, e) => Navigate("Orders", "Active");
 
             var cardReady = new DashboardKpiCard
             {
@@ -211,7 +213,7 @@ namespace CC.Forms.Manager
                 Margin = new Padding(6, 0, 6, 6)
             };
             cardReady.SetBadge("Ready", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
-            cardReady.CardClicked += (s, e) => Navigate("Orders");
+            cardReady.CardClicked += (s, e) => Navigate("Orders", "Ready");
 
             var cardCompleted = new DashboardKpiCard
             {
@@ -222,7 +224,7 @@ namespace CC.Forms.Manager
                 Margin = new Padding(6, 0, 6, 6)
             };
             cardCompleted.SetBadge("Fulfilled", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
-            cardCompleted.CardClicked += (s, e) => Navigate("Orders");
+            cardCompleted.CardClicked += (s, e) => Navigate("Orders", "Completed");
 
             var cardTodayDeliveries = new DashboardKpiCard
             {
@@ -233,7 +235,7 @@ namespace CC.Forms.Manager
                 Margin = new Padding(6, 0, 0, 6)
             };
             cardTodayDeliveries.SetBadge("Today", UITheme.PrimaryMauve, Color.FromArgb(245, 235, 240));
-            cardTodayDeliveries.CardClicked += (s, e) => Navigate("Orders");
+            cardTodayDeliveries.CardClicked += (s, e) => Navigate("Orders", "Today");
 
             // Row 2: Pipeline Value, CRM & Follow-ups
             var cardPipelineVal = new DashboardKpiCard
@@ -245,7 +247,7 @@ namespace CC.Forms.Manager
                 Margin = new Padding(0, 6, 6, 0)
             };
             cardPipelineVal.SetBadge("Pipeline", UITheme.PrimaryMauve, Color.FromArgb(245, 235, 240));
-            cardPipelineVal.CardClicked += (s, e) => Navigate("Orders");
+            cardPipelineVal.CardClicked += (s, e) => Navigate("Orders", "Active");
 
             var cardInquiries = new DashboardKpiCard
             {
@@ -267,7 +269,7 @@ namespace CC.Forms.Manager
                 Margin = new Padding(6, 6, 6, 0)
             };
             cardOverdue.SetBadge("Urgent", UITheme.StatusRedFg, UITheme.StatusRedBg);
-            cardOverdue.CardClicked += (s, e) => Navigate("Follow-ups");
+            cardOverdue.CardClicked += (s, e) => Navigate("Follow-ups", "Overdue");
 
             var cardCustomers = new DashboardKpiCard
             {

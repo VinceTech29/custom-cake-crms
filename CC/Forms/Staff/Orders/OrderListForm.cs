@@ -80,6 +80,15 @@ namespace CC.Forms.Staff.Orders
             Controls.Add(listContainerPanel);
         }
 
+        public OrderListForm(string? initialFilter = null) : this()
+        {
+            if (!string.IsNullOrWhiteSpace(initialFilter))
+            {
+                activeFilter = initialFilter;
+                UpdateFilterPillStyles();
+            }
+        }
+
         public async Task InitializeDataAsync() => await RefreshGridAsync();
 
         private void InitializeComponent()
@@ -249,7 +258,7 @@ namespace CC.Forms.Staff.Orders
                 Margin = new Padding(0, 2, 0, 0)
             };
 
-            string[] filters = new[] { "All", "Pending", "Confirmed", "Processing", "Ready", "Completed", "Cancelled" };
+            string[] filters = new[] { "All", "Active", "Today", "Pending", "Confirmed", "Processing", "Ready", "Completed", "Cancelled" };
 
             foreach (var filterName in filters)
             {

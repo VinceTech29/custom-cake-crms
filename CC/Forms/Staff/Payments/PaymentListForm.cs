@@ -51,6 +51,15 @@ namespace CC.Forms.Staff.Payments
             Controls.Add(topPanel);
         }
 
+        public PaymentListForm(string? initialFilter = null) : this()
+        {
+            if (!string.IsNullOrWhiteSpace(initialFilter))
+            {
+                activeFilter = initialFilter;
+                UpdateFilterPillStyles();
+            }
+        }
+
         public async Task InitializeDataAsync() => await RefreshGridAsync();
 
         private void InitializeComponent()

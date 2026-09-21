@@ -44,9 +44,11 @@ namespace CC.Forms.SuperAdmin
             InitializationTask = LoadDashboardDataAsync();
         }
 
-        protected override void OnNavigationRequested(string key)
+        protected override void OnNavigationRequested(string key, object? filterContext)
         {
-            base.OnNavigationRequested(key);
+            base.OnNavigationRequested(key, filterContext);
+
+            string? filterStr = filterContext as string;
 
             switch (key)
             {
@@ -58,7 +60,9 @@ namespace CC.Forms.SuperAdmin
                     ViewHost.ShowFormInPanel(MainPanel, new BusinessListForm());
                     break;
                 case "Subscriptions":
-                    ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.SuperAdmin.Subscriptions.SuperAdminSubscriptionForm());
+                    int targetTab = filterStr == "Plans" ? 0 : (string.IsNullOrWhiteSpace(filterStr) ? 0 : 1);
+                    string? statusFilter = (filterStr == "Active" || filterStr == "Expiring") ? filterStr : null;
+                    ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.SuperAdmin.Subscriptions.SuperAdminSubscriptionForm(targetTab, statusFilter));
                     break;
                 case "Terms & Conditions":
                     ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.SuperAdmin.Terms.TermsAndConditionsForm());
@@ -237,7 +241,7 @@ namespace CC.Forms.SuperAdmin
                 Margin = new Padding(0, 6, 6, 0)
             };
             cardSubs.SetBadge("Platform", UITheme.PrimaryMauve, Color.FromArgb(245, 235, 240));
-            cardSubs.CardClicked += (s, e) => Navigate("Subscriptions");
+            cardSubs.CardClicked += (s, e) => Navigate("Subscriptions", "Active");
 
             var cardExpiring = new DashboardKpiCard
             {
@@ -248,7 +252,7 @@ namespace CC.Forms.SuperAdmin
                 Margin = new Padding(6, 6, 6, 0)
             };
             cardExpiring.SetBadge("Renewal Alert", UITheme.StatusYellowFg, UITheme.StatusYellowBg);
-            cardExpiring.CardClicked += (s, e) => Navigate("Subscriptions");
+            cardExpiring.CardClicked += (s, e) => Navigate("Subscriptions", "Expiring");
 
             var cardMrr = new DashboardKpiCard
             {
@@ -259,7 +263,7 @@ namespace CC.Forms.SuperAdmin
                 Margin = new Padding(6, 6, 6, 0)
             };
             cardMrr.SetBadge("MRR", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
-            cardMrr.CardClicked += (s, e) => Navigate("Subscriptions");
+            cardMrr.CardClicked += (s, e) => Navigate("Subscriptions", "Plans");
 
             var cardTerms = new DashboardKpiCard
             {

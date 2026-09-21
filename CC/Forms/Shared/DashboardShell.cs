@@ -246,18 +246,23 @@ namespace CC.Forms.Shared
 
         public string CurrentActiveKey => _currentActiveKey;
 
-        public void Navigate(string key)
+        public void Navigate(string key, object? filterContext = null)
         {
             if (string.IsNullOrWhiteSpace(key)) return;
 
-            // Prevent redundant re-navigation to the currently active view
-            if (string.Equals(_currentActiveKey, key, StringComparison.OrdinalIgnoreCase))
+            // Prevent redundant re-navigation to the currently active view if no filter context is provided
+            if (string.Equals(_currentActiveKey, key, StringComparison.OrdinalIgnoreCase) && filterContext == null)
             {
                 return;
             }
 
             _currentActiveKey = key;
             SidebarCtrl.SetActiveItem(key);
+            OnNavigationRequested(key, filterContext);
+        }
+
+        protected virtual void OnNavigationRequested(string key, object? filterContext)
+        {
             OnNavigationRequested(key);
         }
 

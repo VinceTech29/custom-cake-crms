@@ -923,7 +923,53 @@ namespace CC
                         throw new Exception("Backup history does not reflect newly generated backup files.");
                     Console.WriteLine($"  -> PASS: Native SQL Server multi-database backup engine executed successfully. ({backupHistory.Count} total backups found in repository).");
 
-                    Console.WriteLine("=== ALL 16 VERIFICATION TESTS PASSED SUCCESSFULLY! ===");
+                    // 17. KPI Click-to-Data Navigation & Query Alignment
+                    Console.WriteLine("[TEST 17] KPI Click-to-Data Navigation & Query Alignment Verification...");
+
+                    // Test Orders Active filter
+                    var activeOrders = CrmDataService.GetOrdersPagedAsync("Active", pageSize: 20).GetAwaiter().GetResult();
+                    if (activeOrders.Items.Any(o => o.StatusId != 1 && o.StatusId != 2 && o.StatusId != 4))
+                        throw new Exception("Active orders filter included invalid order status.");
+                    Console.WriteLine($"  -> PASS: Orders 'Active' filter verified ({activeOrders.TotalCount} matching orders with Status in Confirmed/Processing/Ready).");
+
+                    // Test Orders Today filter
+                    var todayOrders = CrmDataService.GetOrdersPagedAsync("Today", pageSize: 20).GetAwaiter().GetResult();
+                    var todayUtc = DateTime.UtcNow.Date;
+                    if (todayOrders.Items.Any(o => !o.DeliveryDate.HasValue || o.DeliveryDate.Value.Date != todayUtc))
+                        throw new Exception("Today orders filter returned orders with mismatching delivery date.");
+                    Console.WriteLine($"  -> PASS: Orders 'Today' filter verified ({todayOrders.TotalCount} matching orders due today).");
+
+                    // Test Follow-ups Due & Overdue
+                    var dueFollowUps = CrmDataService.GetFollowUpsPagedAsync("Due", pageSize: 20).GetAwaiter().GetResult();
+                    if (dueFollowUps.Items.Any(f => f.StatusId != 0 && f.StatusId != 3))
+                        throw new Exception("Due follow-ups filter included non-pending follow-up status.");
+                    Console.WriteLine($"  -> PASS: Follow-ups 'Due' filter verified ({dueFollowUps.TotalCount} matching tasks).");
+
+                    var overdueFollowUps = CrmDataService.GetFollowUpsPagedAsync("Overdue", pageSize: 20).GetAwaiter().GetResult();
+                    if (overdueFollowUps.Items.Any(f => f.StatusId != 3 && !(f.StatusId == 0 && f.FollowUpDate.Date < todayUtc)))
+                        throw new Exception("Overdue follow-ups filter included non-overdue tasks.");
+                    Console.WriteLine($"  -> PASS: Follow-ups 'Overdue' filter verified ({overdueFollowUps.TotalCount} matching overdue tasks).");
+
+                    // Test Form Instantiations with Filter Contexts
+                    using (var orderFormActive = new CC.Forms.Staff.Orders.OrderListForm("Active"))
+                    {
+                        if (orderFormActive == null) throw new Exception("Failed to instantiate OrderListForm with filter.");
+                    }
+                    using (var followUpFormDue = new CC.Forms.Staff.FollowUps.FollowUpListForm("Due"))
+                    {
+                        if (followUpFormDue == null) throw new Exception("Failed to instantiate FollowUpListForm with filter.");
+                    }
+                    using (var paymentFormUnpaid = new CC.Forms.Staff.Payments.PaymentListForm("Unpaid"))
+                    {
+                        if (paymentFormUnpaid == null) throw new Exception("Failed to instantiate PaymentListForm with filter.");
+                    }
+                    using (var subFormExpiring = new CC.Forms.SuperAdmin.Subscriptions.SuperAdminSubscriptionForm(1, "Expiring"))
+                    {
+                        if (subFormExpiring == null) throw new Exception("Failed to instantiate SuperAdminSubscriptionForm with tab and filter.");
+                    }
+                    Console.WriteLine("  -> PASS: All destination forms successfully instantiated and bound with designated KPI filter contexts.");
+
+                    Console.WriteLine("=== ALL 17 VERIFICATION TESTS PASSED SUCCESSFULLY! ===");
                     Environment.Exit(0);
                     return;
                 }

@@ -29,9 +29,11 @@ namespace CC.Forms.Staff
             InitializationTask = LoadDashboardDataAsync();
         }
 
-        protected override void OnNavigationRequested(string key)
+        protected override void OnNavigationRequested(string key, object? filterContext)
         {
-            base.OnNavigationRequested(key);
+            base.OnNavigationRequested(key, filterContext);
+
+            string? filterStr = filterContext as string;
 
             switch (key)
             {
@@ -46,13 +48,13 @@ namespace CC.Forms.Staff
                     CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Staff.Inquiries.InquiryListForm());
                     break;
                 case "Orders":
-                    CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Staff.Orders.OrderListForm());
+                    CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Staff.Orders.OrderListForm(filterStr));
                     break;
                 case "Payments":
-                    CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Staff.Payments.PaymentListForm());
+                    CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Staff.Payments.PaymentListForm(filterStr));
                     break;
                 case "Follow-ups":
-                    CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Staff.FollowUps.FollowUpListForm());
+                    CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Staff.FollowUps.FollowUpListForm(filterStr));
                     break;
                 case "Retention & Campaigns":
                     MessageBox.Show("You do not have permission to access this feature.", "Access Denied", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -187,7 +189,7 @@ namespace CC.Forms.Staff
                 Margin = new Padding(0, 0, 6, 6)
             };
             cardDue.SetBadge("Schedule", UITheme.StatusYellowFg, UITheme.StatusYellowBg);
-            cardDue.CardClicked += (s, e) => Navigate("Follow-ups");
+            cardDue.CardClicked += (s, e) => Navigate("Follow-ups", "Due");
 
             var cardOverdue = new DashboardKpiCard
             {
@@ -198,7 +200,7 @@ namespace CC.Forms.Staff
                 Margin = new Padding(6, 0, 6, 6)
             };
             cardOverdue.SetBadge("Urgent", UITheme.StatusRedFg, UITheme.StatusRedBg);
-            cardOverdue.CardClicked += (s, e) => Navigate("Follow-ups");
+            cardOverdue.CardClicked += (s, e) => Navigate("Follow-ups", "Overdue");
 
             var cardInquiries = new DashboardKpiCard
             {
@@ -220,7 +222,7 @@ namespace CC.Forms.Staff
                 Margin = new Padding(6, 0, 0, 6)
             };
             cardTodayDue.SetBadge("Today", UITheme.PrimaryMauve, Color.FromArgb(245, 235, 240));
-            cardTodayDue.CardClicked += (s, e) => Navigate("Orders");
+            cardTodayDue.CardClicked += (s, e) => Navigate("Orders", "Today");
 
             // Row 2: Production Stages & Client Base
             var cardProcessing = new DashboardKpiCard
@@ -232,7 +234,7 @@ namespace CC.Forms.Staff
                 Margin = new Padding(0, 6, 6, 0)
             };
             cardProcessing.SetBadge("Production", UITheme.StatusBlueFg, UITheme.StatusBlueBg);
-            cardProcessing.CardClicked += (s, e) => Navigate("Orders");
+            cardProcessing.CardClicked += (s, e) => Navigate("Orders", "Processing");
 
             var cardReady = new DashboardKpiCard
             {
@@ -243,7 +245,7 @@ namespace CC.Forms.Staff
                 Margin = new Padding(6, 6, 6, 0)
             };
             cardReady.SetBadge("Ready", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
-            cardReady.CardClicked += (s, e) => Navigate("Orders");
+            cardReady.CardClicked += (s, e) => Navigate("Orders", "Ready");
 
             var cardCompleted = new DashboardKpiCard
             {
@@ -254,7 +256,7 @@ namespace CC.Forms.Staff
                 Margin = new Padding(6, 6, 6, 0)
             };
             cardCompleted.SetBadge("Fulfilled", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
-            cardCompleted.CardClicked += (s, e) => Navigate("Orders");
+            cardCompleted.CardClicked += (s, e) => Navigate("Orders", "Completed");
 
             var cardCustomers = new DashboardKpiCard
             {

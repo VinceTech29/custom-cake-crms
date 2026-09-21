@@ -41,9 +41,11 @@ namespace CC.Forms.Admin
             InitializationTask = LoadDashboardDataAsync();
         }
 
-        protected override void OnNavigationRequested(string key)
+        protected override void OnNavigationRequested(string key, object? filterContext)
         {
-            base.OnNavigationRequested(key);
+            base.OnNavigationRequested(key, filterContext);
+
+            string? filterStr = filterContext as string;
 
             switch (key)
             {
@@ -58,13 +60,13 @@ namespace CC.Forms.Admin
                     ViewHost.ShowFormInPanel(MainPanel, new InquiryListForm());
                     break;
                 case "Orders":
-                    ViewHost.ShowFormInPanel(MainPanel, new OrderListForm());
+                    ViewHost.ShowFormInPanel(MainPanel, new OrderListForm(filterStr));
                     break;
                 case "Payments":
-                    ViewHost.ShowFormInPanel(MainPanel, new PaymentListForm());
+                    ViewHost.ShowFormInPanel(MainPanel, new PaymentListForm(filterStr));
                     break;
                 case "Follow-ups":
-                    ViewHost.ShowFormInPanel(MainPanel, new FollowUpListForm());
+                    ViewHost.ShowFormInPanel(MainPanel, new FollowUpListForm(filterStr));
                     break;
                 case "Reports":
                     ViewHost.ShowFormInPanel(MainPanel, new ReportListForm());
@@ -206,7 +208,7 @@ namespace CC.Forms.Admin
                 Margin = new Padding(0, 0, 6, 6)
             };
             cardRevenue.SetBadge("Collected", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
-            cardRevenue.CardClicked += (s, e) => Navigate("Payments");
+            cardRevenue.CardClicked += (s, e) => Navigate("Payments", "Fully Paid");
 
             var cardOutstanding = new DashboardKpiCard
             {
@@ -217,7 +219,7 @@ namespace CC.Forms.Admin
                 Margin = new Padding(6, 0, 6, 6)
             };
             cardOutstanding.SetBadge("Receivables", UITheme.StatusYellowFg, UITheme.StatusYellowBg);
-            cardOutstanding.CardClicked += (s, e) => Navigate("Payments");
+            cardOutstanding.CardClicked += (s, e) => Navigate("Payments", "Unpaid");
 
             var cardAov = new DashboardKpiCard
             {
@@ -273,7 +275,7 @@ namespace CC.Forms.Admin
                 Margin = new Padding(6, 6, 6, 0)
             };
             cardActiveOrders.SetBadge("Kitchen", UITheme.StatusYellowFg, UITheme.StatusYellowBg);
-            cardActiveOrders.CardClicked += (s, e) => Navigate("Orders");
+            cardActiveOrders.CardClicked += (s, e) => Navigate("Orders", "Processing");
 
             var cardSeats = new DashboardKpiCard
             {
