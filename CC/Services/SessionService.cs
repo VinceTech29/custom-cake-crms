@@ -250,5 +250,11 @@ namespace CC.Services
         public string LastName { get; set; } = string.Empty;
         public string Role { get; set; } = string.Empty;
         public int CompanyId { get; set; }
+        public string Email { get; set; } = string.Empty;
+        public string CompanyName { get; set; } = string.Empty;
+        public string? TenantServer { get; set; }
+        public string? TenantDatabase { get; set; }
+
+        public string FullName => $"{FirstName} {LastName}".Trim();
     }
 }

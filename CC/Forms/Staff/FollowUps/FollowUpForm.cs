@@ -10,7 +10,7 @@ using CC.Services;
 
 namespace CC.Forms.Staff.FollowUps
 {
-git    public class FollowUpForm : Form
+    public class FollowUpForm : Form
     {
         private static readonly Color ColorModalBg = Color.White;
         private static readonly Color ColorFieldBg = Color.FromArgb(239, 230, 222);       // #EFE6DE

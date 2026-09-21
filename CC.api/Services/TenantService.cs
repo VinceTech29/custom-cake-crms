@@ -1,6 +1,11 @@
+using System;
 using System.Collections.Concurrent;
+using System.Linq;
 using CC.infrastructure.Data;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace CC.api.Services
 {
@@ -29,10 +34,7 @@ namespace CC.api.Services
         public int? GetCurrentCompanyId()
         {
             var httpContext = _httpContextAccessor.HttpContext;
-            if (httpContext == null)
-            {
-                return null;
-            }
+            if (httpContext == null) return null;
 
             // Read X-Company-Id from request headers
             if (httpContext.Request.Headers.TryGetValue("X-Company-Id", out var companyIdHeader))

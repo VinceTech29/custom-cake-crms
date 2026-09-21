@@ -8,7 +8,7 @@ builder.Logging.AddConsole();
 builder.Logging.AddDebug();
 
 // ========================================
-// Database & Multi-Tenant Configuration
+// Database Configuration & Multi-Tenancy
 // ========================================
 builder.Services.AddHttpContextAccessor();
 

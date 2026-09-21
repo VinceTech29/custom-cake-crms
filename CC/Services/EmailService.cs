@@ -211,9 +211,15 @@ SMTP_ENABLE_SSL={config.EnableSsl.ToString().ToLower()}
 
             try
             {
+                string password = config.Password?.Trim() ?? string.Empty;
+                if (config.Host.Contains("gmail", StringComparison.OrdinalIgnoreCase))
+                {
+                    password = password.Replace(" ", "");
+                }
+
                 using var client = new SmtpClient(config.Host, config.Port)
                 {
-                    Credentials = new NetworkCredential(config.Username, config.Password),
+                    Credentials = new NetworkCredential(config.Username, password),
                     EnableSsl = config.EnableSsl,
                     Timeout = 8000
                 };
@@ -271,9 +277,15 @@ SMTP_ENABLE_SSL={config.EnableSsl.ToString().ToLower()}
                     "Please configure your email settings (Host, Port, Username, App Password) or enable Simulation Mode.");
             }
 
+            string password = config.Password?.Trim() ?? string.Empty;
+            if (config.Host.Contains("gmail", StringComparison.OrdinalIgnoreCase))
+            {
+                password = password.Replace(" ", "");
+            }
+
             using var client = new SmtpClient(config.Host, config.Port)
             {
-                Credentials = new NetworkCredential(config.Username, config.Password),
+                Credentials = new NetworkCredential(config.Username, password),
                 EnableSsl = config.EnableSsl,
                 Timeout = 15000 // 15 seconds
             };

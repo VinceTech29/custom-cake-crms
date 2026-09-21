@@ -225,6 +225,29 @@ namespace CC.Controls
             AddNavItemInternal(_navFlow, key, iconGlyph);
         }
 
+        public void ResetNavItems(IEnumerable<(string Key, string Glyph)> items)
+        {
+            if (_navFlow == null) return;
+
+            _navFlow.Controls.Clear();
+            _navButtons.Clear();
+
+            string firstKey = string.Empty;
+            foreach (var item in items)
+            {
+                if (string.IsNullOrEmpty(firstKey)) firstKey = item.Key;
+                AddNavItemInternal(_navFlow, item.Key, item.Glyph);
+            }
+
+            if (!string.IsNullOrEmpty(firstKey))
+            {
+                SetActiveItem(firstKey);
+            }
+        }
+
+        public bool HasNavItem(string key) => _navButtons.ContainsKey(key);
+        public IReadOnlyCollection<string> NavItemKeys => _navButtons.Keys.ToList().AsReadOnly();
+
         private void AddNavItemInternal(FlowLayoutPanel flow, string key, string iconGlyph)
         {
             var btn = new Button

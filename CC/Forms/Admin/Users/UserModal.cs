@@ -416,7 +416,7 @@ namespace CC.Forms.Admin.Users
                 {
                     var newUser = new SystemUser
                     {
-                        CompanyId = CrmDataService.DefaultCompanyId,
+                        CompanyId = SessionService.CurrentUser?.CompanyId > 0 ? SessionService.CurrentUser.CompanyId : CrmDataService.DefaultCompanyId,
                         RoleId = roleId,
                         FirstName = first,
                         LastName = last,

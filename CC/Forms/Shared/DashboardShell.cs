@@ -20,7 +20,7 @@ namespace CC.Forms.Shared
         protected Control Sidebar => SidebarCtrl;
         public Panel MainPanel { get; private set; } = null!;
         protected Panel TopHeaderBar { get; private set; } = null!;
-        protected SidebarControl SidebarCtrl { get; private set; } = null!;
+        public SidebarControl SidebarCtrl { get; private set; } = null!;
 
         private Label lblPageTitle = null!;
 

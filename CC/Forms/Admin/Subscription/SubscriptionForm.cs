@@ -35,6 +35,7 @@ namespace CC.Forms.Admin.Subscription
         private Label lblPaymentMethod = null!;
         private Label lblSeatCount = null!;
         private Panel seatProgressBar = null!;
+        private Label lblFeatureSeats = null!;
 
         private Button btnRenew = null!;
         private Button btnUpgradeDowngrade = null!;
@@ -150,40 +151,26 @@ namespace CC.Forms.Admin.Subscription
             currentPlanCard = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 225,
+                Height = 224,
                 BackColor = Color.White,
-                Padding = new Padding(24, 20, 24, 20),
-                Margin = new Padding(0, 0, 0, 20)
+                Padding = new Padding(28, 20, 28, 20),
+                Margin = new Padding(0, 0, 0, 16)
             };
 
             currentPlanCard.Paint += (s, e) =>
             {
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 using var pen = new Pen(UITheme.BorderColor, 1f);
-                e.Graphics.DrawRoundedRectangle(pen, new Rectangle(0, 0, currentPlanCard.Width - 1, currentPlanCard.Height - 1), 14);
+                e.Graphics.DrawRoundedRectangle(pen, new Rectangle(0, 0, currentPlanCard.Width - 1, currentPlanCard.Height - 1), 12);
             };
-            currentPlanCard.ApplyRoundedRegion(14);
+            currentPlanCard.ApplyRoundedRegion(12);
 
             // Header Row: Left plan name + pill, Right action buttons
-            var headerRow = new TableLayoutPanel
+            var headerRow = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 65,
-                ColumnCount = 2,
-                RowCount = 1,
-                BackColor = Color.Transparent
-            };
-            headerRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55F));
-            headerRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45F));
-            headerRow.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-
-            var planTitleStack = new FlowLayoutPanel
-            {
-                FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = false,
-                AutoSize = true,
-                Dock = DockStyle.Fill,
-                BackColor = Color.Transparent
+                Height = 58,
+                BackColor = Color.White
             };
 
             var planTitleColumn = new FlowLayoutPanel
@@ -191,7 +178,8 @@ namespace CC.Forms.Admin.Subscription
                 FlowDirection = FlowDirection.TopDown,
                 WrapContents = false,
                 AutoSize = true,
-                BackColor = Color.Transparent
+                Dock = DockStyle.Left,
+                BackColor = Color.White
             };
 
             var lblBadgeHeader = new Label
@@ -200,7 +188,8 @@ namespace CC.Forms.Admin.Subscription
                 Font = new Font(UITheme.FontSans, 7.5F, FontStyle.Bold),
                 ForeColor = UITheme.TextMuted,
                 AutoSize = true,
-                Margin = new Padding(0, 0, 0, 3)
+                Margin = new Padding(0, 0, 0, 2),
+                BackColor = Color.White
             };
 
             var namePillRow = new FlowLayoutPanel
@@ -208,7 +197,7 @@ namespace CC.Forms.Admin.Subscription
                 FlowDirection = FlowDirection.LeftToRight,
                 WrapContents = false,
                 AutoSize = true,
-                BackColor = Color.Transparent
+                BackColor = Color.White
             };
 
             lblPlanName = new Label
@@ -217,12 +206,13 @@ namespace CC.Forms.Admin.Subscription
                 Font = new Font(UITheme.FontSerif, 18F, FontStyle.Bold),
                 ForeColor = UITheme.TextDark,
                 AutoSize = true,
-                Margin = new Padding(0, 0, 10, 0)
+                Margin = new Padding(0, 0, 12, 0),
+                BackColor = Color.White
             };
 
             var activePill = new Panel
             {
-                Size = new Size(72, 24),
+                Size = new Size(74, 24),
                 BackColor = Color.FromArgb(235, 247, 238),
                 Margin = new Padding(0, 4, 0, 0)
             };
@@ -241,15 +231,15 @@ namespace CC.Forms.Admin.Subscription
 
             planTitleColumn.Controls.Add(lblBadgeHeader);
             planTitleColumn.Controls.Add(namePillRow);
-            planTitleStack.Controls.Add(planTitleColumn);
 
             // Right action buttons: Renew Subscription & Upgrade / Downgrade
             var planBtnStack = new FlowLayoutPanel
             {
                 FlowDirection = FlowDirection.RightToLeft,
                 WrapContents = false,
-                Dock = DockStyle.Fill,
-                BackColor = Color.Transparent,
+                Dock = DockStyle.Right,
+                AutoSize = true,
+                BackColor = Color.White,
                 Padding = new Padding(0, 4, 0, 0)
             };
 
@@ -257,49 +247,49 @@ namespace CC.Forms.Admin.Subscription
             {
                 Text = "Upgrade / Downgrade",
                 Height = 38,
-                Width = 170,
+                Width = 175,
                 FlatStyle = FlatStyle.Flat,
                 Cursor = Cursors.Hand,
                 Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold),
                 BackColor = UITheme.PrimaryMauve,
                 ForeColor = Color.White,
-                Margin = new Padding(8, 0, 0, 0)
+                Margin = new Padding(10, 0, 0, 0)
             };
             btnUpgradeDowngrade.FlatAppearance.BorderSize = 0;
-            btnUpgradeDowngrade.ApplyRoundedRegion(10);
+            btnUpgradeDowngrade.ApplyRoundedRegion(8);
             btnUpgradeDowngrade.Click += async (s, e) => await PromptUpgradeDowngradeAsync();
 
             btnRenew = new Button
             {
                 Text = "Renew Subscription",
                 Height = 38,
-                Width = 155,
+                Width = 160,
                 FlatStyle = FlatStyle.Flat,
                 Cursor = Cursors.Hand,
                 Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold),
                 BackColor = Color.White,
                 ForeColor = UITheme.TextDark,
-                Margin = new Padding(8, 0, 0, 0)
+                Margin = new Padding(0, 0, 0, 0)
             };
             btnRenew.FlatAppearance.BorderColor = UITheme.BorderColor;
-            btnRenew.ApplyRoundedRegion(10);
+            btnRenew.ApplyRoundedRegion(8);
             btnRenew.Click += async (s, e) => await PromptRenewSubscriptionAsync();
 
             planBtnStack.Controls.Add(btnUpgradeDowngrade);
             planBtnStack.Controls.Add(btnRenew);
 
-            headerRow.Controls.Add(planTitleStack, 0, 0);
-            headerRow.Controls.Add(planBtnStack, 1, 0);
+            headerRow.Controls.Add(planTitleColumn);
+            headerRow.Controls.Add(planBtnStack);
 
             // Details Row: Price, Renewal Date, Payment Method
             var detailsRow = new FlowLayoutPanel
             {
                 Dock = DockStyle.Top,
-                Height = 44,
+                Height = 32,
                 FlowDirection = FlowDirection.LeftToRight,
                 WrapContents = false,
-                BackColor = Color.Transparent,
-                Padding = new Padding(0, 8, 0, 0)
+                BackColor = Color.White,
+                Padding = new Padding(0, 6, 0, 0)
             };
 
             lblPlanPrice = new Label
@@ -308,7 +298,8 @@ namespace CC.Forms.Admin.Subscription
                 Font = new Font(UITheme.FontSans, 10F, FontStyle.Bold),
                 ForeColor = UITheme.TextDark,
                 AutoSize = true,
-                Margin = new Padding(0, 0, 24, 0)
+                Margin = new Padding(0, 0, 28, 0),
+                BackColor = Color.White
             };
 
             lblRenewalDate = new Label
@@ -317,7 +308,8 @@ namespace CC.Forms.Admin.Subscription
                 Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Regular),
                 ForeColor = UITheme.TextMuted,
                 AutoSize = true,
-                Margin = new Padding(0, 0, 24, 0)
+                Margin = new Padding(0, 0, 28, 0),
+                BackColor = Color.White
             };
 
             lblPaymentMethod = new Label
@@ -326,48 +318,53 @@ namespace CC.Forms.Admin.Subscription
                 Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Regular),
                 ForeColor = UITheme.TextMuted,
                 AutoSize = true,
-                Margin = Padding.Empty
+                Margin = Padding.Empty,
+                BackColor = Color.White
             };
 
             detailsRow.Controls.Add(lblPlanPrice);
             detailsRow.Controls.Add(lblRenewalDate);
             detailsRow.Controls.Add(lblPaymentMethod);
 
-            // Divider Line
+            // Divider Line Container
+            var dividerContainer = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 22,
+                BackColor = Color.White,
+                Padding = new Padding(0, 10, 0, 10)
+            };
             var divider = new Panel
             {
                 Dock = DockStyle.Top,
                 Height = 1,
-                BackColor = Color.FromArgb(242, 238, 234),
-                Margin = new Padding(0, 8, 0, 12)
+                BackColor = Color.FromArgb(242, 238, 234)
             };
+            dividerContainer.Controls.Add(divider);
 
-            // Seat Usage Progress Bar Row
-            var seatPanel = new Panel
+            // Seat Usage Progress Bar Section
+            var seatSectionPanel = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 60,
-                BackColor = Color.Transparent,
-                Padding = new Padding(0, 10, 0, 0)
+                Height = 44,
+                BackColor = Color.White
             };
 
-            var seatHeader = new TableLayoutPanel
+            var seatHeader = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 22,
-                ColumnCount = 2,
-                RowCount = 1,
-                BackColor = Color.Transparent
+                Height = 20,
+                BackColor = Color.White
             };
-            seatHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-            seatHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
 
             var lblSeatLabel = new Label
             {
                 Text = "Seat Usage",
                 Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold),
                 ForeColor = UITheme.TextDark,
-                AutoSize = true
+                Dock = DockStyle.Left,
+                AutoSize = true,
+                BackColor = Color.White
             };
 
             lblSeatCount = new Label
@@ -377,19 +374,19 @@ namespace CC.Forms.Admin.Subscription
                 ForeColor = UITheme.TextMuted,
                 Dock = DockStyle.Right,
                 TextAlign = ContentAlignment.MiddleRight,
-                AutoSize = true
+                AutoSize = true,
+                BackColor = Color.White
             };
 
-            seatHeader.Controls.Add(lblSeatLabel, 0, 0);
-            seatHeader.Controls.Add(lblSeatCount, 1, 0);
-            seatPanel.Controls.Add(seatHeader);
+            seatHeader.Controls.Add(lblSeatLabel);
+            seatHeader.Controls.Add(lblSeatCount);
 
             seatProgressBar = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 10,
+                Height = 8,
                 BackColor = Color.FromArgb(240, 235, 230),
-                Margin = new Padding(0, 6, 0, 0)
+                Margin = new Padding(0, 8, 0, 0)
             };
             seatProgressBar.Paint += (s, e) =>
             {
@@ -402,15 +399,18 @@ namespace CC.Forms.Admin.Subscription
                 if (fillWidth > 0)
                 {
                     using var brush = new SolidBrush(UITheme.PrimaryMauve);
-                    e.Graphics.FillRoundedRectangle(brush, new Rectangle(0, 0, fillWidth, seatProgressBar.Height), 5);
+                    e.Graphics.FillRoundedRectangle(brush, new Rectangle(0, 0, fillWidth, seatProgressBar.Height), 4);
                 }
             };
-            seatProgressBar.ApplyRoundedRegion(5);
-            seatPanel.Controls.Add(seatProgressBar);
+            seatProgressBar.ApplyRoundedRegion(4);
 
-            // Add in reverse order so headerRow is docked at top, then detailsRow, divider, seatPanel
-            currentPlanCard.Controls.Add(seatPanel);
-            currentPlanCard.Controls.Add(divider);
+            // Add progress bar first, then header so header docks at top, progress bar below
+            seatSectionPanel.Controls.Add(seatProgressBar);
+            seatSectionPanel.Controls.Add(seatHeader);
+
+            // Add in reverse docking order so headerRow is at top, detailsRow below, divider, then seatSectionPanel
+            currentPlanCard.Controls.Add(seatSectionPanel);
+            currentPlanCard.Controls.Add(dividerContainer);
             currentPlanCard.Controls.Add(detailsRow);
             currentPlanCard.Controls.Add(headerRow);
         }
@@ -423,38 +423,48 @@ namespace CC.Forms.Admin.Subscription
             featuresCard = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 190,
+                Height = 215,
                 BackColor = Color.White,
-                Padding = new Padding(24, 20, 24, 20),
-                Margin = new Padding(0, 16, 0, 16)
+                Padding = new Padding(28, 20, 28, 20),
+                Margin = new Padding(0, 0, 0, 16)
             };
 
             featuresCard.Paint += (s, e) =>
             {
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 using var pen = new Pen(UITheme.BorderColor, 1f);
-                e.Graphics.DrawRoundedRectangle(pen, new Rectangle(0, 0, featuresCard.Width - 1, featuresCard.Height - 1), 14);
+                e.Graphics.DrawRoundedRectangle(pen, new Rectangle(0, 0, featuresCard.Width - 1, featuresCard.Height - 1), 12);
             };
-            featuresCard.ApplyRoundedRegion(14);
+            featuresCard.ApplyRoundedRegion(12);
 
             var lblSectionTitle = new Label
             {
                 Text = "What's included in your plan",
                 Dock = DockStyle.Top,
-                Height = 28,
+                Height = 32,
                 Font = new Font(UITheme.FontSerif, 14F, FontStyle.Bold),
-                ForeColor = UITheme.TextDark
+                ForeColor = UITheme.TextDark,
+                BackColor = Color.White,
+                TextAlign = ContentAlignment.MiddleLeft
             };
-            featuresCard.Controls.Add(lblSectionTitle);
 
-            // 2-Column checklist table
+            var gridContainer = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.White,
+                Padding = new Padding(0, 10, 0, 0)
+            };
+
+            // 2-Column checklist table (zero border lines)
             var gridTable = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 2,
                 RowCount = 4,
-                BackColor = Color.Transparent,
-                Padding = new Padding(0, 10, 0, 0)
+                BackColor = Color.White,
+                CellBorderStyle = TableLayoutPanelCellBorderStyle.None,
+                Margin = Padding.Empty,
+                Padding = Padding.Empty
             };
             gridTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
             gridTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
@@ -478,28 +488,33 @@ namespace CC.Forms.Admin.Subscription
             for (int r = 0; r < 4; r++)
             {
                 gridTable.RowStyles.Add(new RowStyle(SizeType.Percent, 25F));
-                gridTable.Controls.Add(CreateCheckItem(col1Features[r]), 0, r);
-                gridTable.Controls.Add(CreateCheckItem(col2Features[r]), 1, r);
+                gridTable.Controls.Add(CreateCheckItem(col1Features[r], r == 0), 0, r);
+                gridTable.Controls.Add(CreateCheckItem(col2Features[r], false), 1, r);
             }
 
-            featuresCard.Controls.Add(gridTable);
+            gridContainer.Controls.Add(gridTable);
+
+            // Add container first, then title so title docks cleanly at top without overlapping
+            featuresCard.Controls.Add(gridContainer);
+            featuresCard.Controls.Add(lblSectionTitle);
         }
 
-        private Panel CreateCheckItem(string text)
+        private Panel CreateCheckItem(string text, bool isFirstSeatItem)
         {
             var pnl = new Panel
             {
                 Dock = DockStyle.Fill,
-                BackColor = Color.Transparent
+                BackColor = Color.White
             };
 
             var icon = new Label
             {
                 Text = "\uE73E",
-                Font = new Font("Segoe MDL2 Assets", 10F, FontStyle.Bold),
+                Font = new Font("Segoe MDL2 Assets", 10.5F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(46, 133, 90),
-                Location = new Point(0, 3),
-                Size = new Size(20, 20)
+                Location = new Point(0, 5),
+                Size = new Size(22, 20),
+                BackColor = Color.White
             };
 
             var lbl = new Label
@@ -507,10 +522,16 @@ namespace CC.Forms.Admin.Subscription
                 Text = text,
                 Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Regular),
                 ForeColor = UITheme.TextDark,
-                Location = new Point(24, 2),
+                Location = new Point(26, 4),
                 AutoSize = true,
+                BackColor = Color.White,
                 UseMnemonic = false
             };
+
+            if (isFirstSeatItem)
+            {
+                lblFeatureSeats = lbl;
+            }
 
             pnl.Controls.Add(icon);
             pnl.Controls.Add(lbl);
@@ -527,27 +548,28 @@ namespace CC.Forms.Admin.Subscription
                 Dock = DockStyle.Top,
                 Height = 340,
                 BackColor = Color.White,
-                Padding = new Padding(24, 20, 24, 16),
-                Margin = new Padding(0, 16, 0, 20)
+                Padding = new Padding(28, 20, 28, 20),
+                Margin = new Padding(0, 0, 0, 20)
             };
 
             billingHistoryCard.Paint += (s, e) =>
             {
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 using var pen = new Pen(UITheme.BorderColor, 1f);
-                e.Graphics.DrawRoundedRectangle(pen, new Rectangle(0, 0, billingHistoryCard.Width - 1, billingHistoryCard.Height - 1), 14);
+                e.Graphics.DrawRoundedRectangle(pen, new Rectangle(0, 0, billingHistoryCard.Width - 1, billingHistoryCard.Height - 1), 12);
             };
-            billingHistoryCard.ApplyRoundedRegion(14);
+            billingHistoryCard.ApplyRoundedRegion(12);
 
             var lblSectionTitle = new Label
             {
                 Text = "Billing History",
                 Dock = DockStyle.Top,
-                Height = 32,
+                Height = 36,
                 Font = new Font(UITheme.FontSerif, 14F, FontStyle.Bold),
-                ForeColor = UITheme.TextDark
+                ForeColor = UITheme.TextDark,
+                BackColor = Color.White,
+                TextAlign = ContentAlignment.MiddleLeft
             };
-            billingHistoryCard.Controls.Add(lblSectionTitle);
 
             gridBillingHistory = new DataGridView
             {
@@ -555,7 +577,7 @@ namespace CC.Forms.Admin.Subscription
                 BackgroundColor = Color.White,
                 BorderStyle = BorderStyle.None,
                 CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
-                GridColor = Color.FromArgb(240, 235, 230),
+                GridColor = Color.FromArgb(242, 238, 234),
                 EnableHeadersVisualStyles = false,
                 RowHeadersVisible = false,
                 AllowUserToAddRows = false,
@@ -565,18 +587,23 @@ namespace CC.Forms.Admin.Subscription
                 MultiSelect = false,
                 ReadOnly = true,
                 RowTemplate = { Height = 48 },
-                ColumnHeadersHeight = 38,
-                ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing
+                ColumnHeadersHeight = 36,
+                ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing,
+                ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None
             };
+
+            gridBillingHistory.AdvancedColumnHeadersBorderStyle.All = DataGridViewAdvancedCellBorderStyle.None;
+            gridBillingHistory.AdvancedColumnHeadersBorderStyle.Bottom = DataGridViewAdvancedCellBorderStyle.Single;
 
             gridBillingHistory.DefaultCellStyle.SelectionBackColor = Color.FromArgb(250, 248, 246);
             gridBillingHistory.DefaultCellStyle.SelectionForeColor = UITheme.TextDark;
 
             gridBillingHistory.ColumnHeadersDefaultCellStyle.BackColor = Color.White;
-            gridBillingHistory.ColumnHeadersDefaultCellStyle.ForeColor = UITheme.TextMuted;
+            gridBillingHistory.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(120, 110, 105);
             gridBillingHistory.ColumnHeadersDefaultCellStyle.Font = new Font(UITheme.FontSans, 8F, FontStyle.Bold);
             gridBillingHistory.ColumnHeadersDefaultCellStyle.SelectionBackColor = Color.White;
-            gridBillingHistory.ColumnHeadersDefaultCellStyle.Padding = new Padding(12, 0, 0, 0);
+            gridBillingHistory.ColumnHeadersDefaultCellStyle.SelectionForeColor = Color.FromArgb(120, 110, 105);
+            gridBillingHistory.ColumnHeadersDefaultCellStyle.Padding = new Padding(8, 0, 0, 0);
 
             var colDate = new DataGridViewTextBoxColumn
             {
@@ -633,8 +660,10 @@ namespace CC.Forms.Admin.Subscription
                 await RefreshDataAsync();
             };
 
+            // Add grid first (Fill), then pagination (Bottom), then title (Top) so title docks cleanly at top
             billingHistoryCard.Controls.Add(gridBillingHistory);
             billingHistoryCard.Controls.Add(pagination);
+            billingHistoryCard.Controls.Add(lblSectionTitle);
         }
 
         private void GridBillingHistory_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
@@ -771,11 +800,18 @@ namespace CC.Forms.Admin.Subscription
 
         private async Task PromptUpgradeDowngradeAsync()
         {
+            var plans = await CrmDataService.GetSubscriptionPlansAsync();
+            if (plans.Count == 0)
+            {
+                MessageBox.Show("No subscription plans are currently available.", "Plans", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
             var currentPlan = currentSub?.PlanName ?? "Pro Plan";
             var form = new Form
             {
                 Text = "Upgrade / Downgrade Plan",
-                Size = new Size(420, 280),
+                Size = new Size(460, 290),
                 StartPosition = FormStartPosition.CenterParent,
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false,
@@ -796,23 +832,25 @@ namespace CC.Forms.Admin.Subscription
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 Font = new Font(UITheme.FontSans, 10F),
                 Location = new Point(24, 55),
-                Width = 350
+                Width = 390
             };
-            cmbPlans.Items.AddRange(new object[]
-            {
-                "Starter Plan (₱4,399/yr · 3 Seats)",
-                "Pro Plan (₱9,599/yr · 10 Seats)",
-                "Enterprise Plan (₱19,999/yr · 50 Seats)"
-            });
 
-            if (currentPlan.Contains("Starter", StringComparison.OrdinalIgnoreCase)) cmbPlans.SelectedIndex = 0;
-            else if (currentPlan.Contains("Enterprise", StringComparison.OrdinalIgnoreCase)) cmbPlans.SelectedIndex = 2;
-            else cmbPlans.SelectedIndex = 1;
+            int selectedIdx = 0;
+            for (int i = 0; i < plans.Count; i++)
+            {
+                var p = plans[i];
+                cmbPlans.Items.Add($"{p.PlanName} (₱{p.Price:N2} · {p.MaxUsers} Seats · {p.DurationDays} Days)");
+                if (p.PlanName.Equals(currentPlan, StringComparison.OrdinalIgnoreCase))
+                {
+                    selectedIdx = i;
+                }
+            }
+            cmbPlans.SelectedIndex = selectedIdx;
 
             var btnConfirm = new Button
             {
                 Text = "Apply Plan Change",
-                Location = new Point(190, 160),
+                Location = new Point(230, 170),
                 Size = new Size(184, 40),
                 BackColor = UITheme.PrimaryMauve,
                 ForeColor = Color.White,
@@ -825,7 +863,7 @@ namespace CC.Forms.Admin.Subscription
             var btnCancel = new Button
             {
                 Text = "Cancel",
-                Location = new Point(80, 160),
+                Location = new Point(120, 170),
                 Size = new Size(100, 40),
                 BackColor = Color.FromArgb(239, 231, 223),
                 ForeColor = UITheme.TextDark,
@@ -838,16 +876,13 @@ namespace CC.Forms.Admin.Subscription
 
             btnConfirm.Click += async (s, e) =>
             {
-                string targetPlan = cmbPlans.SelectedIndex switch
+                if (cmbPlans.SelectedIndex >= 0 && cmbPlans.SelectedIndex < plans.Count)
                 {
-                    0 => "Starter",
-                    2 => "Enterprise",
-                    _ => "Pro"
-                };
-
-                await CrmDataService.UpgradeDowngradePlanAsync(targetPlan);
-                form.DialogResult = DialogResult.OK;
-                form.Close();
+                    var chosen = plans[cmbPlans.SelectedIndex];
+                    await CrmDataService.UpgradeDowngradePlanAsync(chosen.PlanId);
+                    form.DialogResult = DialogResult.OK;
+                    form.Close();
+                }
             };
 
             form.Controls.Add(lbl);
@@ -887,6 +922,11 @@ namespace CC.Forms.Admin.Subscription
 
                 lblSeatCount.Text = $"{currentSub.UsedSeats} / {currentSub.MaxSeats} seats used";
                 seatProgressBar.Invalidate();
+
+                if (lblFeatureSeats != null)
+                {
+                    lblFeatureSeats.Text = $"Up to {currentSub.MaxSeats} team members";
+                }
 
                 // Update Billing History Grid
                 gridBillingHistory.Rows.Clear();
