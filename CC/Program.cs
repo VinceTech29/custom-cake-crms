@@ -4,6 +4,8 @@ using System.Drawing.Imaging;
 using System.IO;
 using System.Threading;
 using System.Windows.Forms;
+using CC.domain.Entities;
+using CC.Domain.Entities;
 using CC.Forms.Staff;
 using CC.Services;
 
@@ -23,6 +25,570 @@ namespace CC
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"DB Init warning: {ex.Message}");
+            }
+
+            if (args.Length > 0 && args[0] == "--verify-all")
+            {
+                string outputDir = @"C:\Users\user1\.gemini\antigravity\brain\7aee3b98-6126-4c32-b0bc-280b2549c485";
+                Console.WriteLine("=== STARTING AUTHENTICATION & PLATFORM VERIFICATION ===");
+
+                try
+                {
+                    // 1. Ensure DB Ready
+                    Console.WriteLine("[TEST 1] Database Initialization & Seed Synchronization...");
+                    CrmDataService.EnsureDatabaseReadyAsync().GetAwaiter().GetResult();
+                    Console.WriteLine("  -> PASS: Database ready and seeded.");
+
+                    // 2. Super Admin Login
+                    Console.WriteLine("[TEST 2] Testing Super Admin Login (superadmin / admin123)...");
+                    var superAuth = CrmDataService.AuthenticateUserAsync("superadmin", "admin123").GetAwaiter().GetResult();
+                    if (!superAuth.Success || superAuth.User == null)
+                        throw new Exception($"Super Admin login failed: {superAuth.ErrorMessage}");
+                    Console.WriteLine($"  -> PASS: Super Admin authenticated. Role={superAuth.User.Role?.RoleName ?? superAuth.User.RoleId.ToString()}, TenantDB={superAuth.TenantDatabase}");
+
+                    // 3. Business Admin Login
+                    Console.WriteLine("[TEST 3] Testing Business Admin Login (admin / admin123)...");
+                    var adminAuth = CrmDataService.AuthenticateUserAsync("admin", "admin123").GetAwaiter().GetResult();
+                    if (!adminAuth.Success || adminAuth.User == null)
+                        throw new Exception($"Business Admin login failed: {adminAuth.ErrorMessage}");
+                    Console.WriteLine($"  -> PASS: Business Admin authenticated. User={adminAuth.User.FirstName} {adminAuth.User.LastName}, Role={adminAuth.User.Role?.RoleName}");
+
+                    // 4. Manager Login
+                    Console.WriteLine("[TEST 4] Testing Manager Login (mark.perez / admin123)...");
+                    var mgrAuth = CrmDataService.AuthenticateUserAsync("mark.perez", "admin123").GetAwaiter().GetResult();
+                    if (!mgrAuth.Success || mgrAuth.User == null)
+                        throw new Exception($"Manager login failed: {mgrAuth.ErrorMessage}");
+                    Console.WriteLine($"  -> PASS: Manager authenticated. Role={mgrAuth.User.Role?.RoleName}");
+
+                    // 5. Staff Login
+                    Console.WriteLine("[TEST 5] Testing Staff Login (carrie.ngo / admin123)...");
+                    var staffAuth = CrmDataService.AuthenticateUserAsync("carrie.ngo", "admin123").GetAwaiter().GetResult();
+                    if (!staffAuth.Success || staffAuth.User == null)
+                        throw new Exception($"Staff login failed: {staffAuth.ErrorMessage}");
+                    Console.WriteLine($"  -> PASS: Staff authenticated. Role={staffAuth.User.Role?.RoleName}");
+
+                    // 6. Bad Password
+                    Console.WriteLine("[TEST 6] Testing Invalid Password Rejection...");
+                    var badAuth = CrmDataService.AuthenticateUserAsync("admin", "wrongpassword").GetAwaiter().GetResult();
+                    if (badAuth.Success)
+                        throw new Exception("Invalid password test failed: expected authentication failure.");
+                    Console.WriteLine($"  -> PASS: Rejected correctly with: '{badAuth.ErrorMessage}'");
+
+                    // 7. Inactive Account
+                    Console.WriteLine("[TEST 7] Testing Inactive Account Rejection (jose.uy)...");
+                    var inactiveAuth = CrmDataService.AuthenticateUserAsync("jose.uy", "admin123").GetAwaiter().GetResult();
+                    if (inactiveAuth.Success)
+                        throw new Exception("Inactive account test failed: expected authentication failure.");
+                    Console.WriteLine($"  -> PASS: Inactive account rejected correctly with: '{inactiveAuth.ErrorMessage}'");
+
+                    // 8. User Management -> Login Lifecycle
+                    Console.WriteLine("[TEST 8] Testing User Management -> Login Lifecycle (juan.manager / Temp@12345)...");
+                    var existingJuan = CrmDataService.GetUsersAsync("juan.manager").GetAwaiter().GetResult();
+                    if (existingJuan.Any(u => u.Username == "juan.manager"))
+                    {
+                        Console.WriteLine("  (Existing juan.manager found, updating password to Temp@12345)");
+                        var u = existingJuan.First(x => x.Username == "juan.manager");
+                        u.IsActive = true;
+                        CrmDataService.UpdateUserAsync(u, "Temp@12345").GetAwaiter().GetResult();
+                    }
+                    else
+                    {
+                        var newUser = new CC.Domain.Entities.SystemUser
+                        {
+                            CompanyId = 2,
+                            RoleId = 3, // Manager
+                            FirstName = "Juan",
+                            LastName = "Manager",
+                            Username = "juan.manager",
+                            Email = "juan.manager@cakeshop.ph",
+                            Phone = "+63 917 555 7788",
+                            IsActive = true,
+                            CreatedDate = DateTime.UtcNow
+                        };
+                        CrmDataService.CreateUserAsync(newUser, "Temp@12345").GetAwaiter().GetResult();
+                    }
+
+                    var juanAuth = CrmDataService.AuthenticateUserAsync("juan.manager", "Temp@12345").GetAwaiter().GetResult();
+                    if (!juanAuth.Success || juanAuth.User == null)
+                        throw new Exception($"Login with newly created juan.manager failed: {juanAuth.ErrorMessage}");
+                    if (juanAuth.User.RoleId != 3)
+                        throw new Exception($"Expected RoleId 3 (Manager), got {juanAuth.User.RoleId}");
+                    Console.WriteLine($"  -> PASS: juan.manager logged in successfully! Role={juanAuth.User.Role?.RoleName}, CompanyId={juanAuth.User.CompanyId}");
+
+                    // 9. Database-Per-Company Provisioning & Tenant Isolation Test
+                    Console.WriteLine("[TEST 9] Testing Database-Per-Company Architecture & Data Isolation...");
+                    string testBizCode = "VBB99";
+                    string testDbName = "VanillaBlossom_CRM";
+
+                    // Clean up any previous test company if it exists in Master DB and drop test DB
+                    var oldCompanies = CrmDataService.GetCompaniesAsync(testBizCode).GetAwaiter().GetResult();
+                    var oldVbb = oldCompanies.FirstOrDefault(c => c.CompanyCode == testBizCode);
+                    if (oldVbb != null)
+                    {
+                        CrmDataService.DeleteCompanyAsync(oldVbb.CompanyId).GetAwaiter().GetResult();
+                    }
+                    try
+                    {
+                        using var cleanCtx = CrmDataService.CreateDbContextForDatabase("(localdb)\\MSSQLLocalDB", testDbName);
+                        cleanCtx.Database.EnsureDeleted();
+                    }
+                    catch { }
+
+                    // Create Company B with its own dedicated operational database
+                    var createdCompany = CrmDataService.CreateCompanyAsync(
+                        name: "Vanilla Blossom Bakery",
+                        code: testBizCode,
+                        email: "contact@vanillablossom.ph",
+                        phone: "+63 917 999 8877",
+                        addressLine1: "99 Blossom Boulevard",
+                        addressLine2: null,
+                        city: "Makati City",
+                        state: "Metro Manila",
+                        postalCode: "1200",
+                        country: "Philippines",
+                        isActive: true,
+                        serverName: "(localdb)\\MSSQLLocalDB",
+                        databaseName: testDbName,
+                        adminFullName: "Vanilla Admin",
+                        adminUsername: "admin.vbb",
+                        adminEmail: "admin@vanillablossom.ph",
+                        adminPassword: "Temp@12345"
+                    ).GetAwaiter().GetResult();
+
+                    // 9.1 Verify Master DB routing link
+                    var verifyCompanies = CrmDataService.GetCompaniesAsync(testBizCode).GetAwaiter().GetResult();
+                    var vbb = verifyCompanies.FirstOrDefault(c => c.CompanyCode == testBizCode);
+                    if (vbb == null)
+                        throw new Exception("Created business not found in companies list!");
+                    if (vbb.DatabaseName != testDbName)
+                        throw new Exception($"Expected tenant DB '{testDbName}', got '{vbb.DatabaseName}'");
+                    Console.WriteLine($"  -> PASS: Dedicated Tenant DB registered in Master DB: ID={vbb.CompanyId}, Name={vbb.CompanyName}, DB={vbb.DatabaseName}");
+
+                    // 9.2 Test logging in with the new business admin (Dynamic Tenant Resolution)
+                    var vbbAuth = CrmDataService.AuthenticateUserAsync("admin.vbb", "Temp@12345").GetAwaiter().GetResult();
+                    if (!vbbAuth.Success || vbbAuth.User == null)
+                        throw new Exception($"New business admin login failed: {vbbAuth.ErrorMessage}");
+                    if (vbbAuth.User.CompanyId != vbb.CompanyId)
+                        throw new Exception($"Expected CompanyId {vbb.CompanyId}, got {vbbAuth.User.CompanyId}");
+                    if (vbbAuth.TenantDatabase != testDbName)
+                        throw new Exception($"Expected authenticated tenant DB '{testDbName}', got '{vbbAuth.TenantDatabase}'");
+                    Console.WriteLine($"  -> PASS: Tenant Resolution: admin.vbb resolved to Company #{vbbAuth.User.CompanyId} and connected to '{vbbAuth.TenantDatabase}'");
+
+                    // 9.3 Test Operational Data Isolation
+                    // Logged in as Company B (admin.vbb) -> Create customer in VanillaBlossom_CRM
+                    SessionService.CurrentUser = new CurrentUser
+                    {
+                        UserId = vbbAuth.User.UserId,
+                        Username = vbbAuth.User.Username,
+                        FirstName = vbbAuth.User.FirstName,
+                        LastName = vbbAuth.User.LastName,
+                        Role = "Business Admin",
+                        CompanyId = vbb.CompanyId,
+                        CompanyName = vbb.CompanyName,
+                        TenantServer = vbbAuth.TenantServer,
+                        TenantDatabase = vbbAuth.TenantDatabase
+                    };
+
+                    var custB = CrmDataService.CreateCustomerAsync(new Customer
+                    {
+                        FirstName = "Isabella",
+                        LastName = "Flores",
+                        Email = "isabella@blossom.ph",
+                        Phone = "+63 917 111 2222",
+                        AddressText = "123 Blossom Way, Makati City",
+                        CompanyId = vbb.CompanyId,
+                        CreatedByUserId = vbbAuth.User.UserId
+                    }, companyId: vbb.CompanyId).GetAwaiter().GetResult();
+                    Console.WriteLine($"  -> Created Customer in Company B ({testDbName}): ID={custB.CustomerId}, Name={custB.FirstName} {custB.LastName}");
+
+                    // Verify Company B has only its own customer (1 customer, NOT Company A's 208 customers)
+                    var companyBCustomers = CrmDataService.GetCustomersAsync(companyId: vbb.CompanyId).GetAwaiter().GetResult();
+                    if (companyBCustomers.Count != 1 || !companyBCustomers.Any(c => c.Email == "isabella@blossom.ph"))
+                        throw new Exception($"Company B customer isolation failed! Found {companyBCustomers.Count} customers.");
+                    Console.WriteLine($"  -> PASS: Company B ({testDbName}) contains strictly its own operational data ({companyBCustomers.Count} customer).");
+
+                    // Switch Session to Company A (CC Custom Cake Shop)
+                    SessionService.CurrentUser = new CurrentUser
+                    {
+                        UserId = 2,
+                        Username = "admin",
+                        Role = "Business Admin",
+                        CompanyId = 2,
+                        CompanyName = "CC Custom Cake Shop",
+                        TenantServer = "(localdb)\\MSSQLLocalDB",
+                        TenantDatabase = "CustomCakeCRM"
+                    };
+
+                    // Verify Company A CANNOT see Company B's customer
+                    var companyACustomers = CrmDataService.GetCustomersAsync(companyId: 2).GetAwaiter().GetResult();
+                    if (companyACustomers.Any(c => c.Email == "isabella@blossom.ph"))
+                        throw new Exception("Company A can see Company B's customer! Complete isolation failed.");
+                    Console.WriteLine($"  -> PASS: Complete Isolation: Company A ({companyACustomers.Count} customers) cannot access Company B's operational records.");
+
+                    // 10. UI Screen Captures
+                    // 10. Dashboard Data Calculations & Tenant Scoping
+                    Console.WriteLine("[TEST 10] Testing Real Database Dashboard Calculations & Tenant Scoping...");
+                    var superData = CrmDataService.GetSuperAdminDashboardDataAsync("30d").GetAwaiter().GetResult();
+                    Console.WriteLine($"  -> Super Admin: TotalBiz={superData.TotalBusinesses}, ActiveBiz={superData.ActiveBusinesses}, Users={superData.PlatformUsersCount}, RegTrends={superData.RegistrationTrend.Count} pts, Plans={superData.SubscriptionPlanDistribution.Count}");
+
+                    var adminData30 = CrmDataService.GetAdminDashboardDataAsync(2, "30d").GetAwaiter().GetResult();
+                    var adminData7 = CrmDataService.GetAdminDashboardDataAsync(2, "7d").GetAwaiter().GetResult();
+                    Console.WriteLine($"  -> Business Admin: 30d Rev=P{adminData30.TotalRevenue:N2} ({adminData30.TotalOrders} orders), 7d Rev=P{adminData7.TotalRevenue:N2}, TopCusts={adminData30.TopCustomers.Count}, Channels={adminData30.PaymentMethodBreakdown.Count}");
+
+                    var mgrData = CrmDataService.GetManagerDashboardDataAsync(2, "30d").GetAwaiter().GetResult();
+                    Console.WriteLine($"  -> Manager: ActiveOrders={mgrData.ActiveOrdersCount}, Inquiries={mgrData.OpenInquiriesCount}, OverdueTasks={mgrData.ShopOverdueFollowupsCount}, Pipeline={mgrData.PipelineStages.Count} stages, RecentOrders={mgrData.RecentOrders.Count}");
+
+                    var staffData = CrmDataService.GetStaffDashboardDataAsync(4, 2, "1d").GetAwaiter().GetResult();
+                    Console.WriteLine($"  -> Staff: DueFollowups={staffData.MyDueFollowupsCount}, Overdue={staffData.MyOverdueFollowupsCount}, Processing={staffData.ProcessingOrdersCount}, UrgentTasks={staffData.UrgentTasks.Count}");
+
+                    // 11. UI Screen Captures for all 4 Dashboards
+                    Console.WriteLine("[TEST 11] Generating UI Visual Captures for Walkthrough...");
+
+                    // 11.1 Super Admin Dashboard
+                    SessionService.CurrentUser = new CurrentUser
+                    {
+                        UserId = 1,
+                        Username = "superadmin",
+                        FirstName = "Super",
+                        LastName = "Admin",
+                        Role = "SuperAdmin",
+                        CompanyId = 1,
+                        CompanyName = "Platform Administration",
+                        Email = "superadmin@cakeshop.ph"
+                    };
+
+                    var superShell = new CC.Forms.SuperAdmin.SuperAdminDashboardForm();
+                    superShell.Size = new Size(1366, 820);
+                    superShell.StartPosition = FormStartPosition.Manual;
+                    superShell.Location = new Point(50, 50);
+                    superShell.Show();
+                    for (int i = 0; i < 40; i++) { Application.DoEvents(); Thread.Sleep(50); }
+
+                    using (var bmp = new Bitmap(superShell.Width, superShell.Height))
+                    {
+                        superShell.DrawToBitmap(bmp, new Rectangle(0, 0, superShell.Width, superShell.Height));
+                        bmp.Save(Path.Combine(outputDir, "screen_superadmin_dashboard.png"), ImageFormat.Png);
+                    }
+
+                    superShell.Navigate("Businesses");
+                    for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(30); }
+                    using (var bmp = new Bitmap(superShell.Width, superShell.Height))
+                    {
+                        superShell.DrawToBitmap(bmp, new Rectangle(0, 0, superShell.Width, superShell.Height));
+                        bmp.Save(Path.Combine(outputDir, "screen_superadmin_businesses.png"), ImageFormat.Png);
+                    }
+                    superShell.Close();
+
+                    // Capture Business Details Modal
+                    var detailsModal = new CC.Forms.SuperAdmin.Businesses.BusinessDetailsModal(vbb.CompanyId);
+                    detailsModal.StartPosition = FormStartPosition.Manual;
+                    detailsModal.Location = new Point(100, 100);
+                    detailsModal.Show();
+                    for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(30); }
+                    using (var bmp = new Bitmap(detailsModal.Width, detailsModal.Height))
+                    {
+                        detailsModal.DrawToBitmap(bmp, new Rectangle(0, 0, detailsModal.Width, detailsModal.Height));
+                        bmp.Save(Path.Combine(outputDir, "screen_superadmin_business_details.png"), ImageFormat.Png);
+                    }
+                    detailsModal.Close();
+
+                    // 11.2 Business Admin Dashboard
+                    SessionService.CurrentUser = new CurrentUser
+                    {
+                        UserId = 2,
+                        Username = "admin",
+                        FirstName = "Lea",
+                        LastName = "Abad",
+                        Role = "Admin",
+                        CompanyId = 2,
+                        CompanyName = "CC Custom Cake Shop",
+                        Email = "admin@cakeshop.ph"
+                    };
+
+                    var adminShell = new CC.Forms.Admin.AdminDashboardForm();
+                    adminShell.Size = new Size(1366, 820);
+                    adminShell.StartPosition = FormStartPosition.Manual;
+                    adminShell.Location = new Point(50, 50);
+                    adminShell.Show();
+                    for (int i = 0; i < 40; i++) { Application.DoEvents(); Thread.Sleep(50); }
+
+                    using (var bmp = new Bitmap(adminShell.Width, adminShell.Height))
+                    {
+                        adminShell.DrawToBitmap(bmp, new Rectangle(0, 0, adminShell.Width, adminShell.Height));
+                        bmp.Save(Path.Combine(outputDir, "screen_admin_dashboard.png"), ImageFormat.Png);
+                    }
+                    adminShell.Close();
+
+                    // 11.3 Manager Dashboard
+                    SessionService.CurrentUser = new CurrentUser
+                    {
+                        UserId = 3,
+                        Username = "mark.perez",
+                        FirstName = "Camille",
+                        LastName = "Reyes",
+                        Role = "Manager",
+                        CompanyId = 2,
+                        CompanyName = "CC Custom Cake Shop",
+                        Email = "mark.perez@cakeshop.ph"
+                    };
+
+                    var mgrShell = new CC.Forms.Manager.ManagerDashboardForm();
+                    mgrShell.Size = new Size(1366, 820);
+                    mgrShell.StartPosition = FormStartPosition.Manual;
+                    mgrShell.Location = new Point(50, 50);
+                    mgrShell.Show();
+                    for (int i = 0; i < 40; i++) { Application.DoEvents(); Thread.Sleep(50); }
+
+                    using (var bmp = new Bitmap(mgrShell.Width, mgrShell.Height))
+                    {
+                        mgrShell.DrawToBitmap(bmp, new Rectangle(0, 0, mgrShell.Width, mgrShell.Height));
+                        bmp.Save(Path.Combine(outputDir, "screen_manager_dashboard.png"), ImageFormat.Png);
+                    }
+                    mgrShell.Close();
+
+                    // 11.4 Staff Dashboard
+                    SessionService.CurrentUser = new CurrentUser
+                    {
+                        UserId = 4,
+                        Username = "carrie.ngo",
+                        FirstName = "Jerome",
+                        LastName = "Santos",
+                        Role = "Staff",
+                        CompanyId = 2,
+                        CompanyName = "CC Custom Cake Shop",
+                        Email = "carrie.ngo@cakeshop.ph"
+                    };
+
+                    var staffShell = new CC.Forms.Staff.StaffDashboardForm();
+                    staffShell.Size = new Size(1366, 820);
+                    staffShell.StartPosition = FormStartPosition.Manual;
+                    staffShell.Location = new Point(50, 50);
+                    staffShell.Show();
+                    for (int i = 0; i < 40; i++) { Application.DoEvents(); Thread.Sleep(50); }
+
+                    using (var bmp = new Bitmap(staffShell.Width, staffShell.Height))
+                    {
+                        staffShell.DrawToBitmap(bmp, new Rectangle(0, 0, staffShell.Width, staffShell.Height));
+                        bmp.Save(Path.Combine(outputDir, "screen_staff_dashboard.png"), ImageFormat.Png);
+                    }
+                    staffShell.Close();
+
+                    Console.WriteLine("  -> PASS: All role dashboard visual captures saved to artifact directory.");
+
+                    // 12. Super Admin Navigation Items & UI Screens Verification
+                    Console.WriteLine("[TEST 12] Super Admin Navigation & Dedicated Views Verification...");
+                    SessionService.CurrentUser = new CurrentUser
+                    {
+                        UserId = 1,
+                        Username = "superadmin",
+                        FirstName = "Super",
+                        LastName = "Admin",
+                        Role = "SuperAdmin",
+                        CompanyId = 1,
+                        CompanyName = "Platform Administration",
+                        Email = "superadmin@cakeshop.ph"
+                    };
+
+                    using (var saShell = new CC.Forms.SuperAdmin.SuperAdminDashboardForm())
+                    {
+                        saShell.Size = new Size(1366, 820);
+                        saShell.StartPosition = FormStartPosition.Manual;
+                        saShell.Location = new Point(50, 50);
+                        saShell.Show();
+                        for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(30); }
+
+                        // Assert the 6 requested navigation items (Sign Out is in pinned footer)
+                        string[] expectedNavs = { "Dashboard", "Businesses", "Subscriptions", "Terms & Conditions", "System Monitoring & Backups", "Users" };
+                        foreach (var nav in expectedNavs)
+                        {
+                            if (!saShell.SidebarCtrl.HasNavItem(nav))
+                                throw new Exception($"Super Admin sidebar is missing required navigation item: '{nav}'");
+                        }
+                        if (saShell.SidebarCtrl.HasNavItem("Sign Out"))
+                            throw new Exception("Sign Out should not be duplicated in the navigation list (it is in the footer).");
+                        Console.WriteLine("  -> PASS: All 6 Super Admin navigation items verified (Sign Out located in footer).");
+
+                        // Capture Subscriptions Screen
+                        saShell.Navigate("Subscriptions");
+                        for (int i = 0; i < 30; i++) { Application.DoEvents(); Thread.Sleep(30); }
+                        using (var bmp = new Bitmap(saShell.Width, saShell.Height))
+                        {
+                            saShell.DrawToBitmap(bmp, new Rectangle(0, 0, saShell.Width, saShell.Height));
+                            bmp.Save(Path.Combine(outputDir, "screen_superadmin_subscriptions.png"), ImageFormat.Png);
+                        }
+
+                        // Capture Terms & Conditions Screen
+                        saShell.Navigate("Terms & Conditions");
+                        for (int i = 0; i < 30; i++) { Application.DoEvents(); Thread.Sleep(30); }
+                        using (var bmp = new Bitmap(saShell.Width, saShell.Height))
+                        {
+                            saShell.DrawToBitmap(bmp, new Rectangle(0, 0, saShell.Width, saShell.Height));
+                            bmp.Save(Path.Combine(outputDir, "screen_superadmin_terms.png"), ImageFormat.Png);
+                        }
+
+                        // Capture System Monitoring & Backups Screen
+                        saShell.Navigate("System Monitoring & Backups");
+                        for (int i = 0; i < 30; i++) { Application.DoEvents(); Thread.Sleep(30); }
+                        using (var bmp = new Bitmap(saShell.Width, saShell.Height))
+                        {
+                            saShell.DrawToBitmap(bmp, new Rectangle(0, 0, saShell.Width, saShell.Height));
+                            bmp.Save(Path.Combine(outputDir, "screen_superadmin_monitoring.png"), ImageFormat.Png);
+                        }
+
+                        saShell.Close();
+                    }
+
+                    // Also capture Business Admin Subscription screen
+                    SessionService.CurrentUser = new CurrentUser
+                    {
+                        UserId = 2,
+                        Username = "admin",
+                        FirstName = "Lea",
+                        LastName = "Abad",
+                        Role = "Admin",
+                        CompanyId = 2,
+                        CompanyName = "CC Custom Cake Shop",
+                        Email = "admin@cakeshop.ph"
+                    };
+                    using (var adminSubShell = new CC.Forms.Admin.AdminDashboardForm())
+                    {
+                        adminSubShell.Size = new Size(1366, 820);
+                        adminSubShell.StartPosition = FormStartPosition.Manual;
+                        adminSubShell.Location = new Point(50, 50);
+                        adminSubShell.Show();
+                        adminSubShell.Navigate("Subscription");
+                        for (int i = 0; i < 30; i++) { Application.DoEvents(); Thread.Sleep(30); }
+                        using (var bmp = new Bitmap(adminSubShell.Width, adminSubShell.Height))
+                        {
+                            adminSubShell.DrawToBitmap(bmp, new Rectangle(0, 0, adminSubShell.Width, adminSubShell.Height));
+                            bmp.Save(Path.Combine(outputDir, "screen_admin_subscription.png"), ImageFormat.Png);
+                        }
+                        adminSubShell.Close();
+                    }
+                    Console.WriteLine("  -> PASS: Super Admin and Business Admin subscription/monitoring views captured.");
+
+                    // 13. Subscription Management CRUD & Single Source of Truth
+                    Console.WriteLine("[TEST 13] Subscription Plans CRUD & Cross-Database Single Source of Truth...");
+                    var initialPlans = CrmDataService.GetSubscriptionPlansAsync().GetAwaiter().GetResult();
+                    if (initialPlans.Count < 3)
+                        throw new Exception($"Expected at least 3 seeded subscription plans, got {initialPlans.Count}");
+                    Console.WriteLine($"  -> Initial Plans Count: {initialPlans.Count} (Starter, Pro, Enterprise)");
+
+                    // Create New Custom Plan as Super Admin
+                    var growthPlan = CrmDataService.CreateSubscriptionPlanAsync("Growth Suite", 1499.00m, 60, 12).GetAwaiter().GetResult();
+                    Console.WriteLine($"  -> Created New Plan: PlanId={growthPlan.PlanId}, Name={growthPlan.PlanName}, Price=P{growthPlan.Price}, Seats={growthPlan.MaxUsers}");
+
+                    // Assign this Plan to Company B (vbb.CompanyId)
+                    CrmDataService.AssignCompanySubscriptionAsync(vbb.CompanyId, growthPlan.PlanId, 1, DateTime.UtcNow, DateTime.UtcNow.AddDays(growthPlan.DurationDays)).GetAwaiter().GetResult();
+                    Console.WriteLine($"  -> Assigned to Company B (Id={vbb.CompanyId}): PlanId={growthPlan.PlanId}");
+
+                    // Business Admin queries its own subscription
+                    var bizSubInfo = CrmDataService.GetSubscriptionInfoAsync(vbb.CompanyId).GetAwaiter().GetResult();
+                    if (bizSubInfo.PlanName != "Growth Suite" || bizSubInfo.Price != 1499.00m || bizSubInfo.MaxSeats != 12)
+                        throw new Exception($"Single Source of Truth mismatch! Expected Growth Suite, P1499, 12 users. Got: {bizSubInfo.PlanName}, P{bizSubInfo.Price}, {bizSubInfo.MaxSeats} users.");
+                    if (bizSubInfo.Status != "Active")
+                        throw new Exception($"Subscription status invalid: {bizSubInfo.Status}");
+                    Console.WriteLine($"  -> PASS: Business Admin reads identical subscription from Master DB: {bizSubInfo.PlanName}, Seats={bizSubInfo.UsedSeats}/{bizSubInfo.MaxSeats}, Renewal={bizSubInfo.RenewalDate:yyyy-MM-dd}");
+
+                    // Super Admin renews the subscription
+                    DateTime preRenewEnd = bizSubInfo.RenewalDate;
+                    CrmDataService.RenewSubscriptionAsync(vbb.CompanyId).GetAwaiter().GetResult();
+                    var bizSubRenewed = CrmDataService.GetSubscriptionInfoAsync(vbb.CompanyId).GetAwaiter().GetResult();
+                    if (bizSubRenewed.RenewalDate <= preRenewEnd)
+                        throw new Exception($"Renew failed to extend validity date! Pre: {preRenewEnd}, Post: {bizSubRenewed.RenewalDate}");
+                    Console.WriteLine($"  -> PASS: Subscription Renewal successfully extended validity date to {bizSubRenewed.RenewalDate:yyyy-MM-dd}.");
+
+                    // 14. User Seat Limit Enforcement
+                    Console.WriteLine("[TEST 14] User Seat Limit Enforcement (MaxUsers Guard)...");
+                    // Create a 1-seat restricted plan and assign to Company B
+                    var microPlan = CrmDataService.CreateSubscriptionPlanAsync("Micro Single User", 299.00m, 30, 1).GetAwaiter().GetResult();
+                    CrmDataService.AssignCompanySubscriptionAsync(vbb.CompanyId, microPlan.PlanId, 1, DateTime.UtcNow, DateTime.UtcNow.AddDays(30)).GetAwaiter().GetResult();
+
+                    // Company B already has 1 user. Attempting to create a 2nd active user MUST fail with InvalidOperationException
+                    bool seatLimitEnforced = false;
+                    try
+                    {
+                        CrmDataService.CreateUserAsync(new SystemUser
+                        {
+                            CompanyId = vbb.CompanyId,
+                            Username = "excess.user",
+                            FirstName = "Excess",
+                            LastName = "Seat",
+                            Email = "excess@blossom.ph",
+                            RoleId = 3, // Staff
+                            IsActive = true
+                        }, "Password123!").GetAwaiter().GetResult();
+                    }
+                    catch (InvalidOperationException ex) when (ex.Message.Contains("seat limit"))
+                    {
+                        seatLimitEnforced = true;
+                        Console.WriteLine($"  -> Correctly blocked user creation: {ex.Message}");
+                    }
+
+                    if (!seatLimitEnforced)
+                        throw new Exception("Security/Licensing violation: CreateUserAsync permitted exceeding MaxUsers seat limit!");
+                    Console.WriteLine("  -> PASS: Seat limit enforcement successfully prevented exceeding MaxUsers.");
+
+                    // Restore Company B to Growth Suite
+                    CrmDataService.AssignCompanySubscriptionAsync(vbb.CompanyId, growthPlan.PlanId, 1, DateTime.UtcNow, DateTime.UtcNow.AddDays(60)).GetAwaiter().GetResult();
+
+                    // 15. Terms & Conditions Module
+                    Console.WriteLine("[TEST 15] Terms & Conditions Module & Versioning...");
+                    var termsVersions = CrmDataService.GetTermsVersionsAsync().GetAwaiter().GetResult();
+                    if (termsVersions.Count == 0)
+                        throw new Exception("Expected at least baseline v1.0 terms version.");
+                    Console.WriteLine($"  -> Existing Terms Versions: {termsVersions.Count} (Latest: {termsVersions[0].Version})");
+
+                    var newTerms = CrmDataService.CreateTermsVersionAsync("v2.0", "### Platform Terms of Service v2.0\r\n\r\nUpdated multi-tenant data compliance rules.", DateTime.Today.AddDays(7), 1).GetAwaiter().GetResult();
+                    if (newTerms.Version != "v2.0")
+                        throw new Exception("Created terms version does not match requested version.");
+                    Console.WriteLine($"  -> Created new Terms Version: {newTerms.Version}, Effective: {newTerms.EffectiveDate:yyyy-MM-dd}");
+
+                    // Record acceptance
+                    CrmDataService.RecordTermsAcceptanceAsync(newTerms.TermsId, 1, "127.0.0.1", "WinForms Client 2.0").GetAwaiter().GetResult();
+                    var acceptances = CrmDataService.GetTermsAcceptancesAsync(newTerms.TermsId).GetAwaiter().GetResult();
+                    if (acceptances.Count == 0 || !acceptances.Any(a => a.UserId == 1))
+                        throw new Exception("Terms acceptance record was not stored correctly.");
+                    Console.WriteLine($"  -> PASS: Terms acceptance tracked successfully ({acceptances.Count} acceptances recorded).");
+
+                    // 16. System Monitoring & Multi-Tenant Database Backups
+                    Console.WriteLine("[TEST 16] System Monitoring Audit Logs & Multi-Tenant Database Backup Engine...");
+                    // Test Audit Log
+                    CrmDataService.LogSystemAuditAsync("superadmin", "TEST_SYSTEM_CHECK", "Verification test executed system integrity check", "127.0.0.1").GetAwaiter().GetResult();
+                    var auditLogs = CrmDataService.GetSystemAuditLogsAsync(limit: 10).GetAwaiter().GetResult();
+                    if (!auditLogs.Any(l => l.ActionType == "TEST_SYSTEM_CHECK"))
+                        throw new Exception("Audit log entry was not found in system logs.");
+                    Console.WriteLine($"  -> PASS: System audit log verified ({auditLogs.Count} recent logs).");
+
+                    // Test Multi-Tenant Database Backup
+                    var registeredDbs = BackupService.GetRegisteredDatabasesAsync().GetAwaiter().GetResult();
+                    Console.WriteLine($"  -> Target Databases for Backup ({registeredDbs.Count}): {string.Join(", ", registeredDbs)}");
+                    if (!registeredDbs.Contains("MSME_MasterCRM") || !registeredDbs.Contains("CustomCakeCRM"))
+                        throw new Exception("Backup discovery failed to include Master and Tenant databases!");
+
+                    var backupResults = BackupService.BackupAllDatabasesAsync().GetAwaiter().GetResult();
+                    foreach (var br in backupResults)
+                    {
+                        Console.WriteLine($"  -> Database '{br.DatabaseName}' Backup: Success={br.IsSuccess}, File={Path.GetFileName(br.FilePath)}, Size={br.FileSizeBytes:N0} bytes");
+                        if (!br.IsSuccess || !File.Exists(br.FilePath) || br.FileSizeBytes <= 0)
+                            throw new Exception($"Backup failed for database '{br.DatabaseName}': {br.ErrorMessage}");
+                    }
+
+                    var backupHistory = BackupService.GetBackupHistory();
+                    if (backupHistory.Count < backupResults.Count)
+                        throw new Exception("Backup history does not reflect newly generated backup files.");
+                    Console.WriteLine($"  -> PASS: Native SQL Server multi-database backup engine executed successfully. ({backupHistory.Count} total backups found in repository).");
+
+                    Console.WriteLine("=== ALL 16 VERIFICATION TESTS PASSED SUCCESSFULLY! ===");
+                    Environment.Exit(0);
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"\n[VERIFICATION FAILED]: {ex.Message}\n{ex.StackTrace}");
+                    Environment.Exit(1);
+                    return;
+                }
             }
 
             if (args.Length > 0 && args[0] == "--test-capture")

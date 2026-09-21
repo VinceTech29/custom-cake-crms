@@ -404,7 +404,7 @@ namespace CC.Forms.Authentication
 
             lblUsernameCaption = new Label
             {
-                Text = "EMAIL ADDRESS",
+                Text = "EMAIL ADDRESS OR USERNAME",
                 AutoSize = true,
                 Font = new Font("Segoe UI", BaseCaptionFontSize, FontStyle.Bold),
                 ForeColor = TextMuted
@@ -420,7 +420,7 @@ namespace CC.Forms.Authentication
                 ForeColor = TextDark,
                 Location = new Point(16, 13),
                 Width = panelUsername.Width - 32,
-                PlaceholderText = "Enter your email"
+                PlaceholderText = "Enter your email or username"
             };
             panelUsername.Controls.Add(txtUsername);
 
@@ -772,7 +772,7 @@ namespace CC.Forms.Authentication
         // LOGIN LOGIC
         // =========================================================
 
-        private void BtnSignIn_Click(object? sender, EventArgs e)
+        private async void BtnSignIn_Click(object? sender, EventArgs e)
         {
             lblError.Text = "";
 
@@ -781,57 +781,66 @@ namespace CC.Forms.Authentication
 
             if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
             {
-                lblError.Text = "Please enter your email and password.";
+                lblError.Text = "Please enter your username/email and password.";
                 return;
             }
 
-            // Accounts mapping (matching database seed data with CompanyId = 2)
-            if ((username == "superadmin" || username == "superadmin@sweetstory.ph") && password == "admin123")
+            btnSignIn.Enabled = false;
+            btnSignIn.Text = "Signing in...";
+
+            try
             {
-                SetCurrentUser(1, "superadmin", "Super", "Admin", "SuperAdmin");
-                OpenDashboard("SuperAdmin");
-                return;
+                var result = await CrmDataService.AuthenticateUserAsync(username, password);
+                if (!result.Success || result.User == null)
+                {
+                    lblError.Text = result.ErrorMessage ?? "Invalid email or password.";
+                    return;
+                }
+
+                var user = result.User;
+                string roleName = user.Role?.RoleName ?? (user.RoleId switch
+                {
+                    1 => "SuperAdmin",
+                    2 => "Business Admin",
+                    3 => "Manager",
+                    _ => "Staff"
+                });
+
+                SessionService.CurrentUser = new CurrentUser
+                {
+                    UserId = user.UserId,
+                    Username = user.Username,
+                    FirstName = user.FirstName,
+                    LastName = user.LastName,
+                    Email = user.Email,
+                    Role = roleName,
+                    CompanyId = user.CompanyId,
+                    CompanyName = user.Company?.CompanyName ?? string.Empty,
+                    TenantServer = result.TenantServer,
+                    TenantDatabase = result.TenantDatabase
+                };
+
+                try
+                {
+                    var api = new ApiService();
+                    api.SetSessionHeaders(user.UserId, user.CompanyId);
+                }
+                catch { }
+
+                await CrmDataService.UpdateLastLoginDateAsync(user.UserId);
+
+                OpenDashboard(roleName);
             }
-
-            if ((username == "admin" || username == "admin@sweetstory.ph") && password == "admin123")
+            catch (Exception ex)
             {
-                SetCurrentUser(2, "admin", "Lea", "Abad", "Admin");
-                OpenDashboard("Admin");
-                return;
+                lblError.Text = "An error occurred during sign in.";
+                System.Diagnostics.Debug.WriteLine($"[LoginForm.BtnSignIn_Click] {ex.Message}");
             }
-
-            if ((username == "manager" || username == "manager@sweetstory.ph") && password == "admin123")
+            finally
             {
-                SetCurrentUser(3, "manager", "Camille", "Reyes", "Manager");
-                OpenDashboard("Manager");
-                return;
+                btnSignIn.Enabled = true;
+                btnSignIn.Text = "Sign in";
             }
-
-            if ((username == "staff" || username == "staff@sweetstory.ph") && password == "admin123")
-            {
-                SetCurrentUser(4, "staff", "Jerome", "Santos", "Staff");
-                OpenDashboard("Staff");
-                return;
-            }
-
-            lblError.Text = "Invalid email or password.";
-        }
-
-        // =========================================================
-        // SESSION USER CREATION
-        // =========================================================
-
-        private void SetCurrentUser(int userId, string username, string firstName, string lastName, string role, int companyId = 2)
-        {
-            SessionService.CurrentUser = new CurrentUser
-            {
-                UserId = userId,
-                Username = username,
-                FirstName = firstName,
-                LastName = lastName,
-                Role = role,
-                CompanyId = companyId
-            };
         }
 
         // =========================================================
@@ -842,26 +851,29 @@ namespace CC.Forms.Authentication
         {
             Form dashboard;
 
-            switch (role)
+            string normalized = (role ?? string.Empty).Replace(" ", "").ToLowerInvariant();
+
+            switch (normalized)
             {
-                case "SuperAdmin":
+                case "superadmin":
                     dashboard = new CC.Forms.SuperAdmin.SuperAdminDashboardForm();
                     break;
 
-                case "Admin":
+                case "admin":
+                case "businessadmin":
                     dashboard = new CC.Forms.Admin.AdminDashboardForm();
                     break;
 
-                case "Manager":
+                case "manager":
                     dashboard = new CC.Forms.Manager.ManagerDashboardForm();
                     break;
 
-                case "Staff":
+                case "staff":
                     dashboard = new CC.Forms.Staff.StaffDashboardForm();
                     break;
 
                 default:
-                    lblError.Text = "Invalid user role.";
+                    lblError.Text = $"Unrecognized user role: {role}";
                     return;
             }
 

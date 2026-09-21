@@ -1,38 +1,458 @@
 using System;
 using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Linq;
+using System.Threading.Tasks;
 using System.Windows.Forms;
+using CC.Controls;
+using CC.Forms.Admin.Users;
+using CC.Forms.Authentication;
+using CC.Forms.SuperAdmin.Businesses;
+using CC.Services;
 
 namespace CC.Forms.SuperAdmin
 {
-    public class SuperAdminDashboardForm : Form
+    /// <summary>
+    /// Role-specific Super Admin Dashboard:
+    /// Focuses on multi-tenant platform-level management using MSME_MasterCRM database:
+    /// registered businesses, active tenant database mappings, subscription plan distribution,
+    /// cross-tenant user statistics, and tenant registration trends with period filtering.
+    /// </summary>
+    public class SuperAdminDashboardForm : CC.Forms.Shared.DashboardShell
     {
-        public SuperAdminDashboardForm()
+        private string _activePeriod = "30d";
+        private Panel _contentScrollPanel = null!;
+        public Task InitializationTask { get; private set; } = Task.CompletedTask;
+
+        public SuperAdminDashboardForm() : base("Super Admin Dashboard")
         {
-            Text = "Super Admin Dashboard";
-            Width = 900;
-            Height = 600;
-            StartPosition = FormStartPosition.CenterScreen;
+            PageTitle = "Platform Dashboard";
 
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3 };
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 60F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48F));
+            // Configure Super Admin specialized navigation items
+            SidebarCtrl.ResetNavItems(new[]
+            {
+                ("Dashboard", "\uE80F"),
+                ("Businesses", "\uE716"),
+                ("Subscriptions", "\uE8C7"),
+                ("Terms & Conditions", "\uE8D7"),
+                ("System Monitoring & Backups", "\uE770"),
+                ("Users", "\uE77B")
+            });
+            SidebarCtrl.SetActiveItem("Dashboard");
 
-            var lbl = new Label { Text = "Super Admin Dashboard", Font = new Font("Segoe UI", 16, FontStyle.Bold), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
-            var pnl = new Panel { Dock = DockStyle.Fill, Padding = new Padding(10) };
-            var msg = new Label { Text = "Super Admin modules will be implemented in a later phase.", AutoSize = true, Dock = DockStyle.Top };
-            var btnLogout = new Button { Text = "Logout", Anchor = AnchorStyles.Right, Width = 120 };
-            btnLogout.Click += (s, e) => Close();
+            BuildDashboardShell();
+            InitializationTask = LoadDashboardDataAsync();
+        }
 
-            pnl.Controls.Add(msg);
-            var bottom = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
-            bottom.Controls.Add(btnLogout);
+        protected override void OnNavigationRequested(string key)
+        {
+            base.OnNavigationRequested(key);
 
-            layout.Controls.Add(lbl, 0, 0);
-            layout.Controls.Add(pnl, 0, 1);
-            layout.Controls.Add(bottom, 0, 2);
+            switch (key)
+            {
+                case "Dashboard":
+                    BuildDashboardShell();
+                    _ = LoadDashboardDataAsync();
+                    break;
+                case "Businesses":
+                    ViewHost.ShowFormInPanel(MainPanel, new BusinessListForm());
+                    break;
+                case "Subscriptions":
+                    ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.SuperAdmin.Subscriptions.SuperAdminSubscriptionForm());
+                    break;
+                case "Terms & Conditions":
+                    ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.SuperAdmin.Terms.TermsAndConditionsForm());
+                    break;
+                case "System Monitoring & Backups":
+                    ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.SuperAdmin.Monitoring.SystemMonitoringBackupsForm());
+                    break;
+                case "Users":
+                    ViewHost.ShowFormInPanel(MainPanel, new UserListForm());
+                    break;
+                case "Sign Out":
+                    OnSignOutRequested();
+                    break;
+            }
+        }
 
-            Controls.Add(layout);
+        private void BuildDashboardShell()
+        {
+            ViewHost.ClearHostedForm(MainPanel);
+            MainPanel.Controls.Clear();
+
+            if (_contentScrollPanel == null)
+            {
+                _contentScrollPanel = new Panel
+                {
+                    Dock = DockStyle.Fill,
+                    AutoScroll = true,
+                    BackColor = Color.Transparent
+                };
+            }
+
+            _contentScrollPanel.Visible = true;
+            MainPanel.Controls.Add(_contentScrollPanel);
+        }
+
+        private async Task LoadDashboardDataAsync()
+        {
+            _contentScrollPanel.Controls.Clear();
+
+            var data = await CrmDataService.GetSuperAdminDashboardDataAsync(_activePeriod);
+
+            var rootLayout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                ColumnCount = 1,
+                RowCount = 4,
+                BackColor = Color.Transparent,
+                Padding = new Padding(0, 0, 16, 24)
+            };
+            rootLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+
+            // 1. TOP HEADER & PERIOD FILTER
+            var topPanel = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 64,
+                BackColor = Color.Transparent,
+                Margin = new Padding(0, 0, 0, 16)
+            };
+
+            var titleStack = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Left,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                AutoSize = true,
+                BackColor = Color.Transparent
+            };
+
+            var lblTitle = new Label
+            {
+                Text = "Platform Administration",
+                Font = new Font(UITheme.FontSerif, 22F, FontStyle.Bold),
+                ForeColor = UITheme.TextDark,
+                AutoSize = true,
+                Margin = new Padding(0, 0, 0, 2)
+            };
+
+            var lblSubtitle = new Label
+            {
+                Text = "Supervise multi-tenant businesses, system users, database routing, and platform health",
+                Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Regular),
+                ForeColor = UITheme.TextMuted,
+                AutoSize = true,
+                Margin = Padding.Empty
+            };
+
+            titleStack.Controls.Add(lblTitle);
+            titleStack.Controls.Add(lblSubtitle);
+
+            var periodSelector = new PeriodSelectorControl(new[] { "7d", "30d", "90d", "all" })
+            {
+                Dock = DockStyle.Right,
+                SelectedPeriod = _activePeriod
+            };
+            periodSelector.PeriodChanged += (s, newPeriod) =>
+            {
+                _activePeriod = newPeriod;
+                _ = LoadDashboardDataAsync();
+            };
+
+            topPanel.Controls.Add(periodSelector);
+            topPanel.Controls.Add(titleStack);
+            rootLayout.Controls.Add(topPanel, 0, 0);
+
+            // 2. 4 KPI STAT CARDS
+            var kpiTable = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                Height = 145,
+                ColumnCount = 4,
+                RowCount = 1,
+                BackColor = Color.Transparent,
+                Margin = new Padding(0, 0, 0, 20)
+            };
+            kpiTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25F));
+            kpiTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25F));
+            kpiTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25F));
+            kpiTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25F));
+
+            var cardBusinesses = new DashboardKpiCard
+            {
+                Dock = DockStyle.Fill,
+                Title = "Total Businesses",
+                Value = data.TotalBusinesses.ToString(),
+                Subtitle = $"Active: {data.ActiveBusinesses} tenants",
+                Margin = new Padding(0, 0, 8, 0)
+            };
+            cardBusinesses.SetBadge("Master CRM", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
+            cardBusinesses.CardClicked += (s, e) => Navigate("Businesses");
+
+            var cardSubs = new DashboardKpiCard
+            {
+                Dock = DockStyle.Fill,
+                Title = "Active Subscriptions",
+                Value = data.ActiveSubscriptionsCount.ToString(),
+                Subtitle = $"{data.ExpiringSubscriptionsCount} expiring \u00B7 {data.ExpiredSubscriptionsCount} expired",
+                Margin = new Padding(4, 0, 8, 0)
+            };
+            cardSubs.SetBadge("Platform", UITheme.PrimaryMauve, Color.FromArgb(245, 235, 240));
+
+            var cardUsers = new DashboardKpiCard
+            {
+                Dock = DockStyle.Fill,
+                Title = "Platform Users",
+                Value = data.PlatformUsersCount.ToString(),
+                Subtitle = "Across all registered tenants",
+                Margin = new Padding(4, 0, 8, 0)
+            };
+            cardUsers.SetBadge("Access", Color.FromArgb(50, 130, 200), Color.FromArgb(235, 243, 250));
+            cardUsers.CardClicked += (s, e) => Navigate("Platform Users");
+
+            var cardDatabases = new DashboardKpiCard
+            {
+                Dock = DockStyle.Fill,
+                Title = "Tenant Databases",
+                Value = data.ActiveDatabases.ToString(),
+                Subtitle = "Master DB mapped routing instances",
+                Margin = new Padding(4, 0, 0, 0)
+            };
+            cardDatabases.SetBadge("DB-per-Tenant", UITheme.UpgradeGold, Color.FromArgb(253, 248, 238));
+
+            kpiTable.Controls.Add(cardBusinesses, 0, 0);
+            kpiTable.Controls.Add(cardSubs, 1, 0);
+            kpiTable.Controls.Add(cardUsers, 2, 0);
+            kpiTable.Controls.Add(cardDatabases, 3, 0);
+            rootLayout.Controls.Add(kpiTable, 0, 1);
+
+            // 3. ANALYTICS CHARTS (2 Columns: Registration Trend & Subscription Plans)
+            var chartsTable = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                Height = 310,
+                ColumnCount = 2,
+                RowCount = 1,
+                BackColor = Color.Transparent,
+                Margin = new Padding(0, 0, 0, 20)
+            };
+            chartsTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62F));
+            chartsTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38F));
+
+            var trendChart = new DashboardTrendChart
+            {
+                Dock = DockStyle.Fill,
+                ChartTitle = "Business Registration Trends",
+                ChartSubtitle = "New business onboarding over selected period",
+                IsCurrency = false,
+                Margin = new Padding(0, 0, 10, 0)
+            };
+            trendChart.SetData(data.RegistrationTrend);
+
+            var planChart = new DashboardBarChart
+            {
+                Dock = DockStyle.Fill,
+                ChartTitle = "Subscription Plan Distribution",
+                ChartSubtitle = "Platform tenant tier breakdown",
+                Margin = new Padding(10, 0, 0, 0)
+            };
+            planChart.SetData(data.SubscriptionPlanDistribution);
+
+            chartsTable.Controls.Add(trendChart, 0, 0);
+            chartsTable.Controls.Add(planChart, 1, 0);
+            rootLayout.Controls.Add(chartsTable, 0, 2);
+
+            // 4. TENANT BUSINESS REGISTRY TABLE
+            var registryPanel = BuildTenantRegistryPanel(data);
+            rootLayout.Controls.Add(registryPanel, 0, 3);
+
+            _contentScrollPanel.Controls.Add(rootLayout);
+        }
+
+        private Panel BuildTenantRegistryPanel(SuperAdminDashboardData data)
+        {
+            var card = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 320,
+                BackColor = Color.White,
+                Padding = new Padding(1),
+                Margin = new Padding(0, 0, 0, 24)
+            };
+            card.ApplyRoundedRegion(16);
+
+            card.Paint += (s, e) =>
+            {
+                using var pen = new Pen(UITheme.BorderColor, 1f);
+                e.Graphics.DrawRoundedRectangle(pen, new Rectangle(0, 0, card.Width - 1, card.Height - 1), 16);
+            };
+
+            var headerPanel = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 56,
+                BackColor = Color.White,
+                Padding = new Padding(22, 10, 22, 6)
+            };
+
+            var headerLeft = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Left,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                AutoSize = true,
+                BackColor = Color.Transparent
+            };
+
+            var lblTitle = new Label
+            {
+                Text = "Registered Tenant Businesses & Database Allocations",
+                Font = new Font(UITheme.FontSerif, 12.5F, FontStyle.Bold),
+                ForeColor = UITheme.TextDark,
+                AutoSize = true,
+                Margin = new Padding(0, 0, 0, 2)
+            };
+
+            var lblSubtitle = new Label
+            {
+                Text = $"{data.RecentRegistrations.Count} dedicated tenant database instances active on platform",
+                Font = new Font(UITheme.FontSans, 8.5F, FontStyle.Regular),
+                ForeColor = UITheme.TextMuted,
+                AutoSize = true,
+                Margin = Padding.Empty
+            };
+
+            headerLeft.Controls.Add(lblTitle);
+            headerLeft.Controls.Add(lblSubtitle);
+
+            var linkManage = new Label
+            {
+                Text = "Manage All Businesses \u2192",
+                Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold),
+                ForeColor = UITheme.PrimaryMauve,
+                Dock = DockStyle.Right,
+                AutoSize = true,
+                Cursor = Cursors.Hand,
+                Padding = new Padding(0, 14, 0, 0)
+            };
+            linkManage.Click += (s, e) => Navigate("Businesses");
+
+            var badgePlatform = new Label
+            {
+                Text = "Database-per-Tenant",
+                Font = new Font(UITheme.FontSans, 8.5F, FontStyle.Bold),
+                ForeColor = UITheme.StatusGreenFg,
+                BackColor = UITheme.StatusGreenBg,
+                Dock = DockStyle.Right,
+                AutoSize = true,
+                Padding = new Padding(10, 4, 10, 4),
+                Margin = new Padding(0, 14, 16, 0)
+            };
+            badgePlatform.Paint += (s, e) =>
+            {
+                using var borderPen = new Pen(Color.FromArgb(40, UITheme.StatusGreenFg), 1f);
+                e.Graphics.DrawRoundedRectangle(borderPen, new Rectangle(0, 0, badgePlatform.Width - 1, badgePlatform.Height - 1), 10);
+            };
+
+            headerPanel.Controls.Add(linkManage);
+            headerPanel.Controls.Add(badgePlatform);
+            headerPanel.Controls.Add(headerLeft);
+            card.Controls.Add(headerPanel);
+
+            if (data.RecentRegistrations == null || data.RecentRegistrations.Count == 0)
+            {
+                var emptyLbl = new Label
+                {
+                    Text = "No registered tenant businesses found in Master CRM.",
+                    Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Italic),
+                    ForeColor = UITheme.TextMuted,
+                    Dock = DockStyle.Fill,
+                    TextAlign = ContentAlignment.MiddleCenter
+                };
+                card.Controls.Add(emptyLbl);
+                return card;
+            }
+
+            var grid = new DataGridView
+            {
+                Dock = DockStyle.Fill
+            };
+            UITheme.ApplyTableStyle(grid);
+            grid.RowTemplate.Height = 50;
+            grid.ColumnHeadersHeight = 42;
+
+            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "colCode", HeaderText = "COMPANY CODE", Width = 140, SortMode = DataGridViewColumnSortMode.NotSortable });
+            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "colName", HeaderText = "COMPANY NAME", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, MinimumWidth = 200, SortMode = DataGridViewColumnSortMode.NotSortable });
+            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "colDb", HeaderText = "TENANT DATABASE", Width = 200, SortMode = DataGridViewColumnSortMode.NotSortable });
+            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "colDate", HeaderText = "REGISTERED DATE", Width = 150, SortMode = DataGridViewColumnSortMode.NotSortable });
+            grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "colStatus", HeaderText = "STATUS", Width = 125, SortMode = DataGridViewColumnSortMode.NotSortable });
+
+            foreach (var item in data.RecentRegistrations)
+            {
+                int rowIdx = grid.Rows.Add(
+                    item.CompanyCode,
+                    item.CompanyName,
+                    item.DatabaseName,
+                    item.CreatedDate.ToString("MMM d, yyyy"),
+                    item.IsActive ? "Active" : "Inactive");
+                grid.Rows[rowIdx].Tag = item;
+            }
+
+            grid.CellPainting += (s, e) =>
+            {
+                if (e.RowIndex < 0 || e.Graphics == null) return;
+                var item = grid.Rows[e.RowIndex].Tag as SuperAdminCompanyItem;
+                if (item == null) return;
+
+                e.PaintBackground(e.CellBounds, true);
+                var g = e.Graphics;
+                int px5 = 20;
+                int cellY = e.CellBounds.Top + (e.CellBounds.Height - 20) / 2;
+
+                if (e.ColumnIndex == 0) // CODE
+                {
+                    using var font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold);
+                    using var brush = new SolidBrush(UITheme.PrimaryMauve);
+                    g.DrawString(item.CompanyCode, font, brush, e.CellBounds.Left + px5, cellY);
+                    e.Handled = true;
+                }
+                else if (e.ColumnIndex == 1) // NAME
+                {
+                    using var font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold);
+                    g.DrawString(item.CompanyName, font, Brushes.Black, e.CellBounds.Left + px5, cellY);
+                    e.Handled = true;
+                }
+                else if (e.ColumnIndex == 2) // DATABASE
+                {
+                    using var font = new Font(UITheme.FontSans, 9F, FontStyle.Regular);
+                    using var brush = new SolidBrush(UITheme.TextDark);
+                    g.DrawString(item.DatabaseName, font, brush, e.CellBounds.Left + px5, cellY);
+                    e.Handled = true;
+                }
+                else if (e.ColumnIndex == 3) // DATE
+                {
+                    using var font = new Font(UITheme.FontSans, 9F, FontStyle.Regular);
+                    using var brush = new SolidBrush(UITheme.TextMuted);
+                    g.DrawString(item.CreatedDate.ToString("MMM d, yyyy"), font, brush, e.CellBounds.Left + px5, cellY);
+                    e.Handled = true;
+                }
+                else if (e.ColumnIndex == 4) // STATUS
+                {
+                    Color bg = item.IsActive ? UITheme.StatusGreenBg : UITheme.StatusRedBg;
+                    Color fg = item.IsActive ? UITheme.StatusGreenFg : UITheme.StatusRedFg;
+                    UITheme.DrawStatusBadge(g, e.CellBounds, item.IsActive ? "Active" : "Inactive", bg, fg, showDot: true);
+                    e.Handled = true;
+                }
+            };
+
+            grid.CellClick += (s, e) => Navigate("Businesses");
+
+            grid.ClearSelection();
+            card.Controls.Add(grid);
+            grid.BringToFront();
+            return card;
         }
     }
 }

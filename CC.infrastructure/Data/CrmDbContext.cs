@@ -39,6 +39,10 @@ namespace CC.infrastructure.Data
         public DbSet<ReportLog> ReportLogs => Set<ReportLog>();
         public DbSet<ReportParameter> ReportParameters => Set<ReportParameter>();
 
+        public DbSet<RetentionEmailTemplate> RetentionEmailTemplates => Set<RetentionEmailTemplate>();
+        public DbSet<RetentionEmailLog> RetentionEmailLogs => Set<RetentionEmailLog>();
+        public DbSet<RetentionSetting> RetentionSettings => Set<RetentionSetting>();
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
@@ -392,6 +396,26 @@ namespace CC.infrastructure.Data
                 .WithMany(x => x.Inquiries)
                 .HasForeignKey(x => x.CustomerId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            // Retention Email Template
+            modelBuilder.Entity<RetentionEmailTemplate>()
+                .HasKey(x => x.TemplateId);
+
+            modelBuilder.Entity<RetentionEmailTemplate>()
+                .Property(x => x.DiscountPercent)
+                .HasPrecision(5, 2);
+
+            // Retention Email Log
+            modelBuilder.Entity<RetentionEmailLog>()
+                .HasKey(x => x.LogId);
+
+            modelBuilder.Entity<RetentionEmailLog>()
+                .Property(x => x.ConvertedOrderAmount)
+                .HasPrecision(18, 2);
+
+            // Retention Setting
+            modelBuilder.Entity<RetentionSetting>()
+                .HasKey(x => x.SettingId);
         }
     }
 }
