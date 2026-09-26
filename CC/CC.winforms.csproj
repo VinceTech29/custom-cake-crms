@@ -10,6 +10,19 @@
     <NoWarn>$(NoWarn);WFO1000</NoWarn>
   </PropertyGroup>
 
+  <!-- Exclude nested sibling projects that are physically inside this folder -->
+  <ItemGroup>
+    <Compile Remove="CC.api\**" />
+    <Compile Remove="CC.domain\**" />
+    <Compile Remove="CC.infrastructure\**" />
+    <EmbeddedResource Remove="CC.api\**" />
+    <EmbeddedResource Remove="CC.domain\**" />
+    <EmbeddedResource Remove="CC.infrastructure\**" />
+    <None Remove="CC.api\**" />
+    <None Remove="CC.domain\**" />
+    <None Remove="CC.infrastructure\**" />
+  </ItemGroup>
+
   <ItemGroup>
     <Compile Update="Properties\Resources.Designer.cs">
       <DesignTime>True</DesignTime>
