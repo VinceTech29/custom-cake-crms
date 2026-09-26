@@ -5938,45 +5938,50 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                     break;
             }
 
-            // Body generation - professional, structured, with paragraphs, headings, and CTA (Requirement 5)
+            // Body generation - warm, professional, authentic customer appreciation email
             var sb = new System.Text.StringBuilder();
             sb.AppendLine($"Dear {customerName},");
             sb.AppendLine();
-            sb.AppendLine("Thank you for being part of the Sweet Story family! Your trust and support mean the world to us, and we are grateful for every celebration we've had the honor to be part of.");
+            sb.AppendLine("Thank you for being a valued part of the Sweet Story family! Your trust and support mean the world to us, and we are grateful for every celebration and sweet moment we have had the privilege to be part of.");
             sb.AppendLine();
 
             if (discount > 0)
             {
-                sb.AppendLine($"As a gesture of our heartfelt gratitude, our management team has approved an exclusive {discountText} discount tailored specifically for your next custom cake or pastry order with us.");
+                sb.AppendLine($"As a token of our heartfelt appreciation, our management has approved an exclusive {discountText} discount tailored specifically for your next custom cake or pastry order with us.");
             }
             else
             {
-                sb.AppendLine("As a gesture of our heartfelt gratitude, our management team has approved an exclusive customer appreciation offer tailored specifically for your next order with us.");
+                sb.AppendLine("As a token of our heartfelt appreciation, our management has approved an exclusive customer appreciation offer tailored specifically for your next celebration order with us.");
             }
             sb.AppendLine();
 
-            if (!string.IsNullOrWhiteSpace(req.RetentionDetails))
+            sb.AppendLine("Offer Details:");
+            if (discount > 0)
             {
-                sb.AppendLine("Offer Details:");
-                sb.AppendLine($"• {req.RetentionDetails.Trim()}");
-                if (discount > 0)
-                {
-                    sb.AppendLine($"• Applicable Discount: {discountText} on your upcoming order");
-                }
-                sb.AppendLine("• Validity: Valid for 30 days from today");
-                sb.AppendLine();
+                sb.AppendLine($"• Special Discount: {discountText} off on your next customized cake or bakery order");
             }
-
-            sb.AppendLine("Next Steps / How to Redeem:");
-            sb.AppendLine("Simply mention this special offer or reply to this message when placing your next order, and our dedicated cake designers will make sure your celebration is truly extraordinary.");
+            if (!string.IsNullOrWhiteSpace(req.RetentionDetails) && req.RetentionDetails.Trim().Length > 10)
+            {
+                sb.AppendLine($"• Special Note: {req.RetentionDetails.Trim()}");
+            }
+            else if (!string.IsNullOrWhiteSpace(req.ActionType) && req.ActionType != "Special Discount")
+            {
+                sb.AppendLine($"• Offer Type: {req.ActionType}");
+            }
+            sb.AppendLine("• Validity: Valid for 30 days from today");
             sb.AppendLine();
-            sb.AppendLine("Call to Action:");
-            sb.AppendLine("Visit our store or get in touch with our team today to discuss your next custom design!");
+
+            sb.AppendLine("How to Redeem:");
+            sb.AppendLine("Simply reply directly to this email or present this message at our shop when placing your next order. Our master cake decorators will be delighted to handcraft something extraordinary for your celebration!");
+            sb.AppendLine();
+            sb.AppendLine("We look forward to welcoming you back soon. Feel free to contact our team anytime to discuss your next custom design.");
             sb.AppendLine();
             sb.AppendLine("Warmest regards,");
-            sb.AppendLine("The Sweet Story Team");
+            sb.AppendLine();
+            sb.AppendLine("The Sweet Story Management Team");
             sb.AppendLine("Sweet Story Cake Shop & Café");
-            sb.AppendLine("Email: support@sweetstory.com  |  Phone: +63 912 345 6789");
+            sb.AppendLine("📍 123 Baker Street, Metro Manila");
+            sb.AppendLine("📞 (02) 8123-4567  |  ✉ support@sweetstory.com");
             sb.AppendLine("Crafting Sweet Moments for Every Celebration");
 
             return (subject, sb.ToString());
@@ -6079,18 +6084,70 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 );
             }
 
-            return await query
+            var results = await query
                 .OrderByDescending(r => r.RequestedDate)
                 .ToListAsync();
+
+            foreach (var req in results)
+            {
+                if (req.Status == "Approved" && string.IsNullOrEmpty(req.GeneratedCampaignBody))
+                {
+                    var (genSubject, genBody) = GenerateFormattedRetentionEmail(req);
+                    req.GeneratedCampaignSubject = genSubject;
+                    req.GeneratedCampaignBody = genBody;
+                    req.AddedToCampaign = true;
+                    req.AddedToCampaignDate ??= req.ReviewedDate ?? DateTime.UtcNow;
+                }
+            }
+
+            return results;
         }
 
         public static async Task<RetentionRequest?> GetRetentionRequestByIdAsync(int requestId, int? companyId = null)
         {
             var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
             await using var context = CreateDbContext(targetCompanyId);
-            return await context.RetentionRequests
-                .AsNoTracking()
+            var req = await context.RetentionRequests
                 .FirstOrDefaultAsync(r => r.RequestId == requestId && r.CompanyId == targetCompanyId);
+
+            if (req != null && req.Status == "Approved" && (!req.AddedToCampaign || string.IsNullOrEmpty(req.GeneratedCampaignBody)))
+            {
+                var (genSubject, genBody) = GenerateFormattedRetentionEmail(req);
+                req.GeneratedCampaignSubject = genSubject;
+                req.GeneratedCampaignBody = genBody;
+                req.AddedToCampaign = true;
+                req.AddedToCampaignDate ??= req.ReviewedDate ?? DateTime.UtcNow;
+
+                var existingLog = await context.RetentionEmailLogs
+                    .FirstOrDefaultAsync(l => l.RetentionRequestId == req.RequestId);
+                if (existingLog == null)
+                {
+                    var campaignLog = new RetentionEmailLog
+                    {
+                        CompanyId = req.CompanyId,
+                        CustomerId = req.CustomerId,
+                        CustomerName = req.CustomerName,
+                        CustomerEmail = req.CustomerEmail,
+                        SegmentName = req.TargetSegment,
+                        Subject = genSubject,
+                        BodySent = genBody,
+                        SentDate = req.AddedToCampaignDate ?? DateTime.UtcNow,
+                        SentBy = $"Approved Request #{req.RequestId} ({req.ReviewedByUserName ?? "Admin"})",
+                        Status = "Ready to Send",
+                        RetentionRequestId = req.RequestId
+                    };
+                    context.RetentionEmailLogs.Add(campaignLog);
+                    await context.SaveChangesAsync();
+                    req.GeneratedCampaignLogId = campaignLog.LogId;
+                }
+                else
+                {
+                    req.GeneratedCampaignLogId = existingLog.LogId;
+                }
+                await context.SaveChangesAsync();
+            }
+
+            return req;
         }
     }
 

@@ -295,7 +295,7 @@ namespace CC.Forms.Retention
             }
 
             // --- SECTION 1: CUSTOMER & RETENTION PROPOSAL ---
-            var sec1 = CreateSectionCard("CUSTOMER & RETENTION PROPOSAL", "\uE77B");
+            var sec1 = CreateSectionCard("CUSTOMER & RETENTION PROPOSAL");
             sec1.Controls.Add(CreateDataRow("Customer / Client:", $"{request.CustomerName} ({request.CustomerEmail})"));
             sec1.Controls.Add(CreateDataRow("Target Segment:", request.TargetSegment));
             sec1.Controls.Add(CreateDataRow("Action Type:", request.ActionType));
@@ -304,30 +304,38 @@ namespace CC.Forms.Retention
             contentFlow.Controls.Add(sec1);
 
             // --- SECTION 2: REASON FOR RETENTION ---
-            var sec2 = CreateSectionCard("REASON FOR RETENTION", "\uE7BA");
+            var sec2 = CreateSectionCard("REASON FOR RETENTION");
             sec2.Controls.Add(CreateDataRow("Reason Category:", request.ReasonCategory));
-            if (!string.IsNullOrWhiteSpace(request.ReasonCustomDetails))
-            {
-                sec2.Controls.Add(CreateDataRow("Specific Details / Note:", request.ReasonCustomDetails));
-            }
+            string detailsText = !string.IsNullOrWhiteSpace(request.ReasonCustomDetails)
+                ? request.ReasonCustomDetails
+                : (!string.IsNullOrWhiteSpace(request.RetentionDetails) ? request.RetentionDetails : "Proactive customer appreciation and retention incentive");
+            sec2.Controls.Add(CreateDataRow("Specific Details / Note:", detailsText));
             contentFlow.Controls.Add(sec2);
 
             // --- SECTION 3: APPROVAL HISTORY & AUDIT TRAIL ---
-            var sec3 = CreateSectionCard("APPROVAL HISTORY (AUDIT TIMELINE)", "\uE823");
-            var timelinePanel = BuildApprovalTimeline();
-            sec3.Controls.Add(timelinePanel);
+            var sec3 = CreateSectionCard("APPROVAL HISTORY (AUDIT TIMELINE)");
+            PopulateApprovalTimeline(sec3);
             contentFlow.Controls.Add(sec3);
 
             // --- SECTION 4: AUTOMATIC EMAIL CAMPAIGN (Requirements 4, 5, 6) ---
-            if (request.Status == "Approved" && request.AddedToCampaign)
+            if (request.Status == "Approved")
             {
-                var sec4 = CreateSectionCard("AUTOMATICALLY GENERATED EMAIL CAMPAIGN", "\uE715");
+                if (string.IsNullOrWhiteSpace(request.GeneratedCampaignSubject) || string.IsNullOrWhiteSpace(request.GeneratedCampaignBody))
+                {
+                    var (genSubject, genBody) = CrmDataService.GenerateFormattedRetentionEmail(request);
+                    request.GeneratedCampaignSubject = genSubject;
+                    request.GeneratedCampaignBody = genBody;
+                    request.AddedToCampaign = true;
+                    request.AddedToCampaignDate ??= request.ReviewedDate ?? DateTime.UtcNow;
+                }
 
-                // Banner
+                var sec4 = CreateSectionCard("AUTOMATICALLY GENERATED EMAIL CAMPAIGN");
+
+                // Success Banner
                 var pnlSuccessBanner = new Panel
                 {
-                    Width = 590,
-                    Height = 44,
+                    Width = 600,
+                    Height = 42,
                     BackColor = Color.FromArgb(240, 253, 244),
                     Margin = new Padding(0, 0, 0, 10),
                     Padding = new Padding(12, 10, 12, 10)
@@ -343,40 +351,79 @@ namespace CC.Forms.Retention
                 sec4.Controls.Add(pnlSuccessBanner);
 
                 sec4.Controls.Add(CreateDataRow("Campaign Status:", "Ready to Send (Personalized retention offer)"));
-                sec4.Controls.Add(CreateDataRow("Email Subject:", request.GeneratedCampaignSubject ?? "Exclusive Offer from Sweet Story"));
+                sec4.Controls.Add(CreateDataRow("Email Subject:", request.GeneratedCampaignSubject ?? "Special Offer from Sweet Story"));
 
                 var lblBodyLabel = new Label
                 {
                     Text = "Formatted Email Body (Ready for Dispatch):",
                     Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold),
                     ForeColor = UITheme.TextMuted,
-                    Width = 590,
+                    Width = 600,
                     Margin = new Padding(0, 8, 0, 4)
                 };
                 sec4.Controls.Add(lblBodyLabel);
 
                 var txtBodyPreview = new TextBox
                 {
-                    Width = 590,
-                    Height = 160,
+                    Width = 600,
+                    Height = 180,
                     Multiline = true,
                     ReadOnly = true,
                     ScrollBars = ScrollBars.Vertical,
-                    Font = new Font("Segoe UI", 9F),
+                    Font = new Font("Segoe UI", 9.5F),
                     BackColor = Color.FromArgb(250, 248, 246),
                     ForeColor = UITheme.TextDark,
                     BorderStyle = BorderStyle.FixedSingle,
-                    Margin = new Padding(0, 0, 0, 8),
+                    Margin = new Padding(0, 0, 0, 10),
                     Text = request.GeneratedCampaignBody ?? string.Empty
                 };
                 sec4.Controls.Add(txtBodyPreview);
 
+                var btnSendNow = new Button
+                {
+                    Text = "\u2709 Dispatch Retention Email Now",
+                    Height = 36,
+                    Width = 240,
+                    FlatStyle = FlatStyle.Flat,
+                    Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold),
+                    ForeColor = Color.White,
+                    BackColor = UITheme.PrimaryMauve,
+                    Cursor = Cursors.Hand,
+                    Margin = new Padding(0, 0, 0, 6)
+                };
+                btnSendNow.FlatAppearance.BorderSize = 0;
+                btnSendNow.Click += async (s, e) =>
+                {
+                    btnSendNow.Enabled = false;
+                    btnSendNow.Text = "Sending...";
+                    try
+                    {
+                        await CrmDataService.SendManualRetentionEmailAsync(
+                            customerId: request.CustomerId,
+                            segmentName: request.TargetSegment,
+                            forceIgnoreCooldown: true,
+                            overrideSubject: request.GeneratedCampaignSubject,
+                            overrideBody: request.GeneratedCampaignBody
+                        );
+                        MessageBox.Show($"Retention email successfully dispatched to {request.CustomerName} ({request.CustomerEmail})!", "Email Sent", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        btnSendNow.Text = "\u2714 Email Dispatched";
+                        btnSendNow.BackColor = Color.FromArgb(22, 163, 74);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"Failed to send email: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        btnSendNow.Enabled = true;
+                        btnSendNow.Text = "\u2709 Dispatch Retention Email Now";
+                    }
+                };
+                sec4.Controls.Add(btnSendNow);
+
                 var lblNotice = new Label
                 {
-                    Text = "\u2139 This email campaign entry is accessible under the Email Campaigns tab where it can be reviewed and dispatched.",
+                    Text = "\u2139 This email campaign entry is also active under the Email Campaigns tab where it can be reviewed and dispatched at any time.",
                     Font = new Font(UITheme.FontSans, 8.5F, FontStyle.Italic),
                     ForeColor = UITheme.TextMuted,
-                    Width = 590,
+                    Width = 600,
                     AutoSize = true,
                     Margin = new Padding(0, 4, 0, 4)
                 };
@@ -393,48 +440,38 @@ namespace CC.Forms.Retention
             contentFlow.ResumeLayout(true);
         }
 
-        private Panel BuildApprovalTimeline()
+        private void PopulateApprovalTimeline(FlowLayoutPanel sec3)
         {
-            if (request == null) return new Panel();
+            if (request == null) return;
 
-            var flow = new FlowLayoutPanel
-            {
-                Width = 595,
-                FlowDirection = FlowDirection.TopDown,
-                WrapContents = false,
-                AutoSize = true,
-                BackColor = Color.Transparent,
-                Margin = Padding.Empty,
-                Padding = Padding.Empty
-            };
-
-            // Timeline Step 1: REQUESTED BY MANAGER
-            var step1 = CreateTimelineNode(
+            // Step 1: Request Submitted
+            var step1 = CreateTimelineCard(
                 title: "1. Retention Request Submitted",
                 subtitle: $"Requested by: {request.RequestedByUserName} (Manager)",
                 timestamp: request.RequestedDate.ToLocalTime().ToString("MMM dd, yyyy h:mm tt"),
-                statusBadgeText: "SUBMITTED",
-                statusColor: UITheme.PrimaryMauve,
-                statusBg: Color.FromArgb(243, 240, 255),
-                details: null
+                badgeText: "SUBMITTED",
+                badgeFg: UITheme.PrimaryMauve,
+                badgeBg: Color.FromArgb(243, 240, 255),
+                details: string.IsNullOrWhiteSpace(request.RetentionDetails) ? null : $"Proposal: {request.ActionType} ({(request.DiscountPercent > 0 ? $"{request.DiscountPercent:0.#}% discount" : "Standard")}) \u00B7 {request.RetentionDetails}"
             );
-            flow.Controls.Add(step1);
+            sec3.Controls.Add(step1);
 
-            // Timeline Step 2: ADMIN REVIEW
+            // Step 2: Review (Approved / Rejected / Pending)
             if (request.ReviewedDate.HasValue)
             {
                 bool isApproved = request.Status == "Approved";
                 string reviewTitle = isApproved ? "2. Request Approved" : "2. Request Rejected";
-                string reviewSub = isApproved
-                    ? $"Approved by: {request.ReviewedByUserName ?? "Admin"} (Business Admin)"
-                    : $"Rejected by: {request.RejectedByUserName ?? request.ReviewedByUserName ?? "Admin"} (Business Admin)";
+                string reviewer = isApproved
+                    ? (request.ReviewedByUserName ?? "Admin")
+                    : (request.RejectedByUserName ?? request.ReviewedByUserName ?? "Admin");
+                string reviewSub = $"{request.Status} by: {reviewer} (Business Admin)";
                 string timeStr = (request.RejectionDate ?? request.ReviewedDate.Value).ToLocalTime().ToString("MMM dd, yyyy h:mm tt");
                 string badge = isApproved ? "APPROVED" : "REJECTED";
                 Color fg = isApproved ? UITheme.StatusGreenFg : UITheme.StatusRedFg;
                 Color bg = isApproved ? UITheme.StatusGreenBg : UITheme.StatusRedBg;
 
                 string? details = null;
-                if (!isApproved && !string.IsNullOrWhiteSpace(request.RejectionReason))
+                if (!isApproved)
                 {
                     details = $"Reason for Rejection: {request.RejectionReason}";
                     if (!string.IsNullOrWhiteSpace(request.AdminRemarks))
@@ -442,110 +479,112 @@ namespace CC.Forms.Retention
                         details += $"\r\nRemarks: {request.AdminRemarks}";
                     }
                 }
-                else if (isApproved)
+                else
                 {
-                    details = "Approved by Business Admin. Customer added to Email Campaigns with automated personalized offer.";
+                    details = "Approved by Business Admin. Customer automatically added to Email Campaigns with formatted personalized offer.";
                     if (!string.IsNullOrWhiteSpace(request.AdminRemarks))
                     {
                         details += $"\r\nRemarks: {request.AdminRemarks}";
                     }
                 }
 
-                var step2 = CreateTimelineNode(
+                var step2 = CreateTimelineCard(
                     title: reviewTitle,
                     subtitle: reviewSub,
                     timestamp: timeStr,
-                    statusBadgeText: badge,
-                    statusColor: fg,
-                    statusBg: bg,
+                    badgeText: badge,
+                    badgeFg: fg,
+                    badgeBg: bg,
                     details: details
                 );
-                flow.Controls.Add(step2);
+                sec3.Controls.Add(step2);
             }
             else
             {
-                // Pending Placeholder
-                var stepPending = CreateTimelineNode(
+                var stepPending = CreateTimelineCard(
                     title: "2. Pending Admin Review & Decision",
                     subtitle: "Awaiting Business Admin approval or rejection.",
                     timestamp: "In Progress",
-                    statusBadgeText: "PENDING",
-                    statusColor: UITheme.StatusYellowFg,
-                    statusBg: UITheme.StatusYellowBg,
+                    badgeText: "PENDING",
+                    badgeFg: UITheme.StatusYellowFg,
+                    badgeBg: UITheme.StatusYellowBg,
                     details: null
                 );
-                flow.Controls.Add(stepPending);
+                sec3.Controls.Add(stepPending);
             }
-
-            return flow;
         }
 
-        private Panel CreateTimelineNode(
+        private TableLayoutPanel CreateTimelineCard(
             string title,
             string subtitle,
             string timestamp,
-            string statusBadgeText,
-            Color statusColor,
-            Color statusBg,
+            string badgeText,
+            Color badgeFg,
+            Color badgeBg,
             string? details)
         {
-            var card = new Panel
+            var card = new TableLayoutPanel
             {
-                Width = 590,
+                Width = 600,
                 AutoSize = true,
+                ColumnCount = 1,
+                RowCount = string.IsNullOrWhiteSpace(details) ? 2 : 3,
                 BackColor = Color.FromArgb(249, 250, 251),
                 Margin = new Padding(0, 0, 0, 10),
-                Padding = new Padding(14, 12, 14, 12)
+                Padding = new Padding(14, 10, 14, 12)
             };
+            card.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
 
             var topRow = new TableLayoutPanel
             {
-                Width = 562,
-                Height = 28,
+                Width = 572,
+                Height = 26,
                 ColumnCount = 2,
                 RowCount = 1,
-                Dock = DockStyle.Top,
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+                Margin = Padding.Empty
             };
-            topRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 75F));
-            topRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25F));
+            topRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 72F));
+            topRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 28F));
 
-            var lblT = new Label
+            var lblTitle = new Label
             {
                 Text = title,
                 Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold),
                 ForeColor = UITheme.TextDark,
-                AutoSize = true,
-                Dock = DockStyle.Left
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleLeft,
+                UseMnemonic = false
             };
 
             var badge = new Label
             {
-                Text = statusBadgeText,
+                Text = badgeText,
                 Font = new Font(UITheme.FontSans, 8F, FontStyle.Bold),
                 Height = 22,
-                Width = 85,
+                Width = 90,
                 TextAlign = ContentAlignment.MiddleCenter,
-                BackColor = statusBg,
-                ForeColor = statusColor,
-                Dock = DockStyle.Right
+                BackColor = badgeBg,
+                ForeColor = badgeFg,
+                Dock = DockStyle.Right,
+                UseMnemonic = false
             };
 
-            topRow.Controls.Add(lblT, 0, 0);
+            topRow.Controls.Add(lblTitle, 0, 0);
             topRow.Controls.Add(badge, 1, 0);
+            card.Controls.Add(topRow, 0, 0);
 
             var lblSub = new Label
             {
                 Text = $"{subtitle}  \u00B7  {timestamp}",
                 Font = new Font(UITheme.FontSans, 8.5F, FontStyle.Regular),
                 ForeColor = UITheme.TextMuted,
+                Dock = DockStyle.Fill,
                 AutoSize = true,
-                Dock = DockStyle.Top,
-                Margin = new Padding(0, 2, 0, 4)
+                Margin = new Padding(0, 4, 0, 2),
+                UseMnemonic = false
             };
-
-            card.Controls.Add(lblSub);
-            card.Controls.Add(topRow);
+            card.Controls.Add(lblSub, 0, 1);
 
             if (!string.IsNullOrWhiteSpace(details))
             {
@@ -553,12 +592,13 @@ namespace CC.Forms.Retention
                 {
                     Text = details,
                     Font = new Font(UITheme.FontSans, 8.5F, FontStyle.Regular),
-                    ForeColor = Color.FromArgb(60, 60, 60),
+                    ForeColor = Color.FromArgb(70, 70, 70),
+                    Dock = DockStyle.Fill,
                     AutoSize = true,
-                    Dock = DockStyle.Top,
-                    Margin = new Padding(0, 8, 0, 0)
+                    Margin = new Padding(0, 4, 0, 0),
+                    UseMnemonic = false
                 };
-                card.Controls.Add(lblDet);
+                card.Controls.Add(lblDet, 0, 2);
             }
 
             return card;
@@ -818,11 +858,11 @@ namespace CC.Forms.Retention
             }
         }
 
-        private FlowLayoutPanel CreateSectionCard(string title, string iconGlyph)
+        private FlowLayoutPanel CreateSectionCard(string title)
         {
             var card = new FlowLayoutPanel
             {
-                Width = 615,
+                Width = 620,
                 AutoSize = true,
                 FlowDirection = FlowDirection.TopDown,
                 WrapContents = false,
@@ -840,19 +880,29 @@ namespace CC.Forms.Retention
 
             var header = new Panel
             {
-                Width = 580,
-                Height = 28,
+                Width = 584,
+                Height = 26,
                 BackColor = Color.Transparent,
                 Margin = new Padding(0, 0, 0, 10)
             };
 
+            var accentBar = new Panel
+            {
+                Width = 4,
+                Height = 16,
+                BackColor = UITheme.PrimaryMauve,
+                Location = new Point(0, 3)
+            };
+            header.Controls.Add(accentBar);
+
             var lbl = new Label
             {
-                Text = $"{iconGlyph}  {title}",
+                Text = title,
                 Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold),
                 ForeColor = UITheme.PrimaryMauve,
                 AutoSize = true,
-                Location = new Point(0, 2)
+                Location = new Point(10, 2),
+                UseMnemonic = false
             };
             header.Controls.Add(lbl);
             card.Controls.Add(header);
@@ -864,7 +914,7 @@ namespace CC.Forms.Retention
         {
             var row = new TableLayoutPanel
             {
-                Width = 580,
+                Width = 584,
                 AutoSize = true,
                 BackColor = Color.Transparent,
                 Margin = new Padding(0, 3, 0, 5),
