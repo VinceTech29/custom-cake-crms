@@ -636,6 +636,34 @@ namespace CC
                     }
                     detailsModal.Close();
 
+                    // Capture Register New Business Modal (Top & Scrolled Bottom)
+                    using (var regModal = new CC.Forms.SuperAdmin.Businesses.BusinessModal())
+                    {
+                        regModal.StartPosition = FormStartPosition.Manual;
+                        regModal.Location = new Point(100, 100);
+                        regModal.Show();
+                        for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(20); }
+                        using (var bmp = new Bitmap(regModal.Width, regModal.Height))
+                        {
+                            regModal.DrawToBitmap(bmp, new Rectangle(0, 0, regModal.Width, regModal.Height));
+                            bmp.Save(Path.Combine(outputDir, "screen_superadmin_register_business_top.png"), ImageFormat.Png);
+                        }
+
+                        // Scroll body to bottom to capture Initial Business Admin Account section
+                        var bodyPanel = regModal.Controls.OfType<Panel>().FirstOrDefault(p => p.Dock == DockStyle.Fill);
+                        if (bodyPanel != null)
+                        {
+                            bodyPanel.AutoScrollPosition = new Point(0, 2000);
+                            for (int i = 0; i < 15; i++) { Application.DoEvents(); Thread.Sleep(20); }
+                        }
+                        using (var bmp = new Bitmap(regModal.Width, regModal.Height))
+                        {
+                            regModal.DrawToBitmap(bmp, new Rectangle(0, 0, regModal.Width, regModal.Height));
+                            bmp.Save(Path.Combine(outputDir, "screen_superadmin_register_business_bottom.png"), ImageFormat.Png);
+                        }
+                        regModal.Close();
+                    }
+
                     // 11.2 Business Admin Dashboard
                     SessionService.CurrentUser = new CurrentUser
                     {
@@ -759,6 +787,21 @@ namespace CC
                         {
                             saShell.DrawToBitmap(bmp, new Rectangle(0, 0, saShell.Width, saShell.Height));
                             bmp.Save(Path.Combine(outputDir, "screen_superadmin_subscriptions.png"), ImageFormat.Png);
+                        }
+
+                        // Capture Subscriptions Screen (Tab 1: Business Subscriptions Table)
+                        if (saShell.MainPanel.Controls.Count > 0 && saShell.MainPanel.Controls[0] is CC.Forms.SuperAdmin.Subscriptions.SuperAdminSubscriptionForm saSubForm)
+                        {
+                            var tabBar = saSubForm.Controls.OfType<Panel>().FirstOrDefault(p => p.Height == 44);
+                            var flow = tabBar?.Controls.OfType<FlowLayoutPanel>().FirstOrDefault();
+                            var btnTabBiz = flow?.Controls.OfType<Button>().FirstOrDefault(b => b.Text.Contains("Business Subscriptions"));
+                            btnTabBiz?.PerformClick();
+                            for (int i = 0; i < 30; i++) { Application.DoEvents(); Thread.Sleep(30); }
+                            using (var bmp = new Bitmap(saShell.Width, saShell.Height))
+                            {
+                                saShell.DrawToBitmap(bmp, new Rectangle(0, 0, saShell.Width, saShell.Height));
+                                bmp.Save(Path.Combine(outputDir, "screen_superadmin_business_subscriptions_table.png"), ImageFormat.Png);
+                            }
                         }
 
                         // Capture Terms & Conditions Screen

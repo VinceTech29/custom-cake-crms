@@ -37,6 +37,7 @@ namespace CC.Forms.SuperAdmin.Subscriptions
 
         private Panel contentCardPanel = null!;
         private FlowLayoutPanel flowPlansCards = null!;
+        private Panel bizContainer = null!;
         private DataGridView gridBusinesses = null!;
 
         private List<SubscriptionPlanListItem> _plansList = new();
@@ -311,6 +312,7 @@ namespace CC.Forms.SuperAdmin.Subscriptions
                 txtSearchBox.PlaceholderText = "Search subscription plans...";
 
                 flowPlansCards.Visible = true;
+                bizContainer.Visible = false;
                 gridBusinesses.Visible = false;
                 btnCreatePlan.Visible = true;
 
@@ -328,6 +330,7 @@ namespace CC.Forms.SuperAdmin.Subscriptions
                 txtSearchBox.PlaceholderText = "Search by business name or plan...";
 
                 flowPlansCards.Visible = false;
+                bizContainer.Visible = true;
                 gridBusinesses.Visible = true;
                 btnCreatePlan.Visible = false;
 
@@ -429,13 +432,13 @@ namespace CC.Forms.SuperAdmin.Subscriptions
                 AutoScroll = true,
                 BackColor = Color.Transparent,
                 WrapContents = true,
-                Padding = new Padding(6, 4, 6, 16)
+                Padding = new Padding(6, 4, 6, 24)
             };
             flowPlansCards.Resize += (s, e) => UpdateCardSizes();
             contentCardPanel.Resize += (s, e) => UpdateCardSizes();
 
             // 2. Grid Businesses (Tab 1)
-            var bizContainer = new Panel
+            bizContainer = new Panel
             {
                 Dock = DockStyle.Fill,
                 BackColor = Color.White,
@@ -524,7 +527,8 @@ namespace CC.Forms.SuperAdmin.Subscriptions
             // >= 480px  -> 2 columns
             // < 480px   -> 1 column
             int cols = usableWidth >= 1150 ? 4 : (usableWidth >= 780 ? 3 : (usableWidth >= 480 ? 2 : 1));
-            int gap = 12;
+            int gap = 16;
+            int rowGap = 24;
             int totalGaps = cols * gap;
             int cardWidth = (usableWidth - totalGaps) / cols;
             cardWidth = Math.Max(260, Math.Min(cardWidth, 480));
@@ -536,7 +540,7 @@ namespace CC.Forms.SuperAdmin.Subscriptions
                 {
                     card.Width = cardWidth;
                     card.Height = 380;
-                    card.Margin = new Padding(0, 0, gap, gap);
+                    card.Margin = new Padding(0, 0, gap, rowGap);
                     card.Invalidate();
                 }
             }
@@ -603,14 +607,15 @@ namespace CC.Forms.SuperAdmin.Subscriptions
 
             int usableWidth = flowPlansCards.ClientSize.Width - flowPlansCards.Padding.Horizontal - 16;
             int cols = usableWidth >= 1150 ? 4 : (usableWidth >= 780 ? 3 : (usableWidth >= 480 ? 2 : 1));
-            int gap = 12;
+            int gap = 16;
+            int rowGap = 24;
             int totalGaps = cols * gap;
             int initialWidth = usableWidth >= 260 ? (usableWidth - totalGaps) / cols : 300;
             initialWidth = Math.Max(260, Math.Min(initialWidth, 480));
 
             foreach (var plan in list)
             {
-                var card = CreatePlanCard(plan, initialWidth, gap);
+                var card = CreatePlanCard(plan, initialWidth, gap, rowGap);
                 flowPlansCards.Controls.Add(card);
             }
 
@@ -619,13 +624,13 @@ namespace CC.Forms.SuperAdmin.Subscriptions
             UpdateCardSizes();
         }
 
-        private Panel CreatePlanCard(SubscriptionPlanListItem plan, int initialWidth = 300, int gap = 12)
+        private Panel CreatePlanCard(SubscriptionPlanListItem plan, int initialWidth = 300, int gap = 16, int rowGap = 24)
         {
             var card = new Panel
             {
                 Size = new Size(initialWidth, 380),
                 BackColor = Color.White,
-                Margin = new Padding(0, 0, gap, gap),
+                Margin = new Padding(0, 0, gap, rowGap),
                 Padding = Padding.Empty,
                 Tag = plan
             };
@@ -784,8 +789,8 @@ namespace CC.Forms.SuperAdmin.Subscriptions
             var pnlActions = new Panel
             {
                 Dock = DockStyle.Bottom,
-                Height = 60,
-                Padding = new Padding(20, 8, 20, 16),
+                Height = 68,
+                Padding = new Padding(20, 8, 20, 20),
                 BackColor = Color.White,
                 BorderStyle = BorderStyle.None
             };
