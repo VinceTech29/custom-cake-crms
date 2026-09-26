@@ -167,7 +167,9 @@ namespace CC.Services
         DateTime RenewalDate,
         string PaymentMethod,
         int UsedSeats,
-        int MaxSeats
+        int MaxSeats,
+        bool AllowBranching = false,
+        int MaxBranches = 1
     );
 
     public record BillingHistoryItem(
@@ -405,14 +407,29 @@ namespace CC.Services
             }
 
             // SubscriptionPlans
+            await context.Database.ExecuteSqlRawAsync(@"
+                IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'SubscriptionPlans' AND COLUMN_NAME = 'AllowBranching')
+                BEGIN
+                    ALTER TABLE SubscriptionPlans ADD AllowBranching BIT NOT NULL DEFAULT 0;
+                END
+                IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'SubscriptionPlans' AND COLUMN_NAME = 'MaxBranches')
+                BEGIN
+                    ALTER TABLE SubscriptionPlans ADD MaxBranches INT NOT NULL DEFAULT 1;
+                END
+                IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'SubscriptionPlans' AND COLUMN_NAME = 'IsActive')
+                BEGIN
+                    ALTER TABLE SubscriptionPlans ADD IsActive BIT NOT NULL DEFAULT 1;
+                END
+            ");
+
             if (!await context.SubscriptionPlans.AnyAsync())
             {
                 await context.Database.ExecuteSqlRawAsync(@"
                     SET IDENTITY_INSERT SubscriptionPlans ON;
-                    INSERT INTO SubscriptionPlans (PlanId, PlanName, Price, DurationDays, MaxUsers) VALUES
-                        (1, 'Starter Plan', 4399, 365, 3),
-                        (2, 'Pro Plan', 9599, 365, 10),
-                        (3, 'Enterprise Plan', 19999, 365, 50);
+                    INSERT INTO SubscriptionPlans (PlanId, PlanName, Price, DurationDays, MaxUsers, AllowBranching, MaxBranches, IsActive) VALUES
+                        (1, 'Starter Plan', 4399, 365, 3, 0, 1, 1),
+                        (2, 'Pro Plan', 9599, 365, 10, 1, 3, 1),
+                        (3, 'Enterprise Plan', 19999, 365, 50, 1, 10, 1);
                     SET IDENTITY_INSERT SubscriptionPlans OFF;
                 ");
             }
@@ -489,14 +506,29 @@ namespace CC.Services
                 }
 
                 // Subscription Plans
+                await context.Database.ExecuteSqlRawAsync(@"
+                    IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'SubscriptionPlans' AND COLUMN_NAME = 'AllowBranching')
+                    BEGIN
+                        ALTER TABLE SubscriptionPlans ADD AllowBranching BIT NOT NULL DEFAULT 0;
+                    END
+                    IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'SubscriptionPlans' AND COLUMN_NAME = 'MaxBranches')
+                    BEGIN
+                        ALTER TABLE SubscriptionPlans ADD MaxBranches INT NOT NULL DEFAULT 1;
+                    END
+                    IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'SubscriptionPlans' AND COLUMN_NAME = 'IsActive')
+                    BEGIN
+                        ALTER TABLE SubscriptionPlans ADD IsActive BIT NOT NULL DEFAULT 1;
+                    END
+                ");
+
                 if (!await context.SubscriptionPlans.AnyAsync())
                 {
                     await context.Database.ExecuteSqlRawAsync(@"
                         SET IDENTITY_INSERT SubscriptionPlans ON;
-                        INSERT INTO SubscriptionPlans (PlanId, PlanName, Price, DurationDays, MaxUsers) VALUES
-                            (1, 'Starter Plan', 4399, 365, 3),
-                            (2, 'Pro Plan', 9599, 365, 10),
-                            (3, 'Enterprise Plan', 19999, 365, 50);
+                        INSERT INTO SubscriptionPlans (PlanId, PlanName, Price, DurationDays, MaxUsers, AllowBranching, MaxBranches, IsActive) VALUES
+                            (1, 'Starter Plan', 4399, 365, 3, 0, 1, 1),
+                            (2, 'Pro Plan', 9599, 365, 10, 1, 3, 1),
+                            (3, 'Enterprise Plan', 19999, 365, 50, 1, 10, 1);
                         SET IDENTITY_INSERT SubscriptionPlans OFF;
                     ");
                 }
@@ -670,8 +702,24 @@ namespace CC.Services
                                 PlanName NVARCHAR(100) NOT NULL,
                                 Price DECIMAL(18,2) NOT NULL,
                                 DurationDays INT NOT NULL DEFAULT 365,
-                                MaxUsers INT NOT NULL DEFAULT 10
+                                MaxUsers INT NOT NULL DEFAULT 10,
+                                AllowBranching BIT NOT NULL DEFAULT 0,
+                                MaxBranches INT NOT NULL DEFAULT 1,
+                                IsActive BIT NOT NULL DEFAULT 1
                             );
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'SubscriptionPlans' AND COLUMN_NAME = 'AllowBranching')
+                        BEGIN
+                            ALTER TABLE SubscriptionPlans ADD AllowBranching BIT NOT NULL DEFAULT 0;
+                        END
+                        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'SubscriptionPlans' AND COLUMN_NAME = 'MaxBranches')
+                        BEGIN
+                            ALTER TABLE SubscriptionPlans ADD MaxBranches INT NOT NULL DEFAULT 1;
+                        END
+                        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'SubscriptionPlans' AND COLUMN_NAME = 'IsActive')
+                        BEGIN
+                            ALTER TABLE SubscriptionPlans ADD IsActive BIT NOT NULL DEFAULT 1;
                         END
 
                         IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'SubscriptionStatuses')
@@ -698,10 +746,26 @@ namespace CC.Services
                     if (!await masterContext.SubscriptionPlans.AnyAsync())
                     {
                         masterContext.SubscriptionPlans.AddRange(
-                            new SubscriptionPlan { PlanName = "Starter Plan", Price = 4399m, DurationDays = 365, MaxUsers = 3 },
-                            new SubscriptionPlan { PlanName = "Pro Plan", Price = 9599m, DurationDays = 365, MaxUsers = 10 },
-                            new SubscriptionPlan { PlanName = "Enterprise Plan", Price = 19999m, DurationDays = 365, MaxUsers = 50 }
+                            new SubscriptionPlan { PlanName = "Starter Plan", Price = 4399m, DurationDays = 365, MaxUsers = 3, AllowBranching = false, MaxBranches = 1, IsActive = true },
+                            new SubscriptionPlan { PlanName = "Pro Plan", Price = 9599m, DurationDays = 365, MaxUsers = 10, AllowBranching = true, MaxBranches = 3, IsActive = true },
+                            new SubscriptionPlan { PlanName = "Enterprise Plan", Price = 19999m, DurationDays = 365, MaxUsers = 50, AllowBranching = true, MaxBranches = 10, IsActive = true }
                         );
+                        await masterContext.SaveChangesAsync();
+                    }
+                    else
+                    {
+                        var pro = await masterContext.SubscriptionPlans.FirstOrDefaultAsync(p => p.PlanName == "Pro Plan");
+                        if (pro != null && (!pro.AllowBranching || pro.MaxBranches <= 1))
+                        {
+                            pro.AllowBranching = true;
+                            pro.MaxBranches = 3;
+                        }
+                        var ent = await masterContext.SubscriptionPlans.FirstOrDefaultAsync(p => p.PlanName == "Enterprise Plan");
+                        if (ent != null && (!ent.AllowBranching || ent.MaxBranches <= 1))
+                        {
+                            ent.AllowBranching = true;
+                            ent.MaxBranches = 10;
+                        }
                         await masterContext.SaveChangesAsync();
                     }
 
@@ -2311,7 +2375,9 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                     RenewalDate: sub.EndDate,
                     PaymentMethod: "Visa ending in 4242",
                     UsedSeats: usedSeats,
-                    MaxSeats: sub.Plan.MaxUsers
+                    MaxSeats: sub.Plan.MaxUsers,
+                    AllowBranching: sub.Plan.AllowBranching,
+                    MaxBranches: sub.Plan.MaxBranches
                 );
             }
 
@@ -2324,7 +2390,9 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 RenewalDate: DateTime.Today.AddMonths(11),
                 PaymentMethod: "Visa ending in 4242",
                 UsedSeats: usedSeats > 0 ? usedSeats : 1,
-                MaxSeats: 10
+                MaxSeats: 10,
+                AllowBranching: true,
+                MaxBranches: 3
             );
         }
 
@@ -2478,10 +2546,15 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
         // SUPER ADMIN SUBSCRIPTION PLANS & ASSIGNMENTS
         // =========================================================
 
-        public static async Task<List<SubscriptionPlanListItem>> GetSubscriptionPlansAsync()
+        public static async Task<List<SubscriptionPlanListItem>> GetSubscriptionPlansAsync(bool includeArchived = false)
         {
             await using var masterContext = CreateMasterDbContext();
-            var plans = await masterContext.SubscriptionPlans.ToListAsync();
+            var query = masterContext.SubscriptionPlans.AsQueryable();
+            if (!includeArchived)
+            {
+                query = query.Where(p => p.IsActive);
+            }
+            var plans = await query.ToListAsync();
             var subs = await masterContext.Subscriptions.Where(s => s.StatusId == 1).ToListAsync();
 
             var list = new List<SubscriptionPlanListItem>();
@@ -2494,13 +2567,22 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                     p.Price,
                     p.DurationDays,
                     p.MaxUsers,
-                    activeCount
+                    activeCount,
+                    p.AllowBranching,
+                    p.MaxBranches,
+                    p.IsActive
                 ));
             }
             return list.OrderBy(p => p.Price).ToList();
         }
 
-        public static async Task<SubscriptionPlan> CreateSubscriptionPlanAsync(string name, decimal price, int durationDays, int maxUsers)
+        public static async Task<SubscriptionPlan> CreateSubscriptionPlanAsync(
+            string name,
+            decimal price,
+            int durationDays,
+            int maxUsers,
+            bool allowBranching = false,
+            int maxBranches = 1)
         {
             await using var masterContext = CreateMasterDbContext();
             var plan = new SubscriptionPlan
@@ -2508,7 +2590,10 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 PlanName = name,
                 Price = price,
                 DurationDays = durationDays,
-                MaxUsers = maxUsers
+                MaxUsers = maxUsers,
+                AllowBranching = allowBranching,
+                MaxBranches = allowBranching ? Math.Max(1, maxBranches) : 1,
+                IsActive = true
             };
             masterContext.SubscriptionPlans.Add(plan);
             await masterContext.SaveChangesAsync();
@@ -2522,17 +2607,28 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                     PlanName = name,
                     Price = price,
                     DurationDays = durationDays,
-                    MaxUsers = maxUsers
+                    MaxUsers = maxUsers,
+                    AllowBranching = allowBranching,
+                    MaxBranches = allowBranching ? Math.Max(1, maxBranches) : 1,
+                    IsActive = true
                 });
                 await tenantContext.SaveChangesAsync();
             }
             catch { }
 
-            await LogAuditAsync("SUBSCRIPTION_PLAN_CREATED", $"New subscription plan '{name}' created at ₱{price:N2} ({maxUsers} seats, {durationDays} days).");
+            await LogAuditAsync("SUBSCRIPTION_PLAN_CREATED", $"New subscription plan '{name}' created at ₱{price:N2} ({maxUsers} seats, {durationDays} days, Branching={(allowBranching ? $"Max {maxBranches}" : "No")}).");
             return plan;
         }
 
-        public static async Task<SubscriptionPlan> UpdateSubscriptionPlanAsync(int planId, string name, decimal price, int durationDays, int maxUsers)
+        public static async Task<SubscriptionPlan> UpdateSubscriptionPlanAsync(
+            int planId,
+            string name,
+            decimal price,
+            int durationDays,
+            int maxUsers,
+            bool allowBranching = false,
+            int maxBranches = 1,
+            bool isActive = true)
         {
             await using var masterContext = CreateMasterDbContext();
             var plan = await masterContext.SubscriptionPlans.FirstOrDefaultAsync(p => p.PlanId == planId);
@@ -2542,6 +2638,9 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             plan.Price = price;
             plan.DurationDays = durationDays;
             plan.MaxUsers = maxUsers;
+            plan.AllowBranching = allowBranching;
+            plan.MaxBranches = allowBranching ? Math.Max(1, maxBranches) : 1;
+            plan.IsActive = isActive;
             await masterContext.SaveChangesAsync();
 
             try
@@ -2554,6 +2653,9 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                     tenantPlan.Price = price;
                     tenantPlan.DurationDays = durationDays;
                     tenantPlan.MaxUsers = maxUsers;
+                    tenantPlan.AllowBranching = allowBranching;
+                    tenantPlan.MaxBranches = allowBranching ? Math.Max(1, maxBranches) : 1;
+                    tenantPlan.IsActive = isActive;
                     await tenantContext.SaveChangesAsync();
                 }
             }
@@ -2561,6 +2663,56 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
 
             await LogAuditAsync("SUBSCRIPTION_PLAN_UPDATED", $"Subscription plan #{planId} '{name}' updated.");
             return plan;
+        }
+
+        public static async Task ArchiveSubscriptionPlanAsync(int planId)
+        {
+            await using var masterContext = CreateMasterDbContext();
+            var plan = await masterContext.SubscriptionPlans.FirstOrDefaultAsync(p => p.PlanId == planId);
+            if (plan != null)
+            {
+                plan.IsActive = false;
+                await masterContext.SaveChangesAsync();
+
+                try
+                {
+                    await using var tenantContext = CreateDbContext(DefaultCompanyId);
+                    var tenantPlan = await tenantContext.SubscriptionPlans.FirstOrDefaultAsync(p => p.PlanId == planId || p.PlanName.ToLower() == plan.PlanName.ToLower());
+                    if (tenantPlan != null)
+                    {
+                        tenantPlan.IsActive = false;
+                        await tenantContext.SaveChangesAsync();
+                    }
+                }
+                catch { }
+
+                await LogAuditAsync("SUBSCRIPTION_PLAN_ARCHIVED", $"Subscription plan #{planId} '{plan.PlanName}' archived.");
+            }
+        }
+
+        public static async Task RestoreSubscriptionPlanAsync(int planId)
+        {
+            await using var masterContext = CreateMasterDbContext();
+            var plan = await masterContext.SubscriptionPlans.FirstOrDefaultAsync(p => p.PlanId == planId);
+            if (plan != null)
+            {
+                plan.IsActive = true;
+                await masterContext.SaveChangesAsync();
+
+                try
+                {
+                    await using var tenantContext = CreateDbContext(DefaultCompanyId);
+                    var tenantPlan = await tenantContext.SubscriptionPlans.FirstOrDefaultAsync(p => p.PlanId == planId || p.PlanName.ToLower() == plan.PlanName.ToLower());
+                    if (tenantPlan != null)
+                    {
+                        tenantPlan.IsActive = true;
+                        await tenantContext.SaveChangesAsync();
+                    }
+                }
+                catch { }
+
+                await LogAuditAsync("SUBSCRIPTION_PLAN_RESTORED", $"Subscription plan #{planId} '{plan.PlanName}' restored to active.");
+            }
         }
 
         public static async Task<List<CompanySubscriptionListItem>> GetCompanySubscriptionsAsync(string? searchQuery = null)
@@ -2592,7 +2744,9 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                     StatusId: sub?.StatusId ?? 2,
                     StatusName: sub?.Status?.StatusName ?? (sub != null && sub.EndDate >= DateTime.UtcNow ? "Active" : "Expired"),
                     StartDate: sub?.StartDate ?? c.CreatedDate,
-                    EndDate: sub?.EndDate ?? c.CreatedDate.AddYears(1)
+                    EndDate: sub?.EndDate ?? c.CreatedDate.AddYears(1),
+                    AllowBranching: sub?.Plan?.AllowBranching ?? false,
+                    MaxBranches: sub?.Plan?.MaxBranches ?? 1
                 ));
             }
 
@@ -5329,7 +5483,10 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
         decimal Price,
         int DurationDays,
         int MaxUsers,
-        int ActiveSubscribedBusinesses
+        int ActiveSubscribedBusinesses,
+        bool AllowBranching = false,
+        int MaxBranches = 1,
+        bool IsActive = true
     );
 
     public record CompanySubscriptionListItem(
@@ -5345,7 +5502,9 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
         int StatusId,
         string StatusName,
         DateTime StartDate,
-        DateTime EndDate
+        DateTime EndDate,
+        bool AllowBranching = false,
+        int MaxBranches = 1
     );
 
     public record TermsAcceptanceItem(

@@ -16,11 +16,17 @@ namespace CC.api.Controllers
             _context = context;
         }
 
-        // GET: api/subscriptionplans
+        // GET: api/subscriptionplans?includeArchived=false
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<SubscriptionPlanDto>>> GetPlans()
+        public async Task<ActionResult<IEnumerable<SubscriptionPlanDto>>> GetPlans([FromQuery] bool includeArchived = false)
         {
-            var plans = await _context.SubscriptionPlans.AsNoTracking().ToListAsync();
+            var query = _context.SubscriptionPlans.AsNoTracking().AsQueryable();
+            if (!includeArchived)
+            {
+                query = query.Where(p => p.IsActive);
+            }
+
+            var plans = await query.ToListAsync();
             var activeSubs = await _context.Subscriptions
                 .AsNoTracking()
                 .Where(s => s.StatusId == 1 && s.EndDate >= DateTime.UtcNow)
@@ -33,6 +39,9 @@ namespace CC.api.Controllers
                 Price = p.Price,
                 DurationDays = p.DurationDays,
                 MaxUsers = p.MaxUsers,
+                AllowBranching = p.AllowBranching,
+                MaxBranches = p.MaxBranches,
+                IsActive = p.IsActive,
                 ActiveSubscribersCount = activeSubs.Count(s => s.PlanId == p.PlanId)
             }).OrderBy(p => p.Price).ToList();
 
@@ -58,6 +67,9 @@ namespace CC.api.Controllers
                 Price = plan.Price,
                 DurationDays = plan.DurationDays,
                 MaxUsers = plan.MaxUsers,
+                AllowBranching = plan.AllowBranching,
+                MaxBranches = plan.MaxBranches,
+                IsActive = plan.IsActive,
                 ActiveSubscribersCount = activeCount
             };
 
@@ -85,7 +97,10 @@ namespace CC.api.Controllers
                 PlanName = request.PlanName.Trim(),
                 Price = request.Price,
                 DurationDays = request.DurationDays,
-                MaxUsers = request.MaxUsers
+                MaxUsers = request.MaxUsers,
+                AllowBranching = request.AllowBranching,
+                MaxBranches = request.AllowBranching ? Math.Max(1, request.MaxBranches) : 1,
+                IsActive = true
             };
 
             _context.SubscriptionPlans.Add(plan);
@@ -98,6 +113,9 @@ namespace CC.api.Controllers
                 Price = plan.Price,
                 DurationDays = plan.DurationDays,
                 MaxUsers = plan.MaxUsers,
+                AllowBranching = plan.AllowBranching,
+                MaxBranches = plan.MaxBranches,
+                IsActive = plan.IsActive,
                 ActiveSubscribersCount = 0
             };
 
@@ -116,12 +134,41 @@ namespace CC.api.Controllers
             if (request.Price.HasValue && request.Price.Value >= 0) plan.Price = request.Price.Value;
             if (request.DurationDays.HasValue && request.DurationDays.Value > 0) plan.DurationDays = request.DurationDays.Value;
             if (request.MaxUsers.HasValue && request.MaxUsers.Value > 0) plan.MaxUsers = request.MaxUsers.Value;
+            if (request.AllowBranching.HasValue) plan.AllowBranching = request.AllowBranching.Value;
+            if (request.MaxBranches.HasValue) plan.MaxBranches = Math.Max(1, request.MaxBranches.Value);
+            if (request.IsActive.HasValue) plan.IsActive = request.IsActive.Value;
 
             await _context.SaveChangesAsync();
             return NoContent();
         }
 
-        // DELETE: api/subscriptionplans/1
+        // PUT: api/subscriptionplans/1/archive
+        [HttpPut("{id:int}/archive")]
+        public async Task<IActionResult> ArchivePlan(int id)
+        {
+            var plan = await _context.SubscriptionPlans.FirstOrDefaultAsync(p => p.PlanId == id);
+            if (plan == null)
+                return NotFound($"Subscription Plan #{id} not found.");
+
+            plan.IsActive = false;
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+
+        // PUT: api/subscriptionplans/1/restore
+        [HttpPut("{id:int}/restore")]
+        public async Task<IActionResult> RestorePlan(int id)
+        {
+            var plan = await _context.SubscriptionPlans.FirstOrDefaultAsync(p => p.PlanId == id);
+            if (plan == null)
+                return NotFound($"Subscription Plan #{id} not found.");
+
+            plan.IsActive = true;
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+
+        // DELETE: api/subscriptionplans/1 (Soft archive)
         [HttpDelete("{id:int}")]
         public async Task<IActionResult> DeletePlan(int id)
         {
@@ -129,15 +176,8 @@ namespace CC.api.Controllers
             if (plan == null)
                 return NotFound($"Subscription Plan #{id} not found.");
 
-            var hasActiveSubs = await _context.Subscriptions
-                .AnyAsync(s => s.PlanId == id && s.StatusId == 1 && s.EndDate >= DateTime.UtcNow);
-
-            if (hasActiveSubs)
-            {
-                return BadRequest("Cannot delete a plan that has active subscribers.");
-            }
-
-            _context.SubscriptionPlans.Remove(plan);
+            // Soft-archive the plan to preserve historic subscriptions
+            plan.IsActive = false;
             await _context.SaveChangesAsync();
             return NoContent();
         }
@@ -150,6 +190,9 @@ namespace CC.api.Controllers
         public decimal Price { get; set; }
         public int DurationDays { get; set; }
         public int MaxUsers { get; set; }
+        public bool AllowBranching { get; set; }
+        public int MaxBranches { get; set; }
+        public bool IsActive { get; set; }
         public int ActiveSubscribersCount { get; set; }
     }
 
@@ -159,6 +202,8 @@ namespace CC.api.Controllers
         public decimal Price { get; set; }
         public int DurationDays { get; set; } = 365;
         public int MaxUsers { get; set; } = 10;
+        public bool AllowBranching { get; set; } = false;
+        public int MaxBranches { get; set; } = 1;
     }
 
     public class UpdateSubscriptionPlanRequest
@@ -167,5 +212,8 @@ namespace CC.api.Controllers
         public decimal? Price { get; set; }
         public int? DurationDays { get; set; }
         public int? MaxUsers { get; set; }
+        public bool? AllowBranching { get; set; }
+        public int? MaxBranches { get; set; }
+        public bool? IsActive { get; set; }
     }
 }

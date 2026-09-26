@@ -85,6 +85,9 @@ namespace CC.infrastructure.Data
                 entity.HasKey(x => x.PlanId);
                 entity.Property(x => x.PlanName).HasMaxLength(100).IsRequired();
                 entity.Property(x => x.Price).HasPrecision(18, 2);
+                entity.Property(x => x.AllowBranching).HasDefaultValue(false);
+                entity.Property(x => x.MaxBranches).HasDefaultValue(1);
+                entity.Property(x => x.IsActive).HasDefaultValue(true);
             });
 
             builder.Entity<SubscriptionStatus>(entity =>

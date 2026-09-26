@@ -36,6 +36,7 @@ namespace CC.Forms.Admin.Subscription
         private Label lblSeatCount = null!;
         private Panel seatProgressBar = null!;
         private Label lblFeatureSeats = null!;
+        private Label lblFeatureBranching = null!;
 
         private Button btnRenew = null!;
         private Button btnUpgradeDowngrade = null!;
@@ -488,8 +489,8 @@ namespace CC.Forms.Admin.Subscription
             for (int r = 0; r < 4; r++)
             {
                 gridTable.RowStyles.Add(new RowStyle(SizeType.Percent, 25F));
-                gridTable.Controls.Add(CreateCheckItem(col1Features[r], r == 0), 0, r);
-                gridTable.Controls.Add(CreateCheckItem(col2Features[r], false), 1, r);
+                gridTable.Controls.Add(CreateCheckItem(col1Features[r], r == 0, false), 0, r);
+                gridTable.Controls.Add(CreateCheckItem(col2Features[r], false, r == 3), 1, r);
             }
 
             gridContainer.Controls.Add(gridTable);
@@ -499,7 +500,7 @@ namespace CC.Forms.Admin.Subscription
             featuresCard.Controls.Add(lblSectionTitle);
         }
 
-        private Panel CreateCheckItem(string text, bool isFirstSeatItem)
+        private Panel CreateCheckItem(string text, bool isFirstSeatItem, bool isBranchingItem = false)
         {
             var pnl = new Panel
             {
@@ -531,6 +532,10 @@ namespace CC.Forms.Admin.Subscription
             if (isFirstSeatItem)
             {
                 lblFeatureSeats = lbl;
+            }
+            if (isBranchingItem)
+            {
+                lblFeatureBranching = lbl;
             }
 
             pnl.Controls.Add(icon);
@@ -839,7 +844,8 @@ namespace CC.Forms.Admin.Subscription
             for (int i = 0; i < plans.Count; i++)
             {
                 var p = plans[i];
-                cmbPlans.Items.Add($"{p.PlanName} (₱{p.Price:N2} · {p.MaxUsers} Seats · {p.DurationDays} Days)");
+                string branchDesc = p.AllowBranching ? $" · Max {p.MaxBranches} Branches" : " · Single Location";
+                cmbPlans.Items.Add($"{p.PlanName} (₱{p.Price:N2} · {p.MaxUsers} Seats{branchDesc} · {p.DurationDays} Days)");
                 if (p.PlanName.Equals(currentPlan, StringComparison.OrdinalIgnoreCase))
                 {
                     selectedIdx = i;
@@ -926,6 +932,13 @@ namespace CC.Forms.Admin.Subscription
                 if (lblFeatureSeats != null)
                 {
                     lblFeatureSeats.Text = $"Up to {currentSub.MaxSeats} team members";
+                }
+
+                if (lblFeatureBranching != null)
+                {
+                    lblFeatureBranching.Text = currentSub.AllowBranching
+                        ? $"Multi-branch: Up to {currentSub.MaxBranches} locations"
+                        : "Single store location (branching not included)";
                 }
 
                 // Update Billing History Grid

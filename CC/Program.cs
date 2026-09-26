@@ -779,6 +779,40 @@ namespace CC
                             bmp.Save(Path.Combine(outputDir, "screen_superadmin_monitoring.png"), ImageFormat.Png);
                         }
 
+                        // Capture Plan Modal
+                        using (var planModal = new CC.Forms.SuperAdmin.Subscriptions.PlanModal())
+                        {
+                            planModal.StartPosition = FormStartPosition.Manual;
+                            planModal.Location = new Point(100, 100);
+                            planModal.Show();
+                            for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(20); }
+                            using (var bmp = new Bitmap(planModal.Width, planModal.Height))
+                            {
+                                planModal.DrawToBitmap(bmp, new Rectangle(0, 0, planModal.Width, planModal.Height));
+                                bmp.Save(Path.Combine(outputDir, "screen_superadmin_plan_modal.png"), ImageFormat.Png);
+                            }
+                            planModal.Close();
+                        }
+
+                        // Capture Assign Subscription Modal
+                        var sampleBiz = new CC.Services.CompanySubscriptionListItem(
+                            1, "CC01", "Custom Cake Shop", "CustomCakeCRM", 2, "Pro Plan", 9599m, 365, 10, 1, "Active", DateTime.UtcNow, DateTime.UtcNow.AddYears(1), true, 3
+                        );
+                        var samplePlans = CrmDataService.GetSubscriptionPlansAsync(includeArchived: false).GetAwaiter().GetResult();
+                        using (var assignModal = new CC.Forms.SuperAdmin.Subscriptions.AssignSubscriptionModal(sampleBiz, samplePlans))
+                        {
+                            assignModal.StartPosition = FormStartPosition.Manual;
+                            assignModal.Location = new Point(100, 100);
+                            assignModal.Show();
+                            for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(20); }
+                            using (var bmp = new Bitmap(assignModal.Width, assignModal.Height))
+                            {
+                                assignModal.DrawToBitmap(bmp, new Rectangle(0, 0, assignModal.Width, assignModal.Height));
+                                bmp.Save(Path.Combine(outputDir, "screen_superadmin_assign_subscription_modal.png"), ImageFormat.Png);
+                            }
+                            assignModal.Close();
+                        }
+
                         saShell.Close();
                     }
 
@@ -841,6 +875,39 @@ namespace CC
                     if (bizSubRenewed.RenewalDate <= preRenewEnd)
                         throw new Exception($"Renew failed to extend validity date! Pre: {preRenewEnd}, Post: {bizSubRenewed.RenewalDate}");
                     Console.WriteLine($"  -> PASS: Subscription Renewal successfully extended validity date to {bizSubRenewed.RenewalDate:yyyy-MM-dd}.");
+
+                    // 13b. Verify Branching Configuration and Archive / Restore Lifecycle
+                    Console.WriteLine("  -> Testing Multi-Branch Plan Creation & Archive/Restore Lifecycle...");
+                    var multiBranchPlan = CrmDataService.CreateSubscriptionPlanAsync("Multi-Branch Pro", 2499.00m, 90, 20, allowBranching: true, maxBranches: 5).GetAwaiter().GetResult();
+                    if (!multiBranchPlan.AllowBranching || multiBranchPlan.MaxBranches != 5)
+                        throw new Exception($"Branching configuration mismatch! Expected AllowBranching=true, MaxBranches=5. Got: {multiBranchPlan.AllowBranching}, {multiBranchPlan.MaxBranches}");
+                    Console.WriteLine($"    * Created Multi-Branch Plan: PlanId={multiBranchPlan.PlanId}, AllowBranching={multiBranchPlan.AllowBranching}, MaxBranches={multiBranchPlan.MaxBranches}");
+
+                    // Test Soft-Archive
+                    CrmDataService.ArchiveSubscriptionPlanAsync(multiBranchPlan.PlanId).GetAwaiter().GetResult();
+                    var activePlansAfterArchive = CrmDataService.GetSubscriptionPlansAsync(includeArchived: false).GetAwaiter().GetResult();
+                    if (activePlansAfterArchive.Any(p => p.PlanId == multiBranchPlan.PlanId))
+                        throw new Exception("Archived plan must NOT appear in default active subscription plans list!");
+
+                    var allPlansAfterArchive = CrmDataService.GetSubscriptionPlansAsync(includeArchived: true).GetAwaiter().GetResult();
+                    var archivedItem = allPlansAfterArchive.FirstOrDefault(p => p.PlanId == multiBranchPlan.PlanId);
+                    if (archivedItem == null || archivedItem.IsActive)
+                        throw new Exception("Archived plan must appear with IsActive=false when includeArchived=true!");
+                    Console.WriteLine("    * PASS: Plan soft-archived successfully, correctly excluded from active picker view.");
+
+                    // Test Restore
+                    CrmDataService.RestoreSubscriptionPlanAsync(multiBranchPlan.PlanId).GetAwaiter().GetResult();
+                    var activePlansAfterRestore = CrmDataService.GetSubscriptionPlansAsync(includeArchived: false).GetAwaiter().GetResult();
+                    if (!activePlansAfterRestore.Any(p => p.PlanId == multiBranchPlan.PlanId && p.IsActive))
+                        throw new Exception("Restored plan must reappear in active subscription plans list!");
+                    Console.WriteLine("    * PASS: Plan restored successfully to active status.");
+
+                    // Assign multi-branch plan and verify business-side retrieval
+                    CrmDataService.AssignCompanySubscriptionAsync(vbb.CompanyId, multiBranchPlan.PlanId, 1, DateTime.UtcNow, DateTime.UtcNow.AddDays(90)).GetAwaiter().GetResult();
+                    var branchSubInfo = CrmDataService.GetSubscriptionInfoAsync(vbb.CompanyId).GetAwaiter().GetResult();
+                    if (!branchSubInfo.AllowBranching || branchSubInfo.MaxBranches != 5)
+                        throw new Exception($"Business Admin failed to retrieve branching info! Got AllowBranching={branchSubInfo.AllowBranching}, MaxBranches={branchSubInfo.MaxBranches}");
+                    Console.WriteLine($"    * PASS: Business Admin correctly reads branching capabilities: Multi-Branch={branchSubInfo.AllowBranching}, MaxBranches={branchSubInfo.MaxBranches}.");
 
                     // 14. User Seat Limit Enforcement
                     Console.WriteLine("[TEST 14] User Seat Limit Enforcement (MaxUsers Guard)...");
