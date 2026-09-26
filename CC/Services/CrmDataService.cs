@@ -533,6 +533,31 @@ namespace CC.Services
                     ");
                 }
 
+                // Clean up any historical duplicate subscription plans in tenant DB
+                try
+                {
+                    await context.Database.ExecuteSqlRawAsync(@"
+                        WITH RankedPlans AS (
+                            SELECT PlanId, PlanName, ROW_NUMBER() OVER (PARTITION BY LOWER(PlanName) ORDER BY PlanId DESC) as rn,
+                                   FIRST_VALUE(PlanId) OVER (PARTITION BY LOWER(PlanName) ORDER BY PlanId DESC) as MasterPlanId
+                            FROM SubscriptionPlans
+                        )
+                        UPDATE s
+                        SET s.PlanId = r.MasterPlanId
+                        FROM Subscriptions s
+                        JOIN RankedPlans r ON s.PlanId = r.PlanId
+                        WHERE r.rn > 1;
+
+                        WITH RankedPlans AS (
+                            SELECT PlanId, ROW_NUMBER() OVER (PARTITION BY LOWER(PlanName) ORDER BY PlanId DESC) as rn
+                            FROM SubscriptionPlans
+                        )
+                        DELETE FROM SubscriptionPlans
+                        WHERE PlanId IN (SELECT PlanId FROM RankedPlans WHERE rn > 1);
+                    ");
+                }
+                catch { }
+
                 // Subscription Statuses
                 if (!await context.SubscriptionStatuses.AnyAsync())
                 {
@@ -768,6 +793,31 @@ namespace CC.Services
                         }
                         await masterContext.SaveChangesAsync();
                     }
+
+                    // Clean up any historical duplicate subscription plans in Master DB
+                    try
+                    {
+                        await masterContext.Database.ExecuteSqlRawAsync(@"
+                            WITH RankedPlans AS (
+                                SELECT PlanId, PlanName, ROW_NUMBER() OVER (PARTITION BY LOWER(PlanName) ORDER BY PlanId DESC) as rn,
+                                       FIRST_VALUE(PlanId) OVER (PARTITION BY LOWER(PlanName) ORDER BY PlanId DESC) as MasterPlanId
+                                FROM SubscriptionPlans
+                            )
+                            UPDATE s
+                            SET s.PlanId = r.MasterPlanId
+                            FROM Subscriptions s
+                            JOIN RankedPlans r ON s.PlanId = r.PlanId
+                            WHERE r.rn > 1;
+
+                            WITH RankedPlans AS (
+                                SELECT PlanId, ROW_NUMBER() OVER (PARTITION BY LOWER(PlanName) ORDER BY PlanId DESC) as rn
+                                FROM SubscriptionPlans
+                            )
+                            DELETE FROM SubscriptionPlans
+                            WHERE PlanId IN (SELECT PlanId FROM RankedPlans WHERE rn > 1);
+                        ");
+                    }
+                    catch { }
 
                     if (!await masterContext.SubscriptionStatuses.AnyAsync())
                     {
@@ -2554,8 +2604,15 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             {
                 query = query.Where(p => p.IsActive);
             }
-            var plans = await query.ToListAsync();
+            var rawPlans = await query.ToListAsync();
             var subs = await masterContext.Subscriptions.Where(s => s.StatusId == 1).ToListAsync();
+
+            // Group by PlanName to prevent duplicate plan cards
+            var plans = rawPlans
+                .GroupBy(p => p.PlanName.Trim(), StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.OrderByDescending(p => p.PlanId).First())
+                .OrderBy(p => p.Price)
+                .ToList();
 
             var list = new List<SubscriptionPlanListItem>();
             foreach (var p in plans)
@@ -2573,7 +2630,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                     p.IsActive
                 ));
             }
-            return list.OrderBy(p => p.Price).ToList();
+            return list;
         }
 
         public static async Task<SubscriptionPlan> CreateSubscriptionPlanAsync(
@@ -2585,38 +2642,70 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             int maxBranches = 1)
         {
             await using var masterContext = CreateMasterDbContext();
-            var plan = new SubscriptionPlan
-            {
-                PlanName = name,
-                Price = price,
-                DurationDays = durationDays,
-                MaxUsers = maxUsers,
-                AllowBranching = allowBranching,
-                MaxBranches = allowBranching ? Math.Max(1, maxBranches) : 1,
-                IsActive = true
-            };
-            masterContext.SubscriptionPlans.Add(plan);
-            await masterContext.SaveChangesAsync();
+            var existing = await masterContext.SubscriptionPlans
+                .FirstOrDefaultAsync(p => p.PlanName.ToLower() == name.Trim().ToLower());
 
-            // Synchronize with tenant DBs
-            try
+            SubscriptionPlan plan;
+            if (existing != null)
             {
-                await using var tenantContext = CreateDbContext(DefaultCompanyId);
-                tenantContext.SubscriptionPlans.Add(new SubscriptionPlan
+                existing.Price = price;
+                existing.DurationDays = durationDays;
+                existing.MaxUsers = maxUsers;
+                existing.AllowBranching = allowBranching;
+                existing.MaxBranches = allowBranching ? Math.Max(1, maxBranches) : 1;
+                existing.IsActive = true;
+                await masterContext.SaveChangesAsync();
+                plan = existing;
+            }
+            else
+            {
+                plan = new SubscriptionPlan
                 {
-                    PlanName = name,
+                    PlanName = name.Trim(),
                     Price = price,
                     DurationDays = durationDays,
                     MaxUsers = maxUsers,
                     AllowBranching = allowBranching,
                     MaxBranches = allowBranching ? Math.Max(1, maxBranches) : 1,
                     IsActive = true
-                });
+                };
+                masterContext.SubscriptionPlans.Add(plan);
+                await masterContext.SaveChangesAsync();
+            }
+
+            // Synchronize with tenant DBs
+            try
+            {
+                await using var tenantContext = CreateDbContext(DefaultCompanyId);
+                var tenantExisting = await tenantContext.SubscriptionPlans
+                    .FirstOrDefaultAsync(p => p.PlanName.ToLower() == name.Trim().ToLower());
+                if (tenantExisting != null)
+                {
+                    tenantExisting.Price = price;
+                    tenantExisting.DurationDays = durationDays;
+                    tenantExisting.MaxUsers = maxUsers;
+                    tenantExisting.AllowBranching = allowBranching;
+                    tenantExisting.MaxBranches = allowBranching ? Math.Max(1, maxBranches) : 1;
+                    tenantExisting.IsActive = true;
+                }
+                else
+                {
+                    tenantContext.SubscriptionPlans.Add(new SubscriptionPlan
+                    {
+                        PlanName = name.Trim(),
+                        Price = price,
+                        DurationDays = durationDays,
+                        MaxUsers = maxUsers,
+                        AllowBranching = allowBranching,
+                        MaxBranches = allowBranching ? Math.Max(1, maxBranches) : 1,
+                        IsActive = true
+                    });
+                }
                 await tenantContext.SaveChangesAsync();
             }
             catch { }
 
-            await LogAuditAsync("SUBSCRIPTION_PLAN_CREATED", $"New subscription plan '{name}' created at ₱{price:N2} ({maxUsers} seats, {durationDays} days, Branching={(allowBranching ? $"Max {maxBranches}" : "No")}).");
+            await LogAuditAsync("SUBSCRIPTION_PLAN_SAVED", $"Subscription plan '{name}' saved at ₱{price:N2} ({maxUsers} seats, {durationDays} days, Branching={(allowBranching ? $"Max {maxBranches}" : "No")}).");
             return plan;
         }
 
@@ -3947,13 +4036,13 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
 
             decimal periodRevenue = await context.Payments
                 .Include(p => p.Order)
-                .ThenInclude(o => o.Customer)
+                .ThenInclude(o => o!.Customer)
                 .Where(p => p.Order != null && p.Order.Customer != null && p.Order.Customer.CompanyId == targetCompanyId && p.StatusId == 1 && (startDate == null || p.PaymentDate >= startDate))
                 .SumAsync(p => (decimal?)p.Amount) ?? 0m;
 
             decimal lifetimeRevenue = await context.Payments
                 .Include(p => p.Order)
-                .ThenInclude(o => o.Customer)
+                .ThenInclude(o => o!.Customer)
                 .Where(p => p.Order != null && p.Order.Customer != null && p.Order.Customer.CompanyId == targetCompanyId && p.StatusId == 1)
                 .SumAsync(p => (decimal?)p.Amount) ?? 0m;
 
@@ -3986,7 +4075,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
 
             var revTrendRaw = await context.Payments
                 .Include(p => p.Order)
-                .ThenInclude(o => o.Customer)
+                .ThenInclude(o => o!.Customer)
                 .Where(p => p.Order != null && p.Order.Customer != null && p.Order.Customer.CompanyId == targetCompanyId && p.StatusId == 1 && (startDate == null || p.PaymentDate >= startDate))
                 .GroupBy(p => p.PaymentDate.Date)
                 .Select(g => new { Date = g.Key, Total = g.Sum(p => p.Amount) })
@@ -3997,7 +4086,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             {
                 var todayPayments = await context.Payments
                     .Include(p => p.Order)
-                    .ThenInclude(o => o.Customer)
+                    .ThenInclude(o => o!.Customer)
                     .Where(p => p.Order != null && p.Order.Customer != null && p.Order.Customer.CompanyId == targetCompanyId && p.StatusId == 1 && p.PaymentDate >= today)
                     .Select(p => new { p.PaymentDate, p.Amount })
                     .ToListAsync();
@@ -4031,7 +4120,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
 
             var methodCounts = await context.Payments
                 .Include(p => p.Order)
-                .ThenInclude(o => o.Customer)
+                .ThenInclude(o => o!.Customer)
                 .Include(p => p.Method)
                 .Where(p => p.Order != null && p.Order.Customer != null && p.Order.Customer.CompanyId == targetCompanyId && p.StatusId == 1 && (startDate == null || p.PaymentDate >= startDate))
                 .GroupBy(p => p.Method != null ? p.Method.MethodName : "Cash")

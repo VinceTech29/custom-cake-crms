@@ -57,11 +57,21 @@ namespace CC.Forms.SuperAdmin.Subscriptions
             Controls.Add(kpiTable);
             Controls.Add(topPanel);
 
-            Load += async (s, e) => await RefreshDataAsync();
+            Load += async (s, e) =>
+            {
+                await RefreshDataAsync();
+                UpdateCardSizes();
+            };
             VisibleChanged += async (s, e) =>
             {
-                if (Visible) await RefreshDataAsync();
+                if (Visible)
+                {
+                    await RefreshDataAsync();
+                    UpdateCardSizes();
+                }
             };
+            Resize += (s, e) => UpdateCardSizes();
+            Layout += (s, e) => UpdateCardSizes();
         }
 
         public SuperAdminSubscriptionForm(int initialTab = 0, string? initialStatus = null) : this()
@@ -412,14 +422,17 @@ namespace CC.Forms.SuperAdmin.Subscriptions
             };
 
             // 1. FlowLayoutPanel for Cards
+            // 1. FlowLayoutPanel for Cards
             flowPlansCards = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 AutoScroll = true,
                 BackColor = Color.Transparent,
                 WrapContents = true,
-                Padding = new Padding(4, 0, 4, 16)
+                Padding = new Padding(6, 4, 6, 16)
             };
+            flowPlansCards.Resize += (s, e) => UpdateCardSizes();
+            contentCardPanel.Resize += (s, e) => UpdateCardSizes();
 
             // 2. Grid Businesses (Tab 1)
             var bizContainer = new Panel
@@ -493,6 +506,43 @@ namespace CC.Forms.SuperAdmin.Subscriptions
         // CARD RENDERING: SUBSCRIPTION PLANS
         // =========================================================
 
+        private int _lastComputedWidth = 0;
+
+        private void UpdateCardSizes()
+        {
+            if (flowPlansCards == null || flowPlansCards.Controls.Count == 0) return;
+
+            int usableWidth = flowPlansCards.ClientSize.Width - flowPlansCards.Padding.Horizontal - 16;
+            if (usableWidth < 260) return;
+
+            if (Math.Abs(usableWidth - _lastComputedWidth) < 4) return;
+            _lastComputedWidth = usableWidth;
+
+            // Responsive column breakpoints:
+            // >= 1150px -> 4 columns
+            // >= 780px  -> 3 columns
+            // >= 480px  -> 2 columns
+            // < 480px   -> 1 column
+            int cols = usableWidth >= 1150 ? 4 : (usableWidth >= 780 ? 3 : (usableWidth >= 480 ? 2 : 1));
+            int gap = 12;
+            int totalGaps = cols * gap;
+            int cardWidth = (usableWidth - totalGaps) / cols;
+            cardWidth = Math.Max(260, Math.Min(cardWidth, 480));
+
+            flowPlansCards.SuspendLayout();
+            foreach (Control c in flowPlansCards.Controls)
+            {
+                if (c is Panel card && card.Tag is SubscriptionPlanListItem)
+                {
+                    card.Width = cardWidth;
+                    card.Height = 380;
+                    card.Margin = new Padding(0, 0, gap, gap);
+                    card.Invalidate();
+                }
+            }
+            flowPlansCards.ResumeLayout();
+        }
+
         private void RenderPlanCards()
         {
             flowPlansCards.SuspendLayout();
@@ -513,7 +563,12 @@ namespace CC.Forms.SuperAdmin.Subscriptions
                 filtered = filtered.Where(p => p.PlanName.ToLower().Contains(search));
             }
 
-            var list = filtered.ToList();
+            // Deduplicate by PlanName to prevent duplicate cards
+            var list = filtered
+                .GroupBy(p => p.PlanName.Trim(), StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.OrderByDescending(p => p.PlanId).First())
+                .OrderBy(p => p.Price)
+                .ToList();
 
             if (list.Count == 0)
             {
@@ -546,23 +601,33 @@ namespace CC.Forms.SuperAdmin.Subscriptions
                 return;
             }
 
+            int usableWidth = flowPlansCards.ClientSize.Width - flowPlansCards.Padding.Horizontal - 16;
+            int cols = usableWidth >= 1150 ? 4 : (usableWidth >= 780 ? 3 : (usableWidth >= 480 ? 2 : 1));
+            int gap = 12;
+            int totalGaps = cols * gap;
+            int initialWidth = usableWidth >= 260 ? (usableWidth - totalGaps) / cols : 300;
+            initialWidth = Math.Max(260, Math.Min(initialWidth, 480));
+
             foreach (var plan in list)
             {
-                var card = CreatePlanCard(plan);
+                var card = CreatePlanCard(plan, initialWidth, gap);
                 flowPlansCards.Controls.Add(card);
             }
 
             flowPlansCards.ResumeLayout();
+            _lastComputedWidth = 0;
+            UpdateCardSizes();
         }
 
-        private Panel CreatePlanCard(SubscriptionPlanListItem plan)
+        private Panel CreatePlanCard(SubscriptionPlanListItem plan, int initialWidth = 300, int gap = 12)
         {
             var card = new Panel
             {
-                Size = new Size(345, 415),
+                Size = new Size(initialWidth, 380),
                 BackColor = Color.White,
-                Margin = new Padding(8, 8, 14, 14),
-                Padding = Padding.Empty
+                Margin = new Padding(0, 0, gap, gap),
+                Padding = Padding.Empty,
+                Tag = plan
             };
 
             card.Paint += (s, e) =>
@@ -577,8 +642,8 @@ namespace CC.Forms.SuperAdmin.Subscriptions
             var pnlHeader = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 84,
-                Padding = new Padding(20, 16, 20, 8),
+                Height = 82,
+                Padding = new Padding(20, 16, 20, 6),
                 BackColor = Color.Transparent
             };
 
@@ -613,7 +678,7 @@ namespace CC.Forms.SuperAdmin.Subscriptions
             {
                 Text = $"{plan.ActiveSubscribedBusinesses} BIZ",
                 Dock = DockStyle.Right,
-                Width = 60,
+                Width = 70,
                 TextAlign = ContentAlignment.MiddleRight,
                 Font = new Font(UITheme.FontSans, 8F, FontStyle.Bold),
                 ForeColor = UITheme.PrimaryMauve,
@@ -641,7 +706,7 @@ namespace CC.Forms.SuperAdmin.Subscriptions
             {
                 Dock = DockStyle.Top,
                 Height = 44,
-                Padding = new Padding(20, 2, 20, 4),
+                Padding = new Padding(20, 2, 20, 6),
                 BackColor = Color.Transparent
             };
 
@@ -674,56 +739,56 @@ namespace CC.Forms.SuperAdmin.Subscriptions
                 Dock = DockStyle.Top,
                 Height = 1,
                 BackColor = Color.FromArgb(240, 235, 230),
-                Margin = new Padding(20, 0, 20, 0)
+                Margin = Padding.Empty
             };
 
-            // 4. Features Checklist (Middle)
+            // 4. Features Checklist (Middle) - cleanly stacked with zero gridlines
             var pnlFeatures = new Panel
             {
                 Dock = DockStyle.Fill,
                 Padding = new Padding(20, 14, 20, 10),
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+                BorderStyle = BorderStyle.None
             };
 
-            var featTable = new TableLayoutPanel
+            var featStack = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                ColumnCount = 1,
-                RowCount = 4,
-                BackColor = Color.Transparent
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                BackColor = Color.Transparent,
+                Margin = Padding.Empty,
+                Padding = Padding.Empty,
+                BorderStyle = BorderStyle.None
             };
-            featTable.RowStyles.Add(new RowStyle(SizeType.Percent, 25F));
-            featTable.RowStyles.Add(new RowStyle(SizeType.Percent, 25F));
-            featTable.RowStyles.Add(new RowStyle(SizeType.Percent, 25F));
-            featTable.RowStyles.Add(new RowStyle(SizeType.Percent, 25F));
 
             // Feature 1: Max Users
-            featTable.Controls.Add(CreateFeatureItem("\uE73E", $"{plan.MaxUsers} Team Members / User Seats", true), 0, 0);
+            featStack.Controls.Add(CreateFeatureItem("\uE73E", $"{plan.MaxUsers} Team Members / User Seats", true));
 
             // Feature 2: Branching capability
             if (plan.AllowBranching)
             {
-                featTable.Controls.Add(CreateFeatureItem("\uE73E", $"Multi-Branch: Up to {plan.MaxBranches} Branches", true), 0, 1);
+                featStack.Controls.Add(CreateFeatureItem("\uE73E", $"Multi-Branch: Up to {plan.MaxBranches} Branches", true));
             }
             else
             {
-                featTable.Controls.Add(CreateFeatureItem("\uE711", "Single Store (Branching Disabled)", false), 0, 1);
+                featStack.Controls.Add(CreateFeatureItem("\uE711", "Single Store (Branching Disabled)", false));
             }
 
             // Feature 3: Duration
-            featTable.Controls.Add(CreateFeatureItem("\uE73E", $"Duration: {plan.DurationDays} Days Full Access", true), 0, 2);
+            featStack.Controls.Add(CreateFeatureItem("\uE73E", $"Duration: {plan.DurationDays} Days Full Access", true));
 
             // Feature 4: Active businesses
-            featTable.Controls.Add(CreateFeatureItem("\uE73E", $"{plan.ActiveSubscribedBusinesses} Active Business Tenant(s)", true), 0, 3);
+            featStack.Controls.Add(CreateFeatureItem("\uE73E", $"{plan.ActiveSubscribedBusinesses} Active Business Tenant(s)", true));
 
-            pnlFeatures.Controls.Add(featTable);
+            pnlFeatures.Controls.Add(featStack);
 
-            // 5. Actions Panel (Bottom)
+            // 5. Actions Panel (Bottom) with responsive 50/50 button split
             var pnlActions = new Panel
             {
                 Dock = DockStyle.Bottom,
-                Height = 62,
-                Padding = new Padding(18, 10, 18, 12),
+                Height = 64,
+                Padding = new Padding(18, 12, 18, 14),
                 BackColor = Color.Transparent
             };
 
@@ -734,16 +799,29 @@ namespace CC.Forms.SuperAdmin.Subscriptions
                 BackColor = Color.FromArgb(240, 235, 230)
             };
 
+            var actionsTable = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                RowCount = 1,
+                BackColor = Color.Transparent,
+                Margin = Padding.Empty,
+                Padding = new Padding(0, 10, 0, 0)
+            };
+            actionsTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            actionsTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+
             var btnEdit = new Button
             {
                 Text = "Edit Plan",
-                Size = new Size(140, 36),
+                Dock = DockStyle.Fill,
+                Height = 36,
+                Margin = new Padding(0, 0, 6, 0),
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold),
                 BackColor = Color.FromArgb(242, 238, 233),
                 ForeColor = UITheme.TextDark,
-                Cursor = Cursors.Hand,
-                Location = new Point(18, 16)
+                Cursor = Cursors.Hand
             };
             btnEdit.FlatAppearance.BorderSize = 0;
             btnEdit.ApplyRoundedRegion(6);
@@ -755,13 +833,14 @@ namespace CC.Forms.SuperAdmin.Subscriptions
                 btnArchiveRestore = new Button
                 {
                     Text = "Archive",
-                    Size = new Size(140, 36),
+                    Dock = DockStyle.Fill,
+                    Height = 36,
+                    Margin = new Padding(6, 0, 0, 0),
                     FlatStyle = FlatStyle.Flat,
                     Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold),
                     BackColor = Color.FromArgb(254, 240, 240),
                     ForeColor = Color.FromArgb(190, 60, 60),
-                    Cursor = Cursors.Hand,
-                    Location = new Point(175, 16)
+                    Cursor = Cursors.Hand
                 };
                 btnArchiveRestore.FlatAppearance.BorderSize = 0;
                 btnArchiveRestore.ApplyRoundedRegion(6);
@@ -772,28 +851,33 @@ namespace CC.Forms.SuperAdmin.Subscriptions
                 btnArchiveRestore = new Button
                 {
                     Text = "Restore",
-                    Size = new Size(140, 36),
+                    Dock = DockStyle.Fill,
+                    Height = 36,
+                    Margin = new Padding(6, 0, 0, 0),
                     FlatStyle = FlatStyle.Flat,
                     Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold),
                     BackColor = Color.FromArgb(235, 247, 238),
                     ForeColor = Color.FromArgb(46, 133, 90),
-                    Cursor = Cursors.Hand,
-                    Location = new Point(175, 16)
+                    Cursor = Cursors.Hand
                 };
                 btnArchiveRestore.FlatAppearance.BorderSize = 0;
                 btnArchiveRestore.ApplyRoundedRegion(6);
                 btnArchiveRestore.Click += async (s, e) => await PromptRestorePlanAsync(plan);
             }
 
-            pnlActions.Controls.Add(actionDivider);
-            pnlActions.Controls.Add(btnEdit);
-            pnlActions.Controls.Add(btnArchiveRestore);
+            actionsTable.Controls.Add(btnEdit, 0, 0);
+            actionsTable.Controls.Add(btnArchiveRestore, 1, 0);
 
+            pnlActions.Controls.Add(actionsTable);
+            pnlActions.Controls.Add(actionDivider);
+
+            // Add with proper docking and Z-order so nothing overlaps or gets clipped
             card.Controls.Add(pnlFeatures);
-            card.Controls.Add(pnlActions);
             card.Controls.Add(pnlDivider);
             card.Controls.Add(pnlPrice);
             card.Controls.Add(pnlHeader);
+            card.Controls.Add(pnlActions);
+            pnlFeatures.BringToFront();
 
             return card;
         }
@@ -802,17 +886,20 @@ namespace CC.Forms.SuperAdmin.Subscriptions
         {
             var pnl = new Panel
             {
-                Dock = DockStyle.Fill,
-                BackColor = Color.Transparent
+                Size = new Size(380, 28),
+                Margin = new Padding(0, 4, 0, 4),
+                BackColor = Color.Transparent,
+                BorderStyle = BorderStyle.None
             };
 
             var icon = new Label
             {
                 Text = iconChar,
-                Font = new Font("Segoe MDL2 Assets", 9.5F, FontStyle.Bold),
-                ForeColor = isPositive ? Color.FromArgb(46, 133, 90) : Color.FromArgb(160, 150, 140),
-                Location = new Point(0, 3),
-                Size = new Size(20, 18),
+                Font = new Font("Segoe MDL2 Assets", 9F, FontStyle.Bold),
+                ForeColor = isPositive ? Color.FromArgb(46, 133, 90) : Color.FromArgb(170, 160, 150),
+                Location = new Point(0, 2),
+                Size = new Size(20, 22),
+                TextAlign = ContentAlignment.MiddleCenter,
                 BackColor = Color.Transparent
             };
 
@@ -821,7 +908,7 @@ namespace CC.Forms.SuperAdmin.Subscriptions
                 Text = text,
                 Font = new Font(UITheme.FontSans, 9F, FontStyle.Regular),
                 ForeColor = isPositive ? UITheme.TextDark : UITheme.TextMuted,
-                Location = new Point(24, 2),
+                Location = new Point(26, 3),
                 AutoSize = true,
                 BackColor = Color.Transparent,
                 UseMnemonic = false

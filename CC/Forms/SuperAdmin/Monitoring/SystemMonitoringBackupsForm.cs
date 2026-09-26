@@ -339,8 +339,8 @@ namespace CC.Forms.SuperAdmin.Monitoring
             var log = gridLogs.Rows[e.RowIndex].Tag as AuditLogItem;
             if (log == null) return;
 
-            int colType = gridLogs.Columns["colType"].Index;
-            if (e.ColumnIndex == colType)
+            int colType = gridLogs.Columns["colType"]?.Index ?? -1;
+            if (colType >= 0 && e.ColumnIndex == colType)
             {
                 Color bg;
                 Color fg;
@@ -545,7 +545,8 @@ namespace CC.Forms.SuperAdmin.Monitoring
                 if (e.RowIndex < 0 || e.Graphics == null) return;
                 e.PaintBackground(e.ClipBounds, (e.State & DataGridViewElementStates.Selected) != 0);
 
-                if (e.ColumnIndex == gridBackups.Columns["colStatus"].Index)
+                int colStatus = gridBackups.Columns["colStatus"]?.Index ?? -1;
+                if (colStatus >= 0 && e.ColumnIndex == colStatus)
                 {
                     var pillRect = new Rectangle(e.CellBounds.Left + 8, e.CellBounds.Top + (e.CellBounds.Height - 24) / 2, 72, 24);
                     using var b = new SolidBrush(Color.FromArgb(235, 247, 238));
