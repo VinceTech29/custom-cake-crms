@@ -733,20 +733,11 @@ namespace CC.Forms.SuperAdmin.Subscriptions
             pnlPrice.Controls.Add(lblDuration);
             pnlPrice.Controls.Add(lblPrice);
 
-            // 3. Divider
-            var pnlDivider = new Panel
-            {
-                Dock = DockStyle.Top,
-                Height = 1,
-                BackColor = Color.FromArgb(240, 235, 230),
-                Margin = Padding.Empty
-            };
-
-            // 4. Features Checklist (Middle) - cleanly stacked with zero gridlines
+            // 3. Features Checklist (Middle) - cleanly stacked with zero divider lines
             var pnlFeatures = new Panel
             {
                 Dock = DockStyle.Fill,
-                Padding = new Padding(20, 14, 20, 10),
+                Padding = new Padding(20, 10, 20, 6),
                 BackColor = Color.Transparent,
                 BorderStyle = BorderStyle.None
             };
@@ -783,20 +774,13 @@ namespace CC.Forms.SuperAdmin.Subscriptions
 
             pnlFeatures.Controls.Add(featStack);
 
-            // 5. Actions Panel (Bottom) with responsive 50/50 button split
+            // 4. Actions Panel (Bottom) with responsive 50/50 button split and zero divider lines
             var pnlActions = new Panel
             {
                 Dock = DockStyle.Bottom,
-                Height = 64,
-                Padding = new Padding(18, 12, 18, 14),
+                Height = 60,
+                Padding = new Padding(20, 8, 20, 16),
                 BackColor = Color.Transparent
-            };
-
-            var actionDivider = new Panel
-            {
-                Dock = DockStyle.Top,
-                Height = 1,
-                BackColor = Color.FromArgb(240, 235, 230)
             };
 
             var actionsTable = new TableLayoutPanel
@@ -806,7 +790,7 @@ namespace CC.Forms.SuperAdmin.Subscriptions
                 RowCount = 1,
                 BackColor = Color.Transparent,
                 Margin = Padding.Empty,
-                Padding = new Padding(0, 10, 0, 0)
+                Padding = Padding.Empty
             };
             actionsTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
             actionsTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
@@ -869,11 +853,9 @@ namespace CC.Forms.SuperAdmin.Subscriptions
             actionsTable.Controls.Add(btnArchiveRestore, 1, 0);
 
             pnlActions.Controls.Add(actionsTable);
-            pnlActions.Controls.Add(actionDivider);
 
             // Add with proper docking and Z-order so nothing overlaps or gets clipped
             card.Controls.Add(pnlFeatures);
-            card.Controls.Add(pnlDivider);
             card.Controls.Add(pnlPrice);
             card.Controls.Add(pnlHeader);
             card.Controls.Add(pnlActions);

@@ -132,15 +132,32 @@ namespace CC.Forms.Admin.Subscription
                 Dock = DockStyle.Fill,
                 AutoScroll = true,
                 BackColor = Color.Transparent,
-                Padding = new Padding(0, 0, 12, 20)
+                Padding = new Padding(0, 0, 16, 28)
             };
 
             BuildCurrentPlanCard();
             BuildFeaturesCard();
             BuildBillingHistoryCard();
 
+            // Clear 20px vertical spacing between cards
+            var spacer1 = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 20,
+                BackColor = Color.Transparent
+            };
+
+            var spacer2 = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 20,
+                BackColor = Color.Transparent
+            };
+
             mainContentPanel.Controls.Add(billingHistoryCard);
+            mainContentPanel.Controls.Add(spacer2);
             mainContentPanel.Controls.Add(featuresCard);
+            mainContentPanel.Controls.Add(spacer1);
             mainContentPanel.Controls.Add(currentPlanCard);
         }
 
@@ -152,10 +169,10 @@ namespace CC.Forms.Admin.Subscription
             currentPlanCard = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 224,
+                Height = 236,
                 BackColor = Color.White,
-                Padding = new Padding(28, 20, 28, 20),
-                Margin = new Padding(0, 0, 0, 16)
+                Padding = new Padding(32, 24, 32, 24),
+                Margin = Padding.Empty
             };
 
             currentPlanCard.Paint += (s, e) =>
@@ -424,10 +441,10 @@ namespace CC.Forms.Admin.Subscription
             featuresCard = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 215,
+                Height = 228,
                 BackColor = Color.White,
-                Padding = new Padding(28, 20, 28, 20),
-                Margin = new Padding(0, 0, 0, 16)
+                Padding = new Padding(32, 24, 32, 24),
+                Margin = Padding.Empty
             };
 
             featuresCard.Paint += (s, e) =>
@@ -551,10 +568,10 @@ namespace CC.Forms.Admin.Subscription
             billingHistoryCard = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 340,
+                Height = 356,
                 BackColor = Color.White,
-                Padding = new Padding(28, 20, 28, 20),
-                Margin = new Padding(0, 0, 0, 20)
+                Padding = new Padding(32, 24, 32, 24),
+                Margin = Padding.Empty
             };
 
             billingHistoryCard.Paint += (s, e) =>
