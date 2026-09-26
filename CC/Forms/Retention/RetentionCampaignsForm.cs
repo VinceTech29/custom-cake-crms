@@ -29,7 +29,8 @@ namespace CC.Forms.Retention
         private Button btnTabReports = null!;
         private Button btnTabLogs = null!;
         private Button btnTabSettings = null!;
-        private string activeTab = "Segments"; // "Segments", "Campaigns", "Reports", "Logs", "Settings"
+        private Button btnTabRequests = null!;
+        private string activeTab = "Segments"; // "Segments", "Campaigns", "Reports", "Logs", "Settings", "Requests"
 
         // Tab Container Panels
         private Panel mainContentContainer = null!;
@@ -38,6 +39,7 @@ namespace CC.Forms.Retention
         private Panel panelReports = null!;
         private Panel panelLogs = null!;
         private Panel panelSettings = null!;
+        private Panel panelRequests = null!;
 
         // --- SEGMENTS TAB CONTROLS ---
         private TableLayoutPanel kpiTableSegments = null!;
@@ -74,6 +76,18 @@ namespace CC.Forms.Retention
         private NumericUpDown numCooldownDays = null!;
         private Button btnSaveSettings = null!;
         private Label lblSettingsNotice = null!;
+
+        // --- REQUESTS TAB CONTROLS ---
+        private DataGridView gridRetentionRequests = null!;
+        private PaginationControl paginationRequests = null!;
+        private ComboBox cmbRequestStatusFilter = null!;
+        private TextBox txtRequestSearch = null!;
+        private DateTimePicker dtpRequestFrom = null!;
+        private DateTimePicker dtpRequestTo = null!;
+        private int requestsCurrentPage = 1;
+        private const int RequestsPageSize = 15;
+        private string requestsStatusFilter = "All";
+        private string requestsSearchQuery = string.Empty;
 
         // Data Cache
         private RetentionDashboardData? currentData;
@@ -112,12 +126,14 @@ namespace CC.Forms.Retention
             BuildReportsTab();
             BuildLogsTab();
             BuildSettingsTab();
+            BuildRequestsTab();
 
             mainContentContainer.Controls.Add(panelSegments);
             mainContentContainer.Controls.Add(panelCampaigns);
             mainContentContainer.Controls.Add(panelReports);
             mainContentContainer.Controls.Add(panelLogs);
             mainContentContainer.Controls.Add(panelSettings);
+            mainContentContainer.Controls.Add(panelRequests);
 
             Controls.Add(mainContentContainer);
             Controls.Add(tabNavBar);
@@ -329,6 +345,7 @@ namespace CC.Forms.Retention
             btnTabReports = CreateTabButton("Performance & Tracking", "Reports");
             btnTabLogs = CreateTabButton("Email & Audit Logs", "Logs");
             btnTabSettings = CreateTabButton("Settings (Admin)", "Settings");
+            btnTabRequests = CreateTabButton("Retention Requests", "Requests");
 
             bool isAdmin = SessionService.CurrentUser?.Role == "Business Admin" || SessionService.CurrentUser?.Role == "Admin";
             if (!isAdmin)
@@ -341,6 +358,7 @@ namespace CC.Forms.Retention
             tabFlow.Controls.Add(btnTabReports);
             tabFlow.Controls.Add(btnTabLogs);
             tabFlow.Controls.Add(btnTabSettings);
+            tabFlow.Controls.Add(btnTabRequests);
 
             tabNavBar.Controls.Add(tabFlow);
         }
@@ -372,7 +390,7 @@ namespace CC.Forms.Retention
             activeTab = tabKey;
 
             // Highlight buttons
-            foreach (Button b in new[] { btnTabSegments, btnTabCampaigns, btnTabReports, btnTabLogs, btnTabSettings })
+            foreach (Button b in new[] { btnTabSegments, btnTabCampaigns, btnTabReports, btnTabLogs, btnTabSettings, btnTabRequests })
             {
                 if (b == null || !b.Visible) continue;
                 bool isSel = (string?)b.Tag == activeTab;
@@ -387,6 +405,11 @@ namespace CC.Forms.Retention
             panelReports.Visible = activeTab == "Reports";
             panelLogs.Visible = activeTab == "Logs";
             panelSettings.Visible = activeTab == "Settings";
+            panelRequests.Visible = activeTab == "Requests";
+
+            // Load Requests tab data on switch
+            if (activeTab == "Requests")
+                _ = RefreshRequestsTabAsync();
         }
 
         // =========================================================
@@ -2038,6 +2061,360 @@ namespace CC.Forms.Retention
 
             dlg.Controls.Add(pnl);
             dlg.ShowDialog(this);
+        }
+
+        // =========================================================
+        // TAB 6: RETENTION REQUESTS & APPROVALS
+        // =========================================================
+
+        private void BuildRequestsTab()
+        {
+            panelRequests = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.Transparent,
+                AutoScroll = true,
+                Visible = false
+            };
+
+            // ── Header row (title + New button) ──────────────────────────
+            var headerRow = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                Height = 50,
+                ColumnCount = 2,
+                RowCount = 1,
+                BackColor = Color.Transparent,
+                Margin = new Padding(0, 0, 0, 8)
+            };
+            headerRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            headerRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+            var lblReqTitle = new Label
+            {
+                Text = "Retention Requests & Approvals",
+                Font = new Font(UITheme.FontSans, 13F, FontStyle.Bold),
+                ForeColor = UITheme.TextDark,
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleLeft,
+                AutoSize = false
+            };
+
+            bool isManagerOrAbove = SessionService.CurrentUser?.Role is "Manager" or "Business Admin" or "Admin";
+
+            var btnNewRequest = new Button
+            {
+                Text = "+ New Retention Request",
+                Height = 36,
+                AutoSize = true,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold),
+                ForeColor = Color.White,
+                BackColor = UITheme.PrimaryMauve,
+                Cursor = Cursors.Hand,
+                Margin = new Padding(0, 7, 0, 7),
+                Padding = new Padding(14, 0, 14, 0),
+                Visible = isManagerOrAbove
+            };
+            btnNewRequest.FlatAppearance.BorderSize = 0;
+            btnNewRequest.Click += async (s, e) =>
+            {
+                using var modal = new CreateRetentionRequestModal();
+                modal.ShowDialog(this);
+                await RefreshRequestsTabAsync();
+            };
+
+            headerRow.Controls.Add(lblReqTitle, 0, 0);
+            headerRow.Controls.Add(btnNewRequest, 1, 0);
+
+            // ── Filter bar ───────────────────────────────────────────────
+            var filterBar = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                Height = 46,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                BackColor = Color.Transparent,
+                Margin = new Padding(0, 0, 0, 10)
+            };
+
+            cmbRequestStatusFilter = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Height = 32,
+                Width = 130,
+                Font = new Font(UITheme.FontSans, 9F),
+                Margin = new Padding(0, 7, 8, 7)
+            };
+            cmbRequestStatusFilter.Items.AddRange(new object[] { "All", "Pending", "Approved", "Rejected" });
+            cmbRequestStatusFilter.SelectedIndex = 0;
+            cmbRequestStatusFilter.SelectedIndexChanged += async (s, e) =>
+            {
+                requestsStatusFilter = cmbRequestStatusFilter.SelectedItem?.ToString() ?? "All";
+                requestsCurrentPage = 1;
+                await RefreshRequestsTabAsync();
+            };
+
+            txtRequestSearch = new TextBox
+            {
+                PlaceholderText = "Search customer or reason...",
+                Height = 32,
+                Width = 210,
+                Font = new Font(UITheme.FontSans, 9F),
+                Margin = new Padding(0, 7, 10, 7),
+                BorderStyle = BorderStyle.FixedSingle
+            };
+            var searchDebounce = new System.Windows.Forms.Timer { Interval = 400 };
+            searchDebounce.Tick += async (s, e) =>
+            {
+                searchDebounce.Stop();
+                requestsSearchQuery = txtRequestSearch.Text.Trim();
+                requestsCurrentPage = 1;
+                await RefreshRequestsTabAsync();
+            };
+            txtRequestSearch.TextChanged += (s, e) => { searchDebounce.Stop(); searchDebounce.Start(); };
+
+            var lblFrom = new Label
+            {
+                Text = "From:",
+                AutoSize = true,
+                Font = new Font(UITheme.FontSans, 9F),
+                ForeColor = UITheme.TextMuted,
+                Margin = new Padding(0, 14, 4, 0)
+            };
+            dtpRequestFrom = new DateTimePicker
+            {
+                Format = DateTimePickerFormat.Short,
+                Value = DateTime.Today.AddMonths(-3),
+                Width = 110,
+                Margin = new Padding(0, 7, 6, 7)
+            };
+
+            var lblTo = new Label
+            {
+                Text = "To:",
+                AutoSize = true,
+                Font = new Font(UITheme.FontSans, 9F),
+                ForeColor = UITheme.TextMuted,
+                Margin = new Padding(0, 14, 4, 0)
+            };
+            dtpRequestTo = new DateTimePicker
+            {
+                Format = DateTimePickerFormat.Short,
+                Value = DateTime.Today,
+                Width = 110,
+                Margin = new Padding(0, 7, 8, 7)
+            };
+
+            var btnApply = new Button
+            {
+                Text = "Apply",
+                Height = 32,
+                Width = 65,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold),
+                ForeColor = Color.White,
+                BackColor = UITheme.PrimaryMauve,
+                Cursor = Cursors.Hand,
+                Margin = new Padding(0, 7, 0, 7)
+            };
+            btnApply.FlatAppearance.BorderSize = 0;
+            btnApply.Click += async (s, e) =>
+            {
+                if (dtpRequestFrom.Value.Date > dtpRequestTo.Value.Date)
+                {
+                    MessageBox.Show("\"From\" date must be before or equal to \"To\" date.", "Invalid Range",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                requestsCurrentPage = 1;
+                await RefreshRequestsTabAsync();
+            };
+
+            filterBar.Controls.Add(cmbRequestStatusFilter);
+            filterBar.Controls.Add(txtRequestSearch);
+            filterBar.Controls.Add(lblFrom);
+            filterBar.Controls.Add(dtpRequestFrom);
+            filterBar.Controls.Add(lblTo);
+            filterBar.Controls.Add(dtpRequestTo);
+            filterBar.Controls.Add(btnApply);
+
+            // ── DataGridView ─────────────────────────────────────────────
+            var tableCard = new Panel
+            {
+                Dock = DockStyle.Top,
+                BackColor = Color.White,
+                Height = 440,
+                Padding = new Padding(0)
+            };
+            tableCard.Paint += (s, e) =>
+            {
+                using var pen = new Pen(Color.FromArgb(230, 230, 230), 1);
+                e.Graphics.DrawRectangle(pen, 0, 0, tableCard.Width - 1, tableCard.Height - 1);
+            };
+
+            gridRetentionRequests = new DataGridView
+            {
+                Dock = DockStyle.Fill,
+                BackgroundColor = Color.White,
+                BorderStyle = BorderStyle.None,
+                CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
+                ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single,
+                GridColor = Color.FromArgb(240, 240, 240),
+                AutoGenerateColumns = false,
+                ReadOnly = true,
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                AllowUserToResizeRows = false,
+                RowHeadersVisible = false,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                DefaultCellStyle = new DataGridViewCellStyle
+                {
+                    Font = new Font(UITheme.FontSans, 9F),
+                    ForeColor = UITheme.TextDark,
+                    BackColor = Color.White,
+                    SelectionBackColor = Color.FromArgb(248, 238, 242),
+                    SelectionForeColor = UITheme.TextDark,
+                    Padding = new Padding(6, 4, 6, 4)
+                },
+                ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
+                {
+                    Font = new Font(UITheme.FontSans, 8.5F, FontStyle.Bold),
+                    ForeColor = UITheme.TextMuted,
+                    BackColor = Color.FromArgb(250, 248, 252),
+                    Padding = new Padding(6, 6, 6, 6)
+                },
+                ColumnHeadersHeight = 38,
+                RowTemplate = { Height = 42 },
+                Cursor = Cursors.Hand
+            };
+
+            gridRetentionRequests.Columns.AddRange(new DataGridViewColumn[]
+            {
+                new DataGridViewTextBoxColumn { Name = "colId",          HeaderText = "Ref #",          Width = 65,  DataPropertyName = "RequestId" },
+                new DataGridViewTextBoxColumn { Name = "colCustomer",    HeaderText = "Customer",       Width = 155, DataPropertyName = "CustomerName" },
+                new DataGridViewTextBoxColumn { Name = "colReason",      HeaderText = "Reason",         Width = 185, DataPropertyName = "FullReason" },
+                new DataGridViewTextBoxColumn { Name = "colAction",      HeaderText = "Action Type",    Width = 110, DataPropertyName = "ActionType" },
+                new DataGridViewTextBoxColumn { Name = "colDiscount",    HeaderText = "Discount %",     Width = 90,  DataPropertyName = "DiscountPercent" },
+                new DataGridViewTextBoxColumn { Name = "colRequestedBy", HeaderText = "Requested By",   Width = 130, DataPropertyName = "RequestedByUserName" },
+                new DataGridViewTextBoxColumn { Name = "colDateReq",     HeaderText = "Date Requested", Width = 125, DataPropertyName = "RequestedDate" },
+                new DataGridViewTextBoxColumn { Name = "colReviewedBy",  HeaderText = "Reviewed By",    Width = 120, DataPropertyName = "ReviewedByUserName" },
+                new DataGridViewTextBoxColumn { Name = "colDateRev",     HeaderText = "Date Reviewed",  Width = 125, DataPropertyName = "ReviewedDate" },
+                new DataGridViewTextBoxColumn { Name = "colStatus",      HeaderText = "Status",         Width = 90,  DataPropertyName = "Status" }
+            });
+
+            gridRetentionRequests.CellFormatting += (s, e) =>
+            {
+                if (e.RowIndex < 0 || e.Value == null) return;
+                string colName = gridRetentionRequests.Columns[e.ColumnIndex].Name;
+
+                if (colName is "colDateReq" or "colDateRev" && e.Value is DateTime dt)
+                {
+                    e.Value = dt == default ? "—" : dt.ToString("MMM dd, yyyy");
+                    e.FormattingApplied = true;
+                }
+                if (colName == "colStatus" && e.Value is string status)
+                {
+                    var cell = gridRetentionRequests.Rows[e.RowIndex].Cells[e.ColumnIndex];
+                    cell.Style.ForeColor = status switch
+                    {
+                        "Approved" => UITheme.StatusGreenFg,
+                        "Rejected" => Color.FromArgb(180, 60, 60),
+                        _ => Color.FromArgb(160, 110, 0)
+                    };
+                    cell.Style.Font = new Font(UITheme.FontSans, 8.5F, FontStyle.Bold);
+                }
+                if (colName == "colDiscount" && e.Value is decimal disc)
+                {
+                    e.Value = disc > 0 ? $"{disc:0.##}%" : "—";
+                    e.FormattingApplied = true;
+                }
+                if (colName is "colReviewedBy" or "colDateRev" && e.Value is string sv && string.IsNullOrWhiteSpace(sv))
+                {
+                    e.Value = "—";
+                    e.FormattingApplied = true;
+                }
+            };
+
+            gridRetentionRequests.CellClick += async (s, e) =>
+            {
+                if (e.RowIndex < 0) return;
+                var row = gridRetentionRequests.Rows[e.RowIndex];
+                if (row.DataBoundItem is CC.Domain.Entities.RetentionRequest req)
+                {
+                    using var modal = new RetentionRequestDetailsModal(req.RequestId);
+                    modal.ShowDialog(this);
+                    await RefreshRequestsTabAsync();
+                }
+            };
+
+            tableCard.Controls.Add(gridRetentionRequests);
+
+            // ── Pagination ───────────────────────────────────────────────
+            paginationRequests = new PaginationControl
+            {
+                Dock = DockStyle.Top,
+                Height = 48,
+                BackColor = Color.Transparent
+            };
+            paginationRequests.PageChanged += newPage =>
+            {
+                requestsCurrentPage = newPage;
+                _ = RefreshRequestsTabAsync();
+            };
+
+            // Build content stack (Dock.Top — controls added last appear at the top visually)
+            panelRequests.Controls.Add(paginationRequests);
+            panelRequests.Controls.Add(tableCard);
+            panelRequests.Controls.Add(filterBar);
+            panelRequests.Controls.Add(headerRow);
+        }
+
+        private async Task RefreshRequestsTabAsync()
+        {
+            try
+            {
+                string? statusArg = requestsStatusFilter == "All" ? null : requestsStatusFilter;
+                DateTime fromDate = dtpRequestFrom?.Value.Date ?? DateTime.Today.AddMonths(-3);
+                DateTime toDate = dtpRequestTo?.Value.Date ?? DateTime.Today;
+
+                var all = await CrmDataService.GetRetentionRequestsAsync(
+                    statusFilter: statusArg,
+                    fromDate: fromDate,
+                    toDate: toDate,
+                    companyId: SessionService.CurrentUser?.CompanyId
+                );
+
+                // Client-side search filter
+                if (!string.IsNullOrWhiteSpace(requestsSearchQuery))
+                {
+                    string q = requestsSearchQuery.ToLower();
+                    all = all.Where(r =>
+                        (r.CustomerName?.ToLower().Contains(q) ?? false) ||
+                        (r.FullReason?.ToLower().Contains(q) ?? false) ||
+                        (r.RequestedByUserName?.ToLower().Contains(q) ?? false)
+                    ).ToList();
+                }
+
+                int totalCount = all.Count;
+                int totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)RequestsPageSize));
+                if (requestsCurrentPage > totalPages) requestsCurrentPage = totalPages;
+
+                var page = all
+                    .OrderByDescending(r => r.RequestedDate)
+                    .Skip((requestsCurrentPage - 1) * RequestsPageSize)
+                    .Take(RequestsPageSize)
+                    .ToList();
+
+                gridRetentionRequests.DataSource = null;
+                gridRetentionRequests.DataSource = page;
+
+                paginationRequests.SetPagination(requestsCurrentPage, RequestsPageSize, totalCount, "requests");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[RefreshRequestsTabAsync] {ex.Message}");
+            }
         }
 
         // =========================================================

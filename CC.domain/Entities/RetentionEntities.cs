@@ -94,4 +94,66 @@ namespace CC.Domain.Entities
         public bool SmtpEnableSsl { get; set; } = true;
         public bool SmtpMockMode { get; set; } = true;
     }
+
+    public class RetentionRequest
+    {
+        public int RequestId { get; set; }
+
+        public int CompanyId { get; set; }
+
+        // Customer
+        public int CustomerId { get; set; }
+
+        public string CustomerName { get; set; } = string.Empty;
+
+        public string CustomerEmail { get; set; } = string.Empty;
+
+        // Retention Proposal Details
+        public string TargetSegment { get; set; } = "At Risk";
+
+        public string ActionType { get; set; } = "Special Discount";
+
+        public decimal DiscountPercent { get; set; }
+
+        public string RetentionDetails { get; set; } = string.Empty;
+
+        // Reason for Retention (Requirement 3)
+        public string ReasonCategory { get; set; } = string.Empty;
+
+        public string? ReasonCustomDetails { get; set; }
+
+        public string FullReason => string.IsNullOrWhiteSpace(ReasonCustomDetails)
+            ? ReasonCategory
+            : (ReasonCategory == "Other" ? ReasonCustomDetails : $"{ReasonCategory} - {ReasonCustomDetails}");
+
+        // Status: "Pending", "Approved", "Rejected"
+        public string Status { get; set; } = "Pending";
+
+        // Request Details (Recorded by System)
+        public DateTime RequestedDate { get; set; } = DateTime.UtcNow;
+
+        public int RequestedByUserId { get; set; }
+
+        public string RequestedByUserName { get; set; } = string.Empty;
+
+        // Review Details (Recorded by System)
+        public DateTime? ReviewedDate { get; set; }
+
+        public int? ReviewedByUserId { get; set; }
+
+        public string? ReviewedByUserName { get; set; }
+
+        public string? ReviewAction { get; set; }
+
+        // Rejection Details
+        public DateTime? RejectionDate { get; set; }
+
+        public int? RejectedByUserId { get; set; }
+
+        public string? RejectedByUserName { get; set; }
+
+        public string? RejectionReason { get; set; }
+
+        public string? AdminRemarks { get; set; }
+    }
 }

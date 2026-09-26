@@ -52,7 +52,8 @@ namespace CC.Services
         List<PipelineStage> PipelineStages,
         List<BarItem> OrdersByStatus,
         List<BarItem> StaffPerformance,
-        List<ManagerPriorityOrderItem> RecentOrders
+        List<ManagerPriorityOrderItem> RecentOrders,
+        List<RetentionRequest>? RecentRetentionRequests = null
     );
 
     public record ManagerPriorityOrderItem(
@@ -80,7 +81,8 @@ namespace CC.Services
         List<BarItem> OrderStatusBreakdown,
         List<AdminTopCustomerItem> TopCustomers,
         SubscriptionInfo Subscription,
-        List<TransactionRecord> RecentTransactions
+        List<TransactionRecord> RecentTransactions,
+        List<RetentionRequest>? RecentRetentionRequests = null
     );
 
     public record AdminTopCustomerItem(
@@ -1957,8 +1959,10 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
         public static async Task<List<TransactionRecord>> GetOverallTransactionsAsync(
             string period = "All", // "All", "Daily", "Monthly"
             DateTime? filterDate = null,
-            string? typeFilter = null, // "All", "Orders", "Payments"
-            string? searchQuery = null)
+            string? typeFilter = null, // "All", "Orders", "Payments", "Retention"
+            string? searchQuery = null,
+            DateTime? fromDate = null,
+            DateTime? toDate = null)
         {
             await using var context = CreateDbContext();
             var target = filterDate ?? DateTime.Today;
@@ -2034,8 +2038,44 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 }
             }
 
-            // 3. Filter by Period
-            if (string.Equals(period, "Daily", StringComparison.OrdinalIgnoreCase))
+            // 3. Fetch Retention Requests
+            if (string.Equals(typeFilter, "Retention", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(typeFilter, "Retention Requests", StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrEmpty(typeFilter) || typeFilter == "All")
+            {
+                await EnsureRetentionTablesAndSeedsAsync(context);
+                var retList = await context.RetentionRequests.AsNoTracking().ToListAsync();
+                foreach (var req in retList)
+                {
+                    list.Add(new TransactionRecord(
+                        Id: req.RequestId,
+                        ReferenceNo: $"#RET-{req.RequestId:D4}",
+                        Date: req.RequestedDate,
+                        Type: "Retention Request",
+                        CustomerName: req.CustomerName,
+                        Details: $"{req.ActionType} ({req.DiscountPercent:0.#}%) - {req.ReasonCategory}",
+                        Amount: req.DiscountPercent,
+                        PaymentMethod: $"By: {req.RequestedByUserName}",
+                        Status: req.Status
+                    ));
+                }
+            }
+
+            // 4. Filter by Period and Custom Dates
+            if (fromDate.HasValue || toDate.HasValue)
+            {
+                if (fromDate.HasValue)
+                {
+                    var f = fromDate.Value.Date;
+                    list = list.Where(t => t.Date.Date >= f).ToList();
+                }
+                if (toDate.HasValue)
+                {
+                    var maxDate = toDate.Value.Date.AddDays(1).AddTicks(-1);
+                    list = list.Where(item => item.Date <= maxDate).ToList();
+                }
+            }
+            else if (string.Equals(period, "Daily", StringComparison.OrdinalIgnoreCase))
             {
                 list = list.Where(t => t.Date.Date == target.Date).ToList();
             }
@@ -2048,7 +2088,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 list = list.Where(t => t.Date.Year == target.Year).ToList();
             }
 
-            // 4. Filter by Search Query
+            // 5. Filter by Search Query
             if (!string.IsNullOrWhiteSpace(searchQuery))
             {
                 var q = searchQuery.Trim().ToLowerInvariant();
@@ -2072,12 +2112,14 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             string? typeFilter = null,
             string? searchQuery = null,
             int page = 1,
-            int pageSize = 10)
+            int pageSize = 10,
+            DateTime? fromDate = null,
+            DateTime? toDate = null)
         {
             pageSize = Math.Max(1, pageSize);
             page = Math.Max(1, page);
 
-            var all = await GetOverallTransactionsAsync(period, filterDate, typeFilter, searchQuery);
+            var all = await GetOverallTransactionsAsync(period, filterDate, typeFilter, searchQuery, fromDate, toDate);
             int totalCount = all.Count;
             int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
             if (page > totalPages) page = totalPages;
@@ -3667,14 +3709,33 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
         // ROLE-BASED DASHBOARD ANALYTICS (REAL DATABASE QUERIES)
         // =========================================================
 
-        private static DateTime? GetPeriodStartDate(string period) => period?.ToLowerInvariant() switch
+        public static (DateTime? StartDate, DateTime? EndDate) GetPeriodDateRange(string? period)
         {
-            "1d" => DateTime.Today,
-            "7d" => DateTime.Today.AddDays(-7),
-            "30d" => DateTime.Today.AddDays(-30),
-            "90d" => DateTime.Today.AddDays(-90),
-            _ => null // All time
-        };
+            if (string.IsNullOrWhiteSpace(period)) return (null, null);
+
+            if (period.StartsWith("range:", StringComparison.OrdinalIgnoreCase))
+            {
+                var parts = period.Substring(6).Split(':');
+                DateTime? start = null;
+                DateTime? end = null;
+                if (parts.Length > 0 && DateTime.TryParse(parts[0], out var s))
+                    start = s.Date;
+                if (parts.Length > 1 && DateTime.TryParse(parts[1], out var e))
+                    end = e.Date.AddDays(1).AddTicks(-1);
+                return (start, end);
+            }
+
+            return period.ToLowerInvariant() switch
+            {
+                "1d" => (DateTime.Today, DateTime.Today.AddDays(1).AddTicks(-1)),
+                "7d" => (DateTime.Today.AddDays(-7), DateTime.Today.AddDays(1).AddTicks(-1)),
+                "30d" => (DateTime.Today.AddDays(-30), DateTime.Today.AddDays(1).AddTicks(-1)),
+                "90d" => (DateTime.Today.AddDays(-90), DateTime.Today.AddDays(1).AddTicks(-1)),
+                _ => (null, null) // All time
+            };
+        }
+
+        private static DateTime? GetPeriodStartDate(string period) => GetPeriodDateRange(period).StartDate;
 
         public static async Task<StaffDashboardData> GetStaffDashboardDataAsync(int? userId = null, int? companyId = null, string period = "1d")
         {
@@ -4009,6 +4070,12 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 ))
                 .ToListAsync();
 
+            var recentRetention = await context.RetentionRequests
+                .Where(r => r.CompanyId == targetCompanyId)
+                .OrderByDescending(r => r.RequestedDate)
+                .Take(6)
+                .ToListAsync();
+
             return new ManagerDashboardData(
                 activeOrders,
                 readyOrders,
@@ -4022,7 +4089,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 stages,
                 orderStatusBars,
                 staffPerformance,
-                recentOrders
+                recentOrders,
+                recentRetention
             );
         }
 
@@ -4193,6 +4261,11 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
 
             var subInfo = await GetSubscriptionInfoAsync();
             var pagedTx = await GetOverallTransactionsPagedAsync(page: 1, pageSize: 6);
+            var recentRetention = await context.RetentionRequests
+                .Where(r => r.CompanyId == targetCompanyId)
+                .OrderByDescending(r => r.RequestedDate)
+                .Take(6)
+                .ToListAsync();
 
             return new AdminDashboardData(
                 periodRevenue,
@@ -4209,7 +4282,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 orderStatusBars,
                 topCustomers,
                 subInfo,
-                pagedTx.Items
+                pagedTx.Items,
+                recentRetention
             );
         }
 
@@ -4479,6 +4553,36 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                         );
                     END;
 
+                    IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'RetentionRequests')
+                    BEGIN
+                        CREATE TABLE RetentionRequests (
+                            RequestId INT IDENTITY(1,1) PRIMARY KEY,
+                            CompanyId INT NOT NULL,
+                            CustomerId INT NOT NULL,
+                            CustomerName NVARCHAR(150) NOT NULL,
+                            CustomerEmail NVARCHAR(150) NOT NULL,
+                            TargetSegment NVARCHAR(50) NOT NULL DEFAULT 'At Risk',
+                            ActionType NVARCHAR(100) NOT NULL DEFAULT 'Special Discount',
+                            DiscountPercent DECIMAL(18,2) NOT NULL DEFAULT 0,
+                            RetentionDetails NVARCHAR(MAX) NOT NULL,
+                            ReasonCategory NVARCHAR(100) NOT NULL,
+                            ReasonCustomDetails NVARCHAR(MAX) NULL,
+                            Status NVARCHAR(50) NOT NULL DEFAULT 'Pending',
+                            RequestedDate DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                            RequestedByUserId INT NOT NULL,
+                            RequestedByUserName NVARCHAR(100) NOT NULL,
+                            ReviewedDate DATETIME2 NULL,
+                            ReviewedByUserId INT NULL,
+                            ReviewedByUserName NVARCHAR(100) NULL,
+                            ReviewAction NVARCHAR(50) NULL,
+                            RejectionDate DATETIME2 NULL,
+                            RejectedByUserId INT NULL,
+                            RejectedByUserName NVARCHAR(100) NULL,
+                            RejectionReason NVARCHAR(MAX) NULL,
+                            AdminRemarks NVARCHAR(MAX) NULL
+                        );
+                    END;
+
                     IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Customers') AND name = 'IsUnsubscribed')
                     BEGIN
                         ALTER TABLE Customers ADD IsUnsubscribed BIT NOT NULL DEFAULT 0;
@@ -4663,6 +4767,95 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                             completedOrders[i].DeliveryDate = completedOrders[i].OrderDate.AddDays(3);
                     }
                     await context.SaveChangesAsync();
+                }
+
+                if (!await context.RetentionRequests.AnyAsync())
+                {
+                    var seededCustomers = await context.Customers.Take(3).ToListAsync();
+                    var sampleRequests = new List<RetentionRequest>();
+
+                    if (seededCustomers.Count > 0)
+                    {
+                        var c1 = seededCustomers[0];
+                        sampleRequests.Add(new RetentionRequest
+                        {
+                            CompanyId = DefaultCompanyId,
+                            CustomerId = c1.CustomerId,
+                            CustomerName = $"{c1.FirstName} {c1.LastName}".Trim(),
+                            CustomerEmail = c1.Email,
+                            TargetSegment = "At Risk",
+                            ActionType = "Special Discount",
+                            DiscountPercent = 10m,
+                            RetentionDetails = "Provide a 10% anniversary discount voucher to incentivize a repeat purchase before churn.",
+                            ReasonCategory = "Prevent Customer Churn",
+                            Status = "Pending",
+                            RequestedDate = DateTime.UtcNow.AddDays(-2),
+                            RequestedByUserId = 2,
+                            RequestedByUserName = "Manager User"
+                        });
+                    }
+
+                    if (seededCustomers.Count > 1)
+                    {
+                        var c2 = seededCustomers[1];
+                        sampleRequests.Add(new RetentionRequest
+                        {
+                            CompanyId = DefaultCompanyId,
+                            CustomerId = c2.CustomerId,
+                            CustomerName = $"{c2.FirstName} {c2.LastName}".Trim(),
+                            CustomerEmail = c2.Email,
+                            TargetSegment = "Loyal",
+                            ActionType = "VIP Loyalty Reward",
+                            DiscountPercent = 12m,
+                            RetentionDetails = "Offer custom tier discount on bulk corporate orders to reward loyalty.",
+                            ReasonCategory = "Increase Customer Lifetime Value",
+                            Status = "Approved",
+                            RequestedDate = DateTime.UtcNow.AddDays(-5),
+                            RequestedByUserId = 2,
+                            RequestedByUserName = "Manager User",
+                            ReviewedDate = DateTime.UtcNow.AddDays(-4),
+                            ReviewedByUserId = 1,
+                            ReviewedByUserName = "Admin User",
+                            ReviewAction = "Approved",
+                            AdminRemarks = "Approved. High-value customer with consistent transaction volume."
+                        });
+                    }
+
+                    if (seededCustomers.Count > 2)
+                    {
+                        var c3 = seededCustomers[2];
+                        sampleRequests.Add(new RetentionRequest
+                        {
+                            CompanyId = DefaultCompanyId,
+                            CustomerId = c3.CustomerId,
+                            CustomerName = $"{c3.FirstName} {c3.LastName}".Trim(),
+                            CustomerEmail = c3.Email,
+                            TargetSegment = "Inactive",
+                            ActionType = "Win-Back Campaign",
+                            DiscountPercent = 30m,
+                            RetentionDetails = "Requesting a 30% discount and free custom gift packaging for win-back.",
+                            ReasonCategory = "Monthly Sales Target Not Met",
+                            Status = "Rejected",
+                            RequestedDate = DateTime.UtcNow.AddDays(-8),
+                            RequestedByUserId = 2,
+                            RequestedByUserName = "Manager User",
+                            ReviewedDate = DateTime.UtcNow.AddDays(-7),
+                            ReviewedByUserId = 1,
+                            ReviewedByUserName = "Admin User",
+                            ReviewAction = "Rejected",
+                            RejectionDate = DateTime.UtcNow.AddDays(-7),
+                            RejectedByUserId = 1,
+                            RejectedByUserName = "Admin User",
+                            RejectionReason = "30% discount exceeds maximum allowed promotion margin for inactive accounts (max 15%).",
+                            AdminRemarks = "Please resubmit with standard 15% discount structure."
+                        });
+                    }
+
+                    if (sampleRequests.Count > 0)
+                    {
+                        await context.RetentionRequests.AddRangeAsync(sampleRequests);
+                        await context.SaveChangesAsync();
+                    }
                 }
             }
             catch (Exception ex)
@@ -5520,6 +5713,233 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                     actionDesc: $"Email template for '{t.SegmentName}' updated by {currentUser} ({role})"
                 );
             }
+        }
+
+        // =========================================================
+        // RETENTION REQUESTS & APPROVAL WORKFLOW
+        // =========================================================
+
+        public static readonly string[] RetentionReasonOptions = new[]
+        {
+            "Maximize Profit Margins",
+            "Lower Marketing Costs",
+            "Monthly Sales Target Not Met",
+            "Improve Customer Retention",
+            "Prevent Customer Churn",
+            "Increase Customer Lifetime Value",
+            "Promotional or Strategic Decision",
+            "Other"
+        };
+
+        public static async Task<RetentionRequest> CreateRetentionRequestAsync(
+            int customerId,
+            string targetSegment,
+            string actionType,
+            decimal discountPercent,
+            string retentionDetails,
+            string reasonCategory,
+            string? reasonCustomDetails = null,
+            int? companyId = null)
+        {
+            VerifyRetentionAccess("Manager", throwOnFailure: true);
+
+            var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
+            var currentUserId = SessionService.CurrentUser?.UserId ?? 0;
+            var currentUserName = SessionService.CurrentUser?.Username ?? "Manager";
+
+            if (string.IsNullOrWhiteSpace(reasonCategory))
+                throw new ArgumentException("Reason for Retention is required.", nameof(reasonCategory));
+
+            if (reasonCategory == "Other" && string.IsNullOrWhiteSpace(reasonCustomDetails))
+                throw new ArgumentException("Please provide specific details when selecting 'Other' as the retention reason.", nameof(reasonCustomDetails));
+
+            await using var context = CreateDbContext(targetCompanyId);
+            await EnsureRetentionTablesAndSeedsAsync(context);
+
+            var customer = await context.Customers.FindAsync(customerId);
+            if (customer == null)
+                throw new InvalidOperationException("Customer not found.");
+
+            var req = new RetentionRequest
+            {
+                CompanyId = targetCompanyId,
+                CustomerId = customerId,
+                CustomerName = $"{customer.FirstName} {customer.LastName}".Trim(),
+                CustomerEmail = customer.Email ?? "",
+                TargetSegment = string.IsNullOrWhiteSpace(targetSegment) ? "At Risk" : targetSegment,
+                ActionType = string.IsNullOrWhiteSpace(actionType) ? "Special Discount" : actionType,
+                DiscountPercent = discountPercent,
+                RetentionDetails = retentionDetails ?? "",
+                ReasonCategory = reasonCategory,
+                ReasonCustomDetails = reasonCustomDetails?.Trim(),
+                Status = "Pending",
+                RequestedDate = DateTime.UtcNow,
+                RequestedByUserId = currentUserId,
+                RequestedByUserName = currentUserName
+            };
+
+            context.RetentionRequests.Add(req);
+            await context.SaveChangesAsync();
+
+            await RecordAuditLogAsync(
+                userId: currentUserId,
+                actionType: "RETENTION_REQUEST_CREATED",
+                actionDesc: $"Retention request submitted for '{req.CustomerName}' ({req.ReasonCategory}) by {currentUserName}"
+            );
+
+            return req;
+        }
+
+        public static async Task<RetentionRequest> ApproveRetentionRequestAsync(
+            int requestId,
+            string? adminRemarks = null,
+            int? companyId = null)
+        {
+            VerifyRetentionAccess("Admin", throwOnFailure: true);
+
+            var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
+            var currentUserId = SessionService.CurrentUser?.UserId ?? 0;
+            var currentUserName = SessionService.CurrentUser?.Username ?? "Admin";
+            var currentRole = SessionService.CurrentUser?.Role ?? "Admin";
+
+            await using var context = CreateDbContext(targetCompanyId);
+            var req = await context.RetentionRequests.FindAsync(requestId);
+            if (req == null)
+                throw new InvalidOperationException("Retention request not found.");
+
+            if (req.Status != "Pending")
+                throw new InvalidOperationException($"Cannot approve request with status '{req.Status}'. Only pending requests can be reviewed.");
+
+            // Strict self-approval prevention: Manager or Requester cannot approve their own request
+            if (req.RequestedByUserId == currentUserId && currentRole != "SuperAdmin")
+            {
+                throw new InvalidOperationException("A Manager cannot approve their own Retention request.");
+            }
+
+            req.Status = "Approved";
+            req.ReviewedDate = DateTime.UtcNow;
+            req.ReviewedByUserId = currentUserId;
+            req.ReviewedByUserName = currentUserName;
+            req.ReviewAction = "Approved";
+            req.AdminRemarks = adminRemarks?.Trim();
+
+            await context.SaveChangesAsync();
+
+            await RecordAuditLogAsync(
+                userId: currentUserId,
+                actionType: "RETENTION_REQUEST_APPROVED",
+                actionDesc: $"Retention request #{req.RequestId} for '{req.CustomerName}' approved by {currentUserName}"
+            );
+
+            return req;
+        }
+
+        public static async Task<RetentionRequest> RejectRetentionRequestAsync(
+            int requestId,
+            string rejectionReason,
+            string? adminRemarks = null,
+            int? companyId = null)
+        {
+            VerifyRetentionAccess("Admin", throwOnFailure: true);
+
+            var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
+            var currentUserId = SessionService.CurrentUser?.UserId ?? 0;
+            var currentUserName = SessionService.CurrentUser?.Username ?? "Admin";
+            var currentRole = SessionService.CurrentUser?.Role ?? "Admin";
+
+            if (string.IsNullOrWhiteSpace(rejectionReason))
+                throw new ArgumentException("A rejection reason is required when rejecting a retention request.", nameof(rejectionReason));
+
+            await using var context = CreateDbContext(targetCompanyId);
+            var req = await context.RetentionRequests.FindAsync(requestId);
+            if (req == null)
+                throw new InvalidOperationException("Retention request not found.");
+
+            if (req.Status != "Pending")
+                throw new InvalidOperationException($"Cannot reject request with status '{req.Status}'. Only pending requests can be reviewed.");
+
+            if (req.RequestedByUserId == currentUserId && currentRole != "SuperAdmin")
+            {
+                throw new InvalidOperationException("A Manager cannot review their own Retention request.");
+            }
+
+            req.Status = "Rejected";
+            req.ReviewedDate = DateTime.UtcNow;
+            req.ReviewedByUserId = currentUserId;
+            req.ReviewedByUserName = currentUserName;
+            req.ReviewAction = "Rejected";
+            req.RejectionDate = DateTime.UtcNow;
+            req.RejectedByUserId = currentUserId;
+            req.RejectedByUserName = currentUserName;
+            req.RejectionReason = rejectionReason.Trim();
+            req.AdminRemarks = adminRemarks?.Trim();
+
+            await context.SaveChangesAsync();
+
+            await RecordAuditLogAsync(
+                userId: currentUserId,
+                actionType: "RETENTION_REQUEST_REJECTED",
+                actionDesc: $"Retention request #{req.RequestId} for '{req.CustomerName}' rejected by {currentUserName}: {rejectionReason.Trim()}"
+            );
+
+            return req;
+        }
+
+        public static async Task<List<RetentionRequest>> GetRetentionRequestsAsync(
+            int? companyId = null,
+            string? statusFilter = null,
+            DateTime? fromDate = null,
+            DateTime? toDate = null,
+            string? searchQuery = null)
+        {
+            var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
+            await using var context = CreateDbContext(targetCompanyId);
+            await EnsureRetentionTablesAndSeedsAsync(context);
+
+            var query = context.RetentionRequests
+                .Where(r => r.CompanyId == targetCompanyId)
+                .AsQueryable();
+
+            if (!string.IsNullOrWhiteSpace(statusFilter) && statusFilter != "All")
+            {
+                query = query.Where(r => r.Status == statusFilter);
+            }
+
+            if (fromDate.HasValue)
+            {
+                var f = fromDate.Value.Date;
+                query = query.Where(r => r.RequestedDate >= f);
+            }
+
+            if (toDate.HasValue)
+            {
+                var t = toDate.Value.Date.AddDays(1).AddTicks(-1);
+                query = query.Where(r => r.RequestedDate <= t);
+            }
+
+            if (!string.IsNullOrWhiteSpace(searchQuery))
+            {
+                var q = searchQuery.Trim().ToLower();
+                query = query.Where(r =>
+                    r.CustomerName.ToLower().Contains(q) ||
+                    r.CustomerEmail.ToLower().Contains(q) ||
+                    r.RequestedByUserName.ToLower().Contains(q) ||
+                    (r.ReviewedByUserName != null && r.ReviewedByUserName.ToLower().Contains(q)) ||
+                    r.ReasonCategory.ToLower().Contains(q) ||
+                    (r.ReasonCustomDetails != null && r.ReasonCustomDetails.ToLower().Contains(q))
+                );
+            }
+
+            return await query
+                .OrderByDescending(r => r.RequestedDate)
+                .ToListAsync();
+        }
+
+        public static async Task<RetentionRequest?> GetRetentionRequestByIdAsync(int requestId, int? companyId = null)
+        {
+            var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
+            await using var context = CreateDbContext(targetCompanyId);
+            return await context.RetentionRequests.FirstOrDefaultAsync(r => r.RequestId == requestId && r.CompanyId == targetCompanyId);
         }
     }
 

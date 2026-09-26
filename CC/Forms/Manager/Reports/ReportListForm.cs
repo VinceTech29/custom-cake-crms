@@ -34,6 +34,10 @@ namespace CC.Forms.Manager.Reports
         private TextBox txtSearchBox = null!;
         private FlowLayoutPanel filterPillContainer = null!;
         private DateTimePicker dtpFilterDate = null!;
+        private DateTimePicker dtpFrom = null!;
+        private DateTimePicker dtpTo = null!;
+        private Label lblFromDate = null!;
+        private Label lblToDate = null!;
 
         private Panel tableCardPanel = null!;
         private DataGridView gridTransactions = null!;
@@ -46,7 +50,7 @@ namespace CC.Forms.Manager.Reports
         private Button btnExportAnnual = null!;
         private Button btnExportAll = null!;
 
-        private string activeFilter = "All"; // "All", "Daily", "Monthly", "Annually", "Orders", "Payments"
+        private string activeFilter = "All"; // "All", "Daily", "Monthly", "Annually", "Orders", "Payments", "Retention"
         private string activeSearchQuery = string.Empty;
         private DateTime selectedDate = DateTime.Today;
         private List<TransactionRecord> currentRecords = new List<TransactionRecord>();
@@ -391,7 +395,7 @@ namespace CC.Forms.Manager.Reports
                 Margin = new Padding(0, 2, 8, 0)
             };
 
-            string[] filters = new[] { "All", "Daily", "Monthly", "Annually", "Orders", "Payments" };
+            string[] filters = new[] { "All", "Daily", "Monthly", "Annually", "Orders", "Payments", "Retention" };
 
             foreach (var filterName in filters)
             {
@@ -402,6 +406,7 @@ namespace CC.Forms.Manager.Reports
                         "Daily" => "Daily (Today)",
                         "Monthly" => "Monthly (This Month)",
                         "Annually" => "Annually (This Year)",
+                        "Retention" => "Retention Requests",
                         _ => filterName
                     },
                     AutoSize = true,
@@ -441,7 +446,7 @@ namespace CC.Forms.Manager.Reports
 
             rowFlow.Controls.Add(filterPillContainer);
 
-            // Date Picker for custom date inspection
+            // Date Picker for custom date inspection (Daily/Monthly reference)
             dtpFilterDate = new DateTimePicker
             {
                 Format = DateTimePickerFormat.Short,
@@ -449,7 +454,7 @@ namespace CC.Forms.Manager.Reports
                 Height = 36,
                 Width = 120,
                 Font = new Font(UITheme.FontSans, 9.5F),
-                Margin = new Padding(4, 4, 0, 0)
+                Margin = new Padding(4, 4, 8, 0)
             };
             dtpFilterDate.ValueChanged += async (s, e) =>
             {
@@ -463,6 +468,72 @@ namespace CC.Forms.Manager.Reports
                 await RefreshDataAsync();
             };
             rowFlow.Controls.Add(dtpFilterDate);
+
+            // From / To pickers for custom range (used by Retention Requests and range-based filters)
+            lblFromDate = new Label
+            {
+                Text = "From:",
+                AutoSize = true,
+                Font = new Font(UITheme.FontSans, 9F),
+                ForeColor = UITheme.TextMuted,
+                Margin = new Padding(0, 12, 4, 0)
+            };
+            dtpFrom = new DateTimePicker
+            {
+                Format = DateTimePickerFormat.Short,
+                Value = DateTime.Today.AddMonths(-3),
+                Height = 36,
+                Width = 110,
+                Font = new Font(UITheme.FontSans, 9.5F),
+                Margin = new Padding(0, 4, 6, 0)
+            };
+            lblToDate = new Label
+            {
+                Text = "To:",
+                AutoSize = true,
+                Font = new Font(UITheme.FontSans, 9F),
+                ForeColor = UITheme.TextMuted,
+                Margin = new Padding(0, 12, 4, 0)
+            };
+            dtpTo = new DateTimePicker
+            {
+                Format = DateTimePickerFormat.Short,
+                Value = DateTime.Today,
+                Height = 36,
+                Width = 110,
+                Font = new Font(UITheme.FontSans, 9.5F),
+                Margin = new Padding(0, 4, 6, 0)
+            };
+            var btnApplyRange = new Button
+            {
+                Text = "Apply",
+                Height = 34,
+                Width = 65,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold),
+                ForeColor = Color.White,
+                BackColor = UITheme.PrimaryMauve,
+                Cursor = Cursors.Hand,
+                Margin = new Padding(0, 5, 0, 0)
+            };
+            btnApplyRange.FlatAppearance.BorderSize = 0;
+            btnApplyRange.Click += async (s, e) =>
+            {
+                if (dtpFrom.Value.Date > dtpTo.Value.Date)
+                {
+                    MessageBox.Show("\"From\" date must be before or equal to \"To\" date.", "Invalid Range",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                currentPage = 1;
+                await RefreshDataAsync();
+            };
+
+            rowFlow.Controls.Add(lblFromDate);
+            rowFlow.Controls.Add(dtpFrom);
+            rowFlow.Controls.Add(lblToDate);
+            rowFlow.Controls.Add(dtpTo);
+            rowFlow.Controls.Add(btnApplyRange);
 
             searchFilterPanel.Controls.Add(rowFlow);
             UpdateFilterPillStyles();
@@ -678,6 +749,8 @@ namespace CC.Forms.Manager.Reports
                 // Determine period and type filter
                 string period = "All";
                 string? typeFilter = null;
+                DateTime? fromDate = null;
+                DateTime? toDate = null;
 
                 if (activeFilter == "Daily")
                 {
@@ -698,6 +771,19 @@ namespace CC.Forms.Manager.Reports
                 else if (activeFilter == "Payments")
                 {
                     typeFilter = "Payments";
+                }
+                else if (activeFilter == "Retention")
+                {
+                    typeFilter = "Retention";
+                }
+
+                // If custom From/To pickers are set (non-default), apply range filter
+                if (dtpFrom != null && dtpTo != null &&
+                    (dtpFrom.Value.Date != DateTime.Today.AddMonths(-3).Date || dtpTo.Value.Date != DateTime.Today.Date))
+                {
+                    fromDate = dtpFrom.Value.Date;
+                    toDate = dtpTo.Value.Date;
+                    period = $"range:{fromDate:yyyy-MM-dd}:{toDate:yyyy-MM-dd}";
                 }
 
                 // Query database with pagination

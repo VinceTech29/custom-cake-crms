@@ -42,6 +42,7 @@ namespace CC.infrastructure.Data
         public DbSet<RetentionEmailTemplate> RetentionEmailTemplates => Set<RetentionEmailTemplate>();
         public DbSet<RetentionEmailLog> RetentionEmailLogs => Set<RetentionEmailLog>();
         public DbSet<RetentionSetting> RetentionSettings => Set<RetentionSetting>();
+        public DbSet<RetentionRequest> RetentionRequests => Set<RetentionRequest>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -416,6 +417,14 @@ namespace CC.infrastructure.Data
             // Retention Setting
             modelBuilder.Entity<RetentionSetting>()
                 .HasKey(x => x.SettingId);
+
+            // Retention Request
+            modelBuilder.Entity<RetentionRequest>()
+                .HasKey(x => x.RequestId);
+
+            modelBuilder.Entity<RetentionRequest>()
+                .Property(x => x.DiscountPercent)
+                .HasPrecision(5, 2);
         }
     }
 }
