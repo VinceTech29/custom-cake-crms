@@ -1,0 +1,19 @@
+using System.Collections.Generic;
+
+namespace CC.Models
+{
+    public class SubscriptionPlan
+    {
+        public int PlanId { get; set; }
+
+        public string PlanName { get; set; } = string.Empty;
+
+        public decimal Price { get; set; }
+
+        public int DurationDays { get; set; }
+
+        public int MaxUsers { get; set; }
+
+        public List<Subscription> Subscriptions { get; set; } = new List<Subscription>();
+    }
+}
