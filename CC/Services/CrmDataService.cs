@@ -4493,8 +4493,13 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             }
         }
 
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _retentionTablesInitialized = new();
+
         public static async Task EnsureRetentionTablesAndSeedsAsync(CrmDbContext context)
         {
+            string connKey = context.Database.GetDbConnection().ConnectionString;
+            if (_retentionTablesInitialized.ContainsKey(connKey)) return;
+
             try
             {
                 await context.Database.ExecuteSqlRawAsync(@"
@@ -4603,6 +4608,20 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                         ALTER TABLE RetentionSettings ADD SmtpFromName NVARCHAR(150) NULL;
                         ALTER TABLE RetentionSettings ADD SmtpEnableSsl BIT NOT NULL DEFAULT 1;
                         ALTER TABLE RetentionSettings ADD SmtpMockMode BIT NOT NULL DEFAULT 1;
+                    END;
+
+                    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('RetentionRequests') AND name = 'AddedToCampaign')
+                    BEGIN
+                        ALTER TABLE RetentionRequests ADD AddedToCampaign BIT NOT NULL DEFAULT 0;
+                        ALTER TABLE RetentionRequests ADD AddedToCampaignDate DATETIME2 NULL;
+                        ALTER TABLE RetentionRequests ADD GeneratedCampaignLogId INT NULL;
+                        ALTER TABLE RetentionRequests ADD GeneratedCampaignSubject NVARCHAR(255) NULL;
+                        ALTER TABLE RetentionRequests ADD GeneratedCampaignBody NVARCHAR(MAX) NULL;
+                    END;
+
+                    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('RetentionEmailLogs') AND name = 'RetentionRequestId')
+                    BEGIN
+                        ALTER TABLE RetentionEmailLogs ADD RetentionRequestId INT NULL;
                     END;
                 ");
 
@@ -4857,6 +4876,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                         await context.SaveChangesAsync();
                     }
                 }
+
+                _retentionTablesInitialized[connKey] = true;
             }
             catch (Exception ex)
             {
@@ -5076,6 +5097,12 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 .Take(25)
                 .ToListAsync();
 
+            var approvedCampaigns = await context.RetentionRequests
+                .AsNoTracking()
+                .Where(r => r.CompanyId == targetCompanyId && r.Status == "Approved")
+                .OrderByDescending(r => r.ReviewedDate ?? r.RequestedDate)
+                .ToListAsync();
+
             return new RetentionDashboardData(
                 validBase.Count,
                 summaryMap,
@@ -5084,7 +5111,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 settings,
                 metrics,
                 emailLogs.Take(50).ToList(),
-                auditLogs
+                auditLogs,
+                approvedCampaigns
             );
         }
 
@@ -5823,15 +5851,135 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             req.ReviewAction = "Approved";
             req.AdminRemarks = adminRemarks?.Trim();
 
+            // Automatic & Idempotent Email Campaign Generation (Requirements 4, 5, 6)
+            if (!req.AddedToCampaign)
+            {
+                var (emailSubject, emailBody) = GenerateFormattedRetentionEmail(req);
+
+                var campaignLog = new RetentionEmailLog
+                {
+                    CompanyId = targetCompanyId,
+                    CustomerId = req.CustomerId,
+                    CustomerName = req.CustomerName,
+                    CustomerEmail = req.CustomerEmail,
+                    SegmentName = req.TargetSegment,
+                    Subject = emailSubject,
+                    BodySent = emailBody,
+                    SentDate = DateTime.UtcNow,
+                    SentBy = $"Approved Request #{req.RequestId} ({currentUserName})",
+                    Status = "Ready to Send",
+                    RetentionRequestId = req.RequestId
+                };
+
+                context.RetentionEmailLogs.Add(campaignLog);
+                await context.SaveChangesAsync();
+
+                req.AddedToCampaign = true;
+                req.AddedToCampaignDate = DateTime.UtcNow;
+                req.GeneratedCampaignLogId = campaignLog.LogId;
+                req.GeneratedCampaignSubject = emailSubject;
+                req.GeneratedCampaignBody = emailBody;
+            }
+
             await context.SaveChangesAsync();
 
             await RecordAuditLogAsync(
                 userId: currentUserId,
                 actionType: "RETENTION_REQUEST_APPROVED",
-                actionDesc: $"Retention request #{req.RequestId} for '{req.CustomerName}' approved by {currentUserName}"
+                actionDesc: $"Retention request #{req.RequestId} for '{req.CustomerName}' approved by {currentUserName} and automatically added to Email Campaigns."
             );
 
             return req;
+        }
+
+        public static (string Subject, string Body) GenerateFormattedRetentionEmail(RetentionRequest req)
+        {
+            string customerName = req.CustomerName?.Trim() ?? "Valued Customer";
+            string firstName = customerName.Split(' ')[0];
+            decimal discount = req.DiscountPercent;
+            string discountText = discount > 0 ? $"{discount:0.#}%" : "Exclusive";
+
+            // Subject generation based on retention reason and purpose (Requirement 5)
+            string subject;
+            string reason = req.ReasonCategory?.Trim() ?? "";
+
+            switch (reason)
+            {
+                case "Prevent Customer Churn":
+                    subject = discount > 0
+                        ? $"We Miss You at Sweet Story! Enjoy a Special {discountText} Welcome-Back Gift"
+                        : "We Miss You at Sweet Story! Here is a Special Treat for You";
+                    break;
+                case "Maximize Profit Margins":
+                case "VIP Loyalty Reward":
+                    subject = discount > 0
+                        ? $"An Exclusive Sweet Story VIP Reward: {discountText} Off Just for You, {firstName}!"
+                        : $"Exclusive VIP Reward: A Special Invitation from Sweet Story for {firstName}";
+                    break;
+                case "Improve Customer Retention":
+                    subject = discount > 0
+                        ? $"A Heartfelt Thank You & Special {discountText} Discount for {firstName}"
+                        : $"A Special Appreciation Gift for {firstName} from Sweet Story";
+                    break;
+                case "Monthly Sales Target Not Met":
+                    subject = discount > 0
+                        ? $"Special Celebration Offer: Enjoy {discountText} Off Your Next Order!"
+                        : "Special Celebration Offer Just for You from Sweet Story!";
+                    break;
+                case "Promotional or Strategic Decision":
+                    subject = discount > 0
+                        ? $"Exclusive Promotion: Enjoy {discountText} Off Your Next Sweet Story Order"
+                        : "Exclusive Celebration Promotion from Sweet Story";
+                    break;
+                default:
+                    subject = discount > 0
+                        ? $"Special Appreciation Offer: {discountText} Off for {firstName} from Sweet Story"
+                        : $"A Special Personalized Offer for {firstName} from Sweet Story";
+                    break;
+            }
+
+            // Body generation - professional, structured, with paragraphs, headings, and CTA (Requirement 5)
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"Dear {customerName},");
+            sb.AppendLine();
+            sb.AppendLine("Thank you for being part of the Sweet Story family! Your trust and support mean the world to us, and we are grateful for every celebration we've had the honor to be part of.");
+            sb.AppendLine();
+
+            if (discount > 0)
+            {
+                sb.AppendLine($"As a gesture of our heartfelt gratitude, our management team has approved an exclusive {discountText} discount tailored specifically for your next custom cake or pastry order with us.");
+            }
+            else
+            {
+                sb.AppendLine("As a gesture of our heartfelt gratitude, our management team has approved an exclusive customer appreciation offer tailored specifically for your next order with us.");
+            }
+            sb.AppendLine();
+
+            if (!string.IsNullOrWhiteSpace(req.RetentionDetails))
+            {
+                sb.AppendLine("Offer Details:");
+                sb.AppendLine($"• {req.RetentionDetails.Trim()}");
+                if (discount > 0)
+                {
+                    sb.AppendLine($"• Applicable Discount: {discountText} on your upcoming order");
+                }
+                sb.AppendLine("• Validity: Valid for 30 days from today");
+                sb.AppendLine();
+            }
+
+            sb.AppendLine("Next Steps / How to Redeem:");
+            sb.AppendLine("Simply mention this special offer or reply to this message when placing your next order, and our dedicated cake designers will make sure your celebration is truly extraordinary.");
+            sb.AppendLine();
+            sb.AppendLine("Call to Action:");
+            sb.AppendLine("Visit our store or get in touch with our team today to discuss your next custom design!");
+            sb.AppendLine();
+            sb.AppendLine("Warmest regards,");
+            sb.AppendLine("The Sweet Story Team");
+            sb.AppendLine("Sweet Story Cake Shop & Café");
+            sb.AppendLine("Email: support@sweetstory.com  |  Phone: +63 912 345 6789");
+            sb.AppendLine("Crafting Sweet Moments for Every Celebration");
+
+            return (subject, sb.ToString());
         }
 
         public static async Task<RetentionRequest> RejectRetentionRequestAsync(
@@ -5897,6 +6045,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             await EnsureRetentionTablesAndSeedsAsync(context);
 
             var query = context.RetentionRequests
+                .AsNoTracking()
                 .Where(r => r.CompanyId == targetCompanyId)
                 .AsQueryable();
 
@@ -5939,7 +6088,9 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
         {
             var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
             await using var context = CreateDbContext(targetCompanyId);
-            return await context.RetentionRequests.FirstOrDefaultAsync(r => r.RequestId == requestId && r.CompanyId == targetCompanyId);
+            return await context.RetentionRequests
+                .AsNoTracking()
+                .FirstOrDefaultAsync(r => r.RequestId == requestId && r.CompanyId == targetCompanyId);
         }
     }
 
@@ -5983,7 +6134,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
         RetentionSetting Settings,
         RetentionMetrics Metrics,
         List<RetentionEmailLog> RecentEmailLogs,
-        List<SystemAuditLog> AuditLogs
+        List<SystemAuditLog> AuditLogs,
+        List<RetentionRequest>? ApprovedCampaigns = null
     );
 
     public record SubscriptionPlanListItem(

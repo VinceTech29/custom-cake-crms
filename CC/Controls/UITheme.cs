@@ -476,5 +476,74 @@ namespace CC.Controls
                 // Graceful fallback
             }
         }
+
+        /// <summary>
+        /// Displays a modal dialog with a semi-transparent dark backdrop covering the top-level application window.
+        /// Ensures the modal is centered above all content and prevents accidental interaction with the underlying page.
+        /// </summary>
+        public static DialogResult ShowDialogWithBackdrop(this Form modal, Control? owner = null)
+        {
+            Form? parent = owner?.FindForm() ?? modal.Owner?.FindForm() ?? Form.ActiveForm;
+            if (parent == null || !parent.Visible)
+            {
+                foreach (Form f in Application.OpenForms)
+                {
+                    if (f.Visible && f != modal && f.TopLevel)
+                    {
+                        parent = f;
+                        break;
+                    }
+                }
+            }
+
+            if (parent == null || !parent.Visible || parent.WindowState == FormWindowState.Minimized)
+            {
+                modal.StartPosition = FormStartPosition.CenterScreen;
+                return modal.ShowDialog();
+            }
+
+            // Create semi-transparent overlay matching parent window
+            var backdrop = new Form
+            {
+                FormBorderStyle = FormBorderStyle.None,
+                BackColor = Color.Black,
+                Opacity = 0.45,
+                ShowInTaskbar = false,
+                StartPosition = FormStartPosition.Manual,
+                Location = parent.PointToScreen(Point.Empty),
+                Size = parent.ClientSize,
+                Owner = parent
+            };
+
+            void SyncBackdropBounds(object? s, EventArgs e)
+            {
+                if (!backdrop.IsDisposed && !parent.IsDisposed)
+                {
+                    backdrop.Location = parent.PointToScreen(Point.Empty);
+                    backdrop.Size = parent.ClientSize;
+                }
+            }
+
+            parent.LocationChanged += SyncBackdropBounds;
+            parent.SizeChanged += SyncBackdropBounds;
+
+            backdrop.Show();
+
+            modal.StartPosition = FormStartPosition.Manual;
+            modal.CenterOnParentOrScreen(parent);
+            modal.Owner = backdrop;
+
+            try
+            {
+                return modal.ShowDialog(backdrop);
+            }
+            finally
+            {
+                parent.LocationChanged -= SyncBackdropBounds;
+                parent.SizeChanged -= SyncBackdropBounds;
+                backdrop.Close();
+                backdrop.Dispose();
+            }
+        }
     }
 }

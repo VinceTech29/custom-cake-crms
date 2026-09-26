@@ -480,3 +480,13 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+AgriCycle/
+AgriCycle.api/
+AgriCycle.domain/
+AgriCycle.infrastructure/
+.vs/
+CC/CC.api/
+CC/CC.domain/
+CC/CC.infrastructure/
+CC/CC.slnx
+

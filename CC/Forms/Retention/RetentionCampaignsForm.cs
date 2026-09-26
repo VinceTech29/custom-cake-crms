@@ -88,6 +88,7 @@ namespace CC.Forms.Retention
         private const int RequestsPageSize = 15;
         private string requestsStatusFilter = "All";
         private string requestsSearchQuery = string.Empty;
+        private List<CC.Domain.Entities.RetentionRequest>? _cachedRequests;
 
         // Data Cache
         private RetentionDashboardData? currentData;
@@ -407,8 +408,8 @@ namespace CC.Forms.Retention
             panelSettings.Visible = activeTab == "Settings";
             panelRequests.Visible = activeTab == "Requests";
 
-            // Load Requests tab data on switch
-            if (activeTab == "Requests")
+            // Load Requests tab data on switch only if not already cached
+            if (activeTab == "Requests" && _cachedRequests == null)
                 _ = RefreshRequestsTabAsync();
         }
 
@@ -845,6 +846,51 @@ namespace CC.Forms.Retention
             bool isAdmin = SessionService.CurrentUser?.Role == "Business Admin" || SessionService.CurrentUser?.Role == "Admin";
             int cardWidth = Math.Max(850, flowCampaignCards.ClientSize.Width - 32);
 
+            // 1. Render Approved Individual Retention Campaigns (Requirements 4, 5, 6)
+            if (currentData.ApprovedCampaigns != null && currentData.ApprovedCampaigns.Any())
+            {
+                var banner = new Panel
+                {
+                    Width = cardWidth,
+                    Height = 38,
+                    BackColor = Color.FromArgb(243, 240, 255),
+                    Margin = new Padding(0, 0, 0, 12),
+                    Padding = new Padding(14, 8, 14, 8)
+                };
+                var lblBanner = new Label
+                {
+                    Text = $"\u2728 Approved Retention Campaigns ({currentData.ApprovedCampaigns.Count} individual customer offer(s) ready to send)",
+                    Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold),
+                    ForeColor = UITheme.PrimaryMauve,
+                    Dock = DockStyle.Fill
+                };
+                banner.Controls.Add(lblBanner);
+                flowCampaignCards.Controls.Add(banner);
+
+                foreach (var req in currentData.ApprovedCampaigns)
+                {
+                    flowCampaignCards.Controls.Add(BuildApprovedCampaignCard(req, cardWidth));
+                }
+
+                var separator = new Panel
+                {
+                    Width = cardWidth,
+                    Height = 36,
+                    BackColor = Color.Transparent,
+                    Margin = new Padding(0, 8, 0, 10),
+                    Padding = new Padding(0, 8, 0, 8)
+                };
+                var lblSep = new Label
+                {
+                    Text = "Fixed Segment Automated Templates (Bulk Campaigns)",
+                    Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold),
+                    ForeColor = UITheme.TextMuted,
+                    Dock = DockStyle.Fill
+                };
+                separator.Controls.Add(lblSep);
+                flowCampaignCards.Controls.Add(separator);
+            }
+
             foreach (var template in currentData.Templates)
             {
                 var card = new Panel
@@ -1010,6 +1056,293 @@ namespace CC.Forms.Retention
             }
 
             flowCampaignCards.ResumeLayout(true);
+        }
+
+        private Panel BuildApprovedCampaignCard(CC.Domain.Entities.RetentionRequest req, int cardWidth)
+        {
+            var card = new Panel
+            {
+                Width = cardWidth,
+                Height = 235,
+                BackColor = Color.White,
+                Margin = new Padding(0, 0, 0, 16),
+                Padding = new Padding(20)
+            };
+            card.Paint += (s, e) =>
+            {
+                using var pen = new Pen(Color.FromArgb(140, 70, 90), 1.5f);
+                e.Graphics.DrawRoundedRectangle(pen, new Rectangle(0, 0, card.Width - 1, card.Height - 1), 10);
+            };
+
+            // Right Column (Offers & Actions)
+            var rightStack = new Panel
+            {
+                Dock = DockStyle.Right,
+                Width = 260,
+                BackColor = Color.Transparent
+            };
+
+            var lblOffer = new Label
+            {
+                Text = $"Offer: {(req.DiscountPercent > 0 ? $"{req.DiscountPercent:0.#}% Off Next Order" : "Special VIP Offer")}",
+                Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold),
+                ForeColor = UITheme.StatusGreenFg,
+                Location = new Point(10, 8),
+                Width = 240,
+                Height = 30,
+                UseMnemonic = false
+            };
+
+            var lblSource = new Label
+            {
+                Text = $"From Request #{req.RequestId:D4}\nApproved: {req.ReviewedDate?.ToLocalTime().ToString("MMM dd, yyyy") ?? "Recently"}",
+                Font = new Font(UITheme.FontSans, 8F, FontStyle.Regular),
+                ForeColor = UITheme.TextMuted,
+                Location = new Point(10, 42),
+                Width = 240,
+                Height = 36,
+                UseMnemonic = false
+            };
+
+            var btnReviewSend = new Button
+            {
+                Text = "\u2709 Review & Send Email",
+                Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold),
+                ForeColor = Color.White,
+                BackColor = UITheme.PrimaryMauve,
+                FlatStyle = FlatStyle.Flat,
+                Location = new Point(10, 86),
+                Width = 240,
+                Height = 36,
+                Cursor = Cursors.Hand,
+                UseMnemonic = false
+            };
+            btnReviewSend.FlatAppearance.BorderSize = 0;
+            btnReviewSend.Click += async (s, e) =>
+            {
+                await ShowApprovedRequestEmailDialogAsync(req);
+            };
+
+            var btnViewDetails = new Button
+            {
+                Text = "\uD83D\uDCCB View Request Details",
+                Font = new Font(UITheme.FontSans, 8.5F, FontStyle.Regular),
+                ForeColor = UITheme.TextDark,
+                BackColor = Color.FromArgb(245, 240, 235),
+                FlatStyle = FlatStyle.Flat,
+                Location = new Point(10, 128),
+                Width = 240,
+                Height = 32,
+                Cursor = Cursors.Hand
+            };
+            btnViewDetails.FlatAppearance.BorderColor = UITheme.BorderColor;
+            btnViewDetails.Click += async (s, e) =>
+            {
+                using var modal = new RetentionRequestDetailsModal(req);
+                if (modal.ShowDialogWithBackdrop(this) == DialogResult.OK)
+                {
+                    await RefreshDataAsync();
+                }
+            };
+
+            rightStack.Controls.Add(btnViewDetails);
+            rightStack.Controls.Add(btnReviewSend);
+            rightStack.Controls.Add(lblSource);
+            rightStack.Controls.Add(lblOffer);
+
+            // Left Column (Details)
+            var leftStack = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.Transparent,
+                Padding = new Padding(0, 0, 16, 0)
+            };
+
+            var lblBadge = new Label
+            {
+                Text = $"\u2714 APPROVED RETENTION CAMPAIGN  \u00B7  {req.CustomerName.ToUpperInvariant()} ({req.CustomerEmail})",
+                Font = new Font(UITheme.FontSans, 8.5F, FontStyle.Bold),
+                ForeColor = UITheme.PrimaryMauve,
+                Dock = DockStyle.Top,
+                Height = 22
+            };
+
+            var lblSubject = new Label
+            {
+                Text = $"Subject: {req.GeneratedCampaignSubject ?? "Special Retention Offer"}",
+                Font = new Font(UITheme.FontSans, 10F, FontStyle.Bold),
+                ForeColor = UITheme.TextDark,
+                Dock = DockStyle.Top,
+                Height = 24,
+                UseMnemonic = false
+            };
+
+            var lblPreview = new Label
+            {
+                Text = $"Reason: {req.FullReason}  \u00B7  Action: {req.ActionType}  \u00B7  Discount: {req.DiscountPercent:0.#}%",
+                Font = new Font(UITheme.FontSans, 8.5F, FontStyle.Italic),
+                ForeColor = UITheme.TextMuted,
+                Dock = DockStyle.Top,
+                Height = 20,
+                UseMnemonic = false
+            };
+
+            var txtBodySnippet = new TextBox
+            {
+                Multiline = true,
+                ReadOnly = true,
+                ScrollBars = ScrollBars.Vertical,
+                Font = new Font("Segoe UI", 9F),
+                BackColor = Color.FromArgb(250, 248, 246),
+                ForeColor = UITheme.TextDark,
+                BorderStyle = BorderStyle.FixedSingle,
+                Dock = DockStyle.Fill,
+                Text = req.GeneratedCampaignBody ?? string.Empty
+            };
+
+            leftStack.Controls.Add(txtBodySnippet);
+            leftStack.Controls.Add(lblPreview);
+            leftStack.Controls.Add(lblSubject);
+            leftStack.Controls.Add(lblBadge);
+
+            card.Controls.Add(leftStack);
+            card.Controls.Add(rightStack);
+            return card;
+        }
+
+        private async Task ShowApprovedRequestEmailDialogAsync(CC.Domain.Entities.RetentionRequest req)
+        {
+            using var dlg = new Form
+            {
+                Text = $"Send Approved Retention Email - {req.CustomerName}",
+                Size = new Size(680, 650),
+                StartPosition = FormStartPosition.Manual,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                MaximizeBox = false,
+                MinimizeBox = false,
+                BackColor = UITheme.CreamBackground
+            };
+            dlg.Load += (s, e) => dlg.CenterOnParentOrScreen();
+
+            var pnl = new Panel { Dock = DockStyle.Fill, Padding = new Padding(24) };
+
+            var lblHeader = new Label
+            {
+                Text = $"Review & Send Retention Email \u00B7 {req.CustomerName}",
+                Font = new Font(UITheme.FontSerif, 13F, FontStyle.Bold),
+                ForeColor = UITheme.TextDark,
+                Dock = DockStyle.Top,
+                Height = 28,
+                UseMnemonic = false
+            };
+
+            var lblDesc = new Label
+            {
+                Text = $"Generated automatically from approved Retention Request #{req.RequestId:D4}. You can edit the subject and body before dispatching.",
+                Font = new Font(UITheme.FontSans, 9F, FontStyle.Regular),
+                ForeColor = UITheme.TextMuted,
+                Dock = DockStyle.Top,
+                Height = 32,
+                UseMnemonic = false
+            };
+
+            var formPanel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.Transparent
+            };
+
+            var lblRecip = new Label { Text = $"Recipient: {req.CustomerName} ({req.CustomerEmail})", Location = new Point(0, 6), AutoSize = true, Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold), ForeColor = UITheme.TextDark };
+            var lblSub = new Label { Text = "Email Subject Line:", Location = new Point(0, 36), AutoSize = true, Font = new Font(UITheme.FontSans, 8.5F, FontStyle.Bold), ForeColor = UITheme.TextDark };
+            var txtSub = new TextBox { Text = req.GeneratedCampaignSubject ?? "Special Offer from Sweet Story", Location = new Point(0, 56), Width = 610, Font = new Font(UITheme.FontSans, 9.5F) };
+
+            var lblBody = new Label { Text = "Email Body (Personalized):", Location = new Point(0, 92), AutoSize = true, Font = new Font(UITheme.FontSans, 8.5F, FontStyle.Bold), ForeColor = UITheme.TextDark };
+            var txtBody = new TextBox
+            {
+                Text = req.GeneratedCampaignBody ?? string.Empty,
+                Location = new Point(0, 114),
+                Width = 610,
+                Height = 320,
+                Multiline = true,
+                ScrollBars = ScrollBars.Vertical,
+                Font = new Font("Segoe UI", 9F)
+            };
+
+            formPanel.Controls.Add(lblRecip);
+            formPanel.Controls.Add(lblSub);
+            formPanel.Controls.Add(txtSub);
+            formPanel.Controls.Add(lblBody);
+            formPanel.Controls.Add(txtBody);
+
+            var bottomActionPanel = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Bottom,
+                Height = 50,
+                FlowDirection = FlowDirection.RightToLeft,
+                Padding = new Padding(0, 8, 0, 0)
+            };
+
+            var btnSend = new Button
+            {
+                Text = "\u2709 Send Email Now",
+                Height = 38,
+                Width = 160,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold),
+                ForeColor = Color.White,
+                BackColor = UITheme.PrimaryMauve,
+                Cursor = Cursors.Hand
+            };
+            btnSend.FlatAppearance.BorderSize = 0;
+            btnSend.Click += async (s, e) =>
+            {
+                btnSend.Enabled = false;
+                btnSend.Text = "Sending...";
+                try
+                {
+                    await CrmDataService.SendManualRetentionEmailAsync(
+                        customerId: req.CustomerId,
+                        segmentName: req.TargetSegment,
+                        forceIgnoreCooldown: true,
+                        overrideSubject: txtSub.Text.Trim(),
+                        overrideBody: txtBody.Text.Trim()
+                    );
+                    MessageBox.Show($"Retention email successfully dispatched to {req.CustomerName} ({req.CustomerEmail})!", "Email Sent", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    dlg.Close();
+                    await RefreshDataAsync();
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Failed to send email: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    btnSend.Enabled = true;
+                    btnSend.Text = "\u2709 Send Email Now";
+                }
+            };
+
+            var btnCancel = new Button
+            {
+                Text = "Cancel",
+                Height = 38,
+                Width = 85,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font(UITheme.FontSans, 9F),
+                ForeColor = UITheme.TextDark,
+                BackColor = Color.White,
+                Cursor = Cursors.Hand
+            };
+            btnCancel.FlatAppearance.BorderColor = UITheme.BorderColor;
+            btnCancel.Click += (s, e) => dlg.Close();
+
+            bottomActionPanel.Controls.Add(btnSend);
+            bottomActionPanel.Controls.Add(btnCancel);
+
+            pnl.Controls.Add(formPanel);
+            pnl.Controls.Add(bottomActionPanel);
+            pnl.Controls.Add(lblDesc);
+            pnl.Controls.Add(lblHeader);
+            dlg.Controls.Add(pnl);
+
+            dlg.ShowDialogWithBackdrop(this);
         }
 
         private void ShowEditTemplateDialog(RetentionEmailTemplate template)
@@ -2239,18 +2572,17 @@ namespace CC.Forms.Retention
             filterBar.Controls.Add(dtpRequestTo);
             filterBar.Controls.Add(btnApply);
 
-            // ── DataGridView ─────────────────────────────────────────────
+            // ── DataGridView Container ──────────────────────────────────────────
             var tableCard = new Panel
             {
-                Dock = DockStyle.Top,
+                Dock = DockStyle.Fill,
                 BackColor = Color.White,
-                Height = 440,
-                Padding = new Padding(0)
+                Padding = new Padding(1)
             };
             tableCard.Paint += (s, e) =>
             {
-                using var pen = new Pen(Color.FromArgb(230, 230, 230), 1);
-                e.Graphics.DrawRectangle(pen, 0, 0, tableCard.Width - 1, tableCard.Height - 1);
+                using var pen = new Pen(UITheme.BorderColor, 1);
+                e.Graphics.DrawRoundedRectangle(pen, new Rectangle(0, 0, tableCard.Width - 1, tableCard.Height - 1), 8);
             };
 
             gridRetentionRequests = new DataGridView
@@ -2259,8 +2591,7 @@ namespace CC.Forms.Retention
                 BackgroundColor = Color.White,
                 BorderStyle = BorderStyle.None,
                 CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
-                ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single,
-                GridColor = Color.FromArgb(240, 240, 240),
+                GridColor = UITheme.BorderColor,
                 AutoGenerateColumns = false,
                 ReadOnly = true,
                 AllowUserToAddRows = false,
@@ -2268,40 +2599,62 @@ namespace CC.Forms.Retention
                 AllowUserToResizeRows = false,
                 RowHeadersVisible = false,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-                DefaultCellStyle = new DataGridViewCellStyle
-                {
-                    Font = new Font(UITheme.FontSans, 9F),
-                    ForeColor = UITheme.TextDark,
-                    BackColor = Color.White,
-                    SelectionBackColor = Color.FromArgb(248, 238, 242),
-                    SelectionForeColor = UITheme.TextDark,
-                    Padding = new Padding(6, 4, 6, 4)
-                },
-                ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
-                {
-                    Font = new Font(UITheme.FontSans, 8.5F, FontStyle.Bold),
-                    ForeColor = UITheme.TextMuted,
-                    BackColor = Color.FromArgb(250, 248, 252),
-                    Padding = new Padding(6, 6, 6, 6)
-                },
-                ColumnHeadersHeight = 38,
-                RowTemplate = { Height = 42 },
+                MultiSelect = false,
+                EnableHeadersVisualStyles = false,
                 Cursor = Cursors.Hand
             };
 
+            UITheme.ApplyTableStyle(gridRetentionRequests);
+            gridRetentionRequests.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            gridRetentionRequests.RowTemplate.Height = 48;
+            gridRetentionRequests.ColumnHeadersHeight = 42;
+
             gridRetentionRequests.Columns.AddRange(new DataGridViewColumn[]
             {
-                new DataGridViewTextBoxColumn { Name = "colId",          HeaderText = "Ref #",          Width = 65,  DataPropertyName = "RequestId" },
-                new DataGridViewTextBoxColumn { Name = "colCustomer",    HeaderText = "Customer",       Width = 155, DataPropertyName = "CustomerName" },
-                new DataGridViewTextBoxColumn { Name = "colReason",      HeaderText = "Reason",         Width = 185, DataPropertyName = "FullReason" },
-                new DataGridViewTextBoxColumn { Name = "colAction",      HeaderText = "Action Type",    Width = 110, DataPropertyName = "ActionType" },
-                new DataGridViewTextBoxColumn { Name = "colDiscount",    HeaderText = "Discount %",     Width = 90,  DataPropertyName = "DiscountPercent" },
-                new DataGridViewTextBoxColumn { Name = "colRequestedBy", HeaderText = "Requested By",   Width = 130, DataPropertyName = "RequestedByUserName" },
-                new DataGridViewTextBoxColumn { Name = "colDateReq",     HeaderText = "Date Requested", Width = 125, DataPropertyName = "RequestedDate" },
-                new DataGridViewTextBoxColumn { Name = "colReviewedBy",  HeaderText = "Reviewed By",    Width = 120, DataPropertyName = "ReviewedByUserName" },
-                new DataGridViewTextBoxColumn { Name = "colDateRev",     HeaderText = "Date Reviewed",  Width = 125, DataPropertyName = "ReviewedDate" },
-                new DataGridViewTextBoxColumn { Name = "colStatus",      HeaderText = "Status",         Width = 90,  DataPropertyName = "Status" }
+                new DataGridViewTextBoxColumn { Name = "colId",          HeaderText = "REF #",          FillWeight = 7,  MinimumWidth = 55,  DataPropertyName = "RequestId" },
+                new DataGridViewTextBoxColumn { Name = "colCustomer",    HeaderText = "CUSTOMER",       FillWeight = 16, MinimumWidth = 120, DataPropertyName = "CustomerName" },
+                new DataGridViewTextBoxColumn { Name = "colReason",      HeaderText = "REASON FOR RETENTION", FillWeight = 22, MinimumWidth = 140, DataPropertyName = "FullReason" },
+                new DataGridViewTextBoxColumn { Name = "colAction",      HeaderText = "ACTION TYPE",    FillWeight = 12, MinimumWidth = 95,  DataPropertyName = "ActionType" },
+                new DataGridViewTextBoxColumn { Name = "colDiscount",    HeaderText = "DISCOUNT",      FillWeight = 8,  MinimumWidth = 65,  DataPropertyName = "DiscountPercent" },
+                new DataGridViewTextBoxColumn { Name = "colRequestedBy", HeaderText = "REQUESTED BY",   FillWeight = 11, MinimumWidth = 90,  DataPropertyName = "RequestedByUserName" },
+                new DataGridViewTextBoxColumn { Name = "colDateReq",     HeaderText = "DATE REQUESTED", FillWeight = 10, MinimumWidth = 85,  DataPropertyName = "RequestedDate" },
+                new DataGridViewTextBoxColumn { Name = "colReviewedBy",  HeaderText = "REVIEWED BY",    FillWeight = 11, MinimumWidth = 90,  DataPropertyName = "ReviewedByUserName" },
+                new DataGridViewTextBoxColumn { Name = "colDateRev",     HeaderText = "DATE REVIEWED",  FillWeight = 10, MinimumWidth = 85,  DataPropertyName = "ReviewedDate" },
+                new DataGridViewTextBoxColumn { Name = "colStatus",      HeaderText = "STATUS",         FillWeight = 11, MinimumWidth = 85,  DataPropertyName = "Status" },
+                new DataGridViewTextBoxColumn { Name = "colView",        HeaderText = "ACTION",         FillWeight = 8,  MinimumWidth = 65 }
             });
+
+            gridRetentionRequests.CellPainting += (s, e) =>
+            {
+                if (e.RowIndex < 0 || e.Graphics == null) return;
+                string colName = gridRetentionRequests.Columns[e.ColumnIndex].Name;
+
+                if (colName == "colStatus" && e.Value != null)
+                {
+                    e.PaintBackground(e.CellBounds, true);
+                    string status = e.Value.ToString() ?? "";
+                    Color bg = status switch
+                    {
+                        "Approved" => UITheme.StatusGreenBg,
+                        "Rejected" => UITheme.StatusRedBg,
+                        _ => UITheme.StatusYellowBg
+                    };
+                    Color fg = status switch
+                    {
+                        "Approved" => UITheme.StatusGreenFg,
+                        "Rejected" => UITheme.StatusRedFg,
+                        _ => UITheme.StatusYellowFg
+                    };
+                    UITheme.DrawStatusBadge(e.Graphics, e.CellBounds, status, bg, fg);
+                    e.Handled = true;
+                }
+                else if (colName == "colView")
+                {
+                    e.PaintBackground(e.CellBounds, true);
+                    UITheme.DrawActionLink(e.Graphics, e.CellBounds, "View \u2192");
+                    e.Handled = true;
+                }
+            };
 
             gridRetentionRequests.CellFormatting += (s, e) =>
             {
@@ -2310,26 +2663,15 @@ namespace CC.Forms.Retention
 
                 if (colName is "colDateReq" or "colDateRev" && e.Value is DateTime dt)
                 {
-                    e.Value = dt == default ? "—" : dt.ToString("MMM dd, yyyy");
+                    e.Value = dt == default ? "—" : dt.ToLocalTime().ToString("MMM dd, yyyy");
                     e.FormattingApplied = true;
                 }
-                if (colName == "colStatus" && e.Value is string status)
-                {
-                    var cell = gridRetentionRequests.Rows[e.RowIndex].Cells[e.ColumnIndex];
-                    cell.Style.ForeColor = status switch
-                    {
-                        "Approved" => UITheme.StatusGreenFg,
-                        "Rejected" => Color.FromArgb(180, 60, 60),
-                        _ => Color.FromArgb(160, 110, 0)
-                    };
-                    cell.Style.Font = new Font(UITheme.FontSans, 8.5F, FontStyle.Bold);
-                }
-                if (colName == "colDiscount" && e.Value is decimal disc)
+                else if (colName == "colDiscount" && e.Value is decimal disc)
                 {
                     e.Value = disc > 0 ? $"{disc:0.##}%" : "—";
                     e.FormattingApplied = true;
                 }
-                if (colName is "colReviewedBy" or "colDateRev" && e.Value is string sv && string.IsNullOrWhiteSpace(sv))
+                else if (colName is "colReviewedBy" or "colDateRev" && e.Value is string sv && string.IsNullOrWhiteSpace(sv))
                 {
                     e.Value = "—";
                     e.FormattingApplied = true;
@@ -2342,35 +2684,38 @@ namespace CC.Forms.Retention
                 var row = gridRetentionRequests.Rows[e.RowIndex];
                 if (row.DataBoundItem is CC.Domain.Entities.RetentionRequest req)
                 {
-                    using var modal = new RetentionRequestDetailsModal(req.RequestId);
-                    modal.ShowDialog(this);
-                    await RefreshRequestsTabAsync();
+                    using var modal = new RetentionRequestDetailsModal(req);
+                    if (modal.ShowDialogWithBackdrop(this) == DialogResult.OK)
+                    {
+                        await RefreshRequestsTabAsync(forceRefresh: true);
+                        await RefreshDataAsync();
+                    }
                 }
             };
-
-            tableCard.Controls.Add(gridRetentionRequests);
 
             // ── Pagination ───────────────────────────────────────────────
             paginationRequests = new PaginationControl
             {
-                Dock = DockStyle.Top,
-                Height = 48,
-                BackColor = Color.Transparent
+                Dock = DockStyle.Bottom,
+                Height = 46,
+                BackColor = Color.White
             };
             paginationRequests.PageChanged += newPage =>
             {
                 requestsCurrentPage = newPage;
-                _ = RefreshRequestsTabAsync();
+                _ = RefreshRequestsTabAsync(forceRefresh: false);
             };
 
-            // Build content stack (Dock.Top — controls added last appear at the top visually)
-            panelRequests.Controls.Add(paginationRequests);
+            tableCard.Controls.Add(gridRetentionRequests);
+            tableCard.Controls.Add(paginationRequests);
+
+            // Build content stack (Dock.Fill first, then Dock.Top controls in reverse order)
             panelRequests.Controls.Add(tableCard);
             panelRequests.Controls.Add(filterBar);
             panelRequests.Controls.Add(headerRow);
         }
 
-        private async Task RefreshRequestsTabAsync()
+        private async Task RefreshRequestsTabAsync(bool forceRefresh = false)
         {
             try
             {
@@ -2378,29 +2723,41 @@ namespace CC.Forms.Retention
                 DateTime fromDate = dtpRequestFrom?.Value.Date ?? DateTime.Today.AddMonths(-3);
                 DateTime toDate = dtpRequestTo?.Value.Date ?? DateTime.Today;
 
-                var all = await CrmDataService.GetRetentionRequestsAsync(
-                    statusFilter: statusArg,
-                    fromDate: fromDate,
-                    toDate: toDate,
-                    companyId: SessionService.CurrentUser?.CompanyId
-                );
+                if (forceRefresh || _cachedRequests == null)
+                {
+                    _cachedRequests = await CrmDataService.GetRetentionRequestsAsync(
+                        statusFilter: null, // load all to enable instant client-side status filtering
+                        fromDate: fromDate,
+                        toDate: toDate,
+                        companyId: SessionService.CurrentUser?.CompanyId
+                    );
+                }
+
+                var filtered = _cachedRequests ?? new List<CC.Domain.Entities.RetentionRequest>();
+
+                // Status filter in memory
+                if (!string.IsNullOrWhiteSpace(statusArg))
+                {
+                    filtered = filtered.Where(r => r.Status == statusArg).ToList();
+                }
 
                 // Client-side search filter
                 if (!string.IsNullOrWhiteSpace(requestsSearchQuery))
                 {
                     string q = requestsSearchQuery.ToLower();
-                    all = all.Where(r =>
+                    filtered = filtered.Where(r =>
                         (r.CustomerName?.ToLower().Contains(q) ?? false) ||
                         (r.FullReason?.ToLower().Contains(q) ?? false) ||
-                        (r.RequestedByUserName?.ToLower().Contains(q) ?? false)
+                        (r.RequestedByUserName?.ToLower().Contains(q) ?? false) ||
+                        (r.ActionType?.ToLower().Contains(q) ?? false)
                     ).ToList();
                 }
 
-                int totalCount = all.Count;
+                int totalCount = filtered.Count;
                 int totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)RequestsPageSize));
                 if (requestsCurrentPage > totalPages) requestsCurrentPage = totalPages;
 
-                var page = all
+                var page = filtered
                     .OrderByDescending(r => r.RequestedDate)
                     .Skip((requestsCurrentPage - 1) * RequestsPageSize)
                     .Take(RequestsPageSize)
