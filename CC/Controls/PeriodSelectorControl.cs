@@ -172,7 +172,7 @@ namespace CC.Controls
             {
                 if (_isInternalUpdate) return;
                 // Enforce From <= To
-                if (_dtpFrom.Value > _dtpTo.Value)
+                if (_dtpTo != null && _dtpFrom.Value > _dtpTo.Value)
                 {
                     _isInternalUpdate = true;
                     _dtpTo.Value = _dtpFrom.Value;
