@@ -50,6 +50,9 @@ namespace CC.Forms.Staff.Customers
         private Label lblOrderCountBadge = null!;
         private DataGridView gridOrders = null!;
         private Label lblNoOrders = null!;
+        private PaginationControl paginationOrders = null!;
+        private int currentOrderPage = 1;
+        private const int OrderPageSize = 10;
 
         private Panel rightBottomCard = null!;
         private Label lblInteractionCountBadge = null!;
@@ -123,6 +126,7 @@ namespace CC.Forms.Staff.Customers
         public async Task LoadCustomerAsync(int customerId)
         {
             _customerId = customerId;
+            currentOrderPage = 1;
             try
             {
                 _customer = await CrmDataService.GetCustomerByIdAsync(customerId);
@@ -414,8 +418,19 @@ namespace CC.Forms.Staff.Customers
                 Visible = false
             };
 
+            paginationOrders = new PaginationControl
+            {
+                Dock = DockStyle.Bottom
+            };
+            paginationOrders.PageChanged += (newPage) =>
+            {
+                currentOrderPage = newPage;
+                PopulateCustomerData();
+            };
+
             rightTopCard.Controls.Add(lblNoOrders);
             rightTopCard.Controls.Add(gridOrders);
+            rightTopCard.Controls.Add(paginationOrders);
             rightTopCard.Controls.Add(orderHeader);
 
             // 2. INTERACTION HISTORY CARD
@@ -446,7 +461,7 @@ namespace CC.Forms.Staff.Customers
 
             lblNoInteractions = new Label
             {
-                Text = "No interaction history yet",
+                Text = "No interactions logged yet",
                 Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Italic),
                 ForeColor = UITheme.TextMuted,
                 Dock = DockStyle.Fill,
@@ -463,15 +478,17 @@ namespace CC.Forms.Staff.Customers
             mainLayout.Controls.Add(rightTable, 1, 0);
         }
 
-        private Panel CreateCardHeader(string glyph, string title, out Label countBadge)
+        private Control CreateCardHeader(string glyph, string title, out Label countBadge)
         {
             var header = new Panel
             {
                 Height = 36,
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+                Margin = Padding.Empty,
+                Padding = Padding.Empty
             };
 
-            var leftFlow = new FlowLayoutPanel
+            var leftStack = new FlowLayoutPanel
             {
                 Dock = DockStyle.Left,
                 AutoSize = true,
@@ -480,43 +497,41 @@ namespace CC.Forms.Staff.Customers
                 BackColor = Color.Transparent
             };
 
-            var iconLbl = new Label
+            var lblIcon = new Label
             {
                 Text = glyph,
                 Font = new Font("Segoe MDL2 Assets", 11.5F),
-                ForeColor = UITheme.TextDark,
-                Size = new Size(24, 28),
-                TextAlign = ContentAlignment.MiddleLeft,
-                Margin = new Padding(0, 0, 6, 0)
+                ForeColor = UITheme.PrimaryMauve,
+                AutoSize = true,
+                Margin = new Padding(0, 3, 8, 0)
             };
 
-            var titleLbl = new Label
+            var lblTitle = new Label
             {
                 Text = title,
-                Font = new Font(UITheme.FontSans, 11F, FontStyle.Bold),
+                Font = new Font(UITheme.FontSerif, 13F, FontStyle.Bold),
                 ForeColor = UITheme.TextDark,
                 AutoSize = true,
-                TextAlign = ContentAlignment.MiddleLeft,
-                Margin = new Padding(0, 2, 0, 0)
+                Margin = Padding.Empty
             };
 
-            leftFlow.Controls.Add(iconLbl);
-            leftFlow.Controls.Add(titleLbl);
+            leftStack.Controls.Add(lblIcon);
+            leftStack.Controls.Add(lblTitle);
 
             countBadge = new Label
             {
                 Text = "0",
-                Font = new Font(UITheme.FontSans, 8F, FontStyle.Bold),
-                ForeColor = UITheme.TextDark,
-                BackColor = Color.FromArgb(239, 230, 222),
-                Size = new Size(26, 22),
+                Font = new Font(UITheme.FontSans, 8.5F, FontStyle.Bold),
+                ForeColor = UITheme.PrimaryMauve,
+                BackColor = Color.FromArgb(246, 237, 240),
+                AutoSize = false,
+                Size = new Size(32, 24),
                 TextAlign = ContentAlignment.MiddleCenter,
-                Dock = DockStyle.Right,
-                Margin = new Padding(0, 2, 0, 0)
+                Dock = DockStyle.Right
             };
-            countBadge.ApplyRoundedRegion(11);
+            countBadge.ApplyRoundedRegion(12);
 
-            header.Controls.Add(leftFlow);
+            header.Controls.Add(leftStack);
             header.Controls.Add(countBadge);
 
             return header;
@@ -556,8 +571,20 @@ namespace CC.Forms.Staff.Customers
             {
                 lblNoOrders.Visible = false;
                 gridOrders.Visible = true;
+                paginationOrders.Visible = true;
 
-                var rows = orders.Select(o => new
+                int totalPages = (int)Math.Ceiling(orders.Count / (double)OrderPageSize);
+                if (totalPages > 0 && currentOrderPage > totalPages)
+                {
+                    currentOrderPage = totalPages;
+                }
+
+                var pagedOrders = orders
+                    .Skip((currentOrderPage - 1) * OrderPageSize)
+                    .Take(OrderPageSize)
+                    .ToList();
+
+                var rows = pagedOrders.Select(o => new
                 {
                     OrderId = $"#ORD-{o.OrderId}",
                     Design = !string.IsNullOrWhiteSpace(o.DesignTheme) ? o.DesignTheme : (!string.IsNullOrWhiteSpace(o.CakeSize) ? o.CakeSize : "Custom Cake"),
@@ -567,10 +594,12 @@ namespace CC.Forms.Staff.Customers
                 }).ToList();
 
                 gridOrders.DataSource = rows;
+                paginationOrders.SetPagination(currentOrderPage, OrderPageSize, orders.Count, "orders");
             }
             else
             {
                 gridOrders.Visible = false;
+                paginationOrders.Visible = false;
                 lblNoOrders.Visible = true;
             }
 

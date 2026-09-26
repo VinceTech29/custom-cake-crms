@@ -20,7 +20,7 @@ namespace CC.Forms.Staff.Orders
     /// - Table rows: py-4 px-5 text-sm, 68px row height
     /// - Columns: ORDER ID, CUSTOMER, DESIGN, EVENT DATE, PICKUP, TOTAL, STATUS (dot + text), ACTION (View →)
     /// </summary>
-    public class OrderListForm : Form, ISearchable
+    public class OrderListForm : Form, ISearchable, INavigationAware
     {
         private Panel topPanel = null!;
         private Label lblTitle = null!;
@@ -34,8 +34,11 @@ namespace CC.Forms.Staff.Orders
 
         private Panel tableCardPanel = null!;
         private DataGridView gridOrders = null!;
+        private PaginationControl pagination = null!;
         private string activeFilter = "All";
         private string activeSearchQuery = string.Empty;
+        private int currentPage = 1;
+        private const int PageSize = 10;
 
         private Panel listContainerPanel = null!;
         private OrderDetailsControl detailsControl = null!;
@@ -75,9 +78,18 @@ namespace CC.Forms.Staff.Orders
 
             Controls.Add(detailsControl);
             Controls.Add(listContainerPanel);
-
-            Load += async (s, e) => await RefreshGridAsync();
         }
+
+        public OrderListForm(string? initialFilter = null) : this()
+        {
+            if (!string.IsNullOrWhiteSpace(initialFilter))
+            {
+                activeFilter = initialFilter;
+                UpdateFilterPillStyles();
+            }
+        }
+
+        public async Task InitializeDataAsync() => await RefreshGridAsync();
 
         private void InitializeComponent()
         {
@@ -98,6 +110,7 @@ namespace CC.Forms.Staff.Orders
             {
                 txtSearchBox.Text = activeSearchQuery;
             }
+            currentPage = 1;
             _ = RefreshGridAsync();
         }
 
@@ -245,7 +258,7 @@ namespace CC.Forms.Staff.Orders
                 Margin = new Padding(0, 2, 0, 0)
             };
 
-            string[] filters = new[] { "All", "Pending", "Confirmed", "Processing", "Ready", "Completed", "Cancelled" };
+            string[] filters = new[] { "All", "Active", "Today", "Pending", "Confirmed", "Processing", "Ready", "Completed", "Cancelled" };
 
             foreach (var filterName in filters)
             {
@@ -279,6 +292,7 @@ namespace CC.Forms.Staff.Orders
                 btn.Click += (s, e) =>
                 {
                     activeFilter = filterName;
+                    currentPage = 1;
                     UpdateFilterPillStyles();
                     _ = RefreshGridAsync();
                 };
@@ -352,9 +366,18 @@ namespace CC.Forms.Staff.Orders
                 if (e.RowIndex >= 0 && gridOrders.Columns["colAction"] is { } col && e.ColumnIndex == col.Index)
                     gridOrders.Cursor = Cursors.Hand;
             };
-            gridOrders.CellMouseLeave += (s, e) => gridOrders.Cursor = Cursors.Default;
+            pagination = new PaginationControl
+            {
+                Dock = DockStyle.Bottom
+            };
+            pagination.PageChanged += async (newPage) =>
+            {
+                currentPage = newPage;
+                await RefreshGridAsync();
+            };
 
             tableCardPanel.Controls.Add(gridOrders);
+            tableCardPanel.Controls.Add(pagination);
         }
 
         private void GridOrders_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
@@ -517,7 +540,15 @@ namespace CC.Forms.Staff.Orders
             using var form = new OrderForm();
             if (form.ShowDialog(this.FindForm() ?? this) == DialogResult.OK)
             {
+                txtSearchBox.Text = string.Empty;
+                activeSearchQuery = string.Empty;
+                activeFilter = "All";
+                currentPage = 1;
                 await RefreshGridAsync();
+                if (gridOrders.Rows.Count > 0)
+                {
+                    UITheme.HighlightNewRow(gridOrders, 0);
+                }
             }
         }
 
@@ -525,15 +556,19 @@ namespace CC.Forms.Staff.Orders
         {
             try
             {
-                var list = await CrmDataService.GetOrdersAsync(activeFilter, activeSearchQuery);
-                lblSubtitle.Text = $"{list.Count} total orders";
+                var paged = await CrmDataService.GetOrdersPagedAsync(activeFilter, activeSearchQuery, currentPage, PageSize);
+                currentPage = paged.Page;
+
+                lblSubtitle.Text = $"{paged.TotalCount} total orders";
                 gridOrders.RowTemplate.Height = 68;
                 gridOrders.DataSource = null;
-                gridOrders.DataSource = list;
+                gridOrders.DataSource = paged.Items;
                 foreach (DataGridViewRow row in gridOrders.Rows)
                 {
                     row.Height = 68;
                 }
+
+                pagination.SetPagination(paged.Page, paged.PageSize, paged.TotalCount, "orders");
             }
             catch (Exception ex)
             {

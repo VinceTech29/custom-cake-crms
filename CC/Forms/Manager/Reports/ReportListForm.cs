@@ -17,7 +17,7 @@ namespace CC.Forms.Manager.Reports
     /// Manager Reports module displaying overall transactions (orders and payments)
     /// with daily/monthly filtering, live KPI summaries, and CSV export capabilities.
     /// </summary>
-    public class ReportListForm : Form
+    public class ReportListForm : Form, INavigationAware
     {
         private Panel topPanel = null!;
         private Label lblTitle = null!;
@@ -34,16 +34,23 @@ namespace CC.Forms.Manager.Reports
         private TextBox txtSearchBox = null!;
         private FlowLayoutPanel filterPillContainer = null!;
         private DateTimePicker dtpFilterDate = null!;
+        private DateTimePicker dtpFrom = null!;
+        private DateTimePicker dtpTo = null!;
+        private Label lblFromDate = null!;
+        private Label lblToDate = null!;
 
         private Panel tableCardPanel = null!;
         private DataGridView gridTransactions = null!;
+        private PaginationControl pagination = null!;
+        private int currentPage = 1;
+        private const int PageSize = 10;
 
         private Button btnExportDaily = null!;
         private Button btnExportMonthly = null!;
         private Button btnExportAnnual = null!;
         private Button btnExportAll = null!;
 
-        private string activeFilter = "All"; // "All", "Daily", "Monthly", "Annually", "Orders", "Payments"
+        private string activeFilter = "All"; // "All", "Daily", "Monthly", "Annually", "Orders", "Payments", "Retention"
         private string activeSearchQuery = string.Empty;
         private DateTime selectedDate = DateTime.Today;
         private List<TransactionRecord> currentRecords = new List<TransactionRecord>();
@@ -60,13 +67,9 @@ namespace CC.Forms.Manager.Reports
             Controls.Add(searchFilterPanel);
             Controls.Add(kpiTable);
             Controls.Add(topPanel);
-
-            Load += async (s, e) => await RefreshDataAsync();
-            VisibleChanged += async (s, e) =>
-            {
-                if (Visible) await RefreshDataAsync();
-            };
         }
+
+        public async Task InitializeDataAsync() => await RefreshDataAsync();
 
         private void InitializeComponent()
         {
@@ -376,6 +379,7 @@ namespace CC.Forms.Manager.Reports
             txtSearchBox.TextChanged += async (s, e) =>
             {
                 activeSearchQuery = txtSearchBox.Text.Trim();
+                currentPage = 1;
                 await RefreshDataAsync();
             };
             searchPill.Controls.Add(txtSearchBox);
@@ -391,7 +395,7 @@ namespace CC.Forms.Manager.Reports
                 Margin = new Padding(0, 2, 8, 0)
             };
 
-            string[] filters = new[] { "All", "Daily", "Monthly", "Annually", "Orders", "Payments" };
+            string[] filters = new[] { "All", "Daily", "Monthly", "Annually", "Orders", "Payments", "Retention" };
 
             foreach (var filterName in filters)
             {
@@ -402,6 +406,7 @@ namespace CC.Forms.Manager.Reports
                         "Daily" => "Daily (Today)",
                         "Monthly" => "Monthly (This Month)",
                         "Annually" => "Annually (This Year)",
+                        "Retention" => "Retention Requests",
                         _ => filterName
                     },
                     AutoSize = true,
@@ -431,6 +436,7 @@ namespace CC.Forms.Manager.Reports
                 btn.Click += async (s, e) =>
                 {
                     activeFilter = ((Button)s!).Tag?.ToString() ?? "All";
+                    currentPage = 1;
                     UpdateFilterPillStyles();
                     await RefreshDataAsync();
                 };
@@ -440,7 +446,7 @@ namespace CC.Forms.Manager.Reports
 
             rowFlow.Controls.Add(filterPillContainer);
 
-            // Date Picker for custom date inspection
+            // Date Picker for custom date inspection (Daily/Monthly reference)
             dtpFilterDate = new DateTimePicker
             {
                 Format = DateTimePickerFormat.Short,
@@ -448,11 +454,12 @@ namespace CC.Forms.Manager.Reports
                 Height = 36,
                 Width = 120,
                 Font = new Font(UITheme.FontSans, 9.5F),
-                Margin = new Padding(4, 4, 0, 0)
+                Margin = new Padding(4, 4, 8, 0)
             };
             dtpFilterDate.ValueChanged += async (s, e) =>
             {
                 selectedDate = dtpFilterDate.Value;
+                currentPage = 1;
                 if (activeFilter != "Daily" && activeFilter != "Monthly")
                 {
                     activeFilter = "Daily";
@@ -461,6 +468,72 @@ namespace CC.Forms.Manager.Reports
                 await RefreshDataAsync();
             };
             rowFlow.Controls.Add(dtpFilterDate);
+
+            // From / To pickers for custom range (used by Retention Requests and range-based filters)
+            lblFromDate = new Label
+            {
+                Text = "From:",
+                AutoSize = true,
+                Font = new Font(UITheme.FontSans, 9F),
+                ForeColor = UITheme.TextMuted,
+                Margin = new Padding(0, 12, 4, 0)
+            };
+            dtpFrom = new DateTimePicker
+            {
+                Format = DateTimePickerFormat.Short,
+                Value = DateTime.Today.AddMonths(-3),
+                Height = 36,
+                Width = 110,
+                Font = new Font(UITheme.FontSans, 9.5F),
+                Margin = new Padding(0, 4, 6, 0)
+            };
+            lblToDate = new Label
+            {
+                Text = "To:",
+                AutoSize = true,
+                Font = new Font(UITheme.FontSans, 9F),
+                ForeColor = UITheme.TextMuted,
+                Margin = new Padding(0, 12, 4, 0)
+            };
+            dtpTo = new DateTimePicker
+            {
+                Format = DateTimePickerFormat.Short,
+                Value = DateTime.Today,
+                Height = 36,
+                Width = 110,
+                Font = new Font(UITheme.FontSans, 9.5F),
+                Margin = new Padding(0, 4, 6, 0)
+            };
+            var btnApplyRange = new Button
+            {
+                Text = "Apply",
+                Height = 34,
+                Width = 65,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold),
+                ForeColor = Color.White,
+                BackColor = UITheme.PrimaryMauve,
+                Cursor = Cursors.Hand,
+                Margin = new Padding(0, 5, 0, 0)
+            };
+            btnApplyRange.FlatAppearance.BorderSize = 0;
+            btnApplyRange.Click += async (s, e) =>
+            {
+                if (dtpFrom.Value.Date > dtpTo.Value.Date)
+                {
+                    MessageBox.Show("\"From\" date must be before or equal to \"To\" date.", "Invalid Range",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                currentPage = 1;
+                await RefreshDataAsync();
+            };
+
+            rowFlow.Controls.Add(lblFromDate);
+            rowFlow.Controls.Add(dtpFrom);
+            rowFlow.Controls.Add(lblToDate);
+            rowFlow.Controls.Add(dtpTo);
+            rowFlow.Controls.Add(btnApplyRange);
 
             searchFilterPanel.Controls.Add(rowFlow);
             UpdateFilterPillStyles();
@@ -520,7 +593,7 @@ namespace CC.Forms.Manager.Reports
             {
                 Name = "colRef",
                 HeaderText = "REFERENCE #",
-                Width = 135,
+                Width = 145,
                 ReadOnly = true
             };
 
@@ -536,16 +609,16 @@ namespace CC.Forms.Manager.Reports
             {
                 Name = "colCustomer",
                 HeaderText = "CUSTOMER",
-                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                MinimumWidth = 160,
+                Width = 180,
                 ReadOnly = true
             };
 
             var colDetails = new DataGridViewTextBoxColumn
             {
                 Name = "colDetails",
-                HeaderText = "DETAILS / METHOD",
-                Width = 180,
+                HeaderText = "DETAILS",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                MinimumWidth = 180,
                 ReadOnly = true
             };
 
@@ -553,7 +626,7 @@ namespace CC.Forms.Manager.Reports
             {
                 Name = "colAmount",
                 HeaderText = "AMOUNT",
-                Width = 130,
+                Width = 125,
                 ReadOnly = true
             };
 
@@ -568,7 +641,18 @@ namespace CC.Forms.Manager.Reports
             gridTransactions.Columns.AddRange(colDate, colRef, colType, colCustomer, colDetails, colAmount, colStatus);
             gridTransactions.CellPainting += GridTransactions_CellPainting;
 
+            pagination = new PaginationControl
+            {
+                Dock = DockStyle.Bottom
+            };
+            pagination.PageChanged += async (newPage) =>
+            {
+                currentPage = newPage;
+                await RefreshDataAsync();
+            };
+
             tableCardPanel.Controls.Add(gridTransactions);
+            tableCardPanel.Controls.Add(pagination);
         }
 
         private void GridTransactions_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
@@ -665,6 +749,8 @@ namespace CC.Forms.Manager.Reports
                 // Determine period and type filter
                 string period = "All";
                 string? typeFilter = null;
+                DateTime? fromDate = null;
+                DateTime? toDate = null;
 
                 if (activeFilter == "Daily")
                 {
@@ -686,14 +772,44 @@ namespace CC.Forms.Manager.Reports
                 {
                     typeFilter = "Payments";
                 }
+                else if (activeFilter == "Retention")
+                {
+                    typeFilter = "Retention";
+                }
 
-                // Query database
-                currentRecords = await CrmDataService.GetOverallTransactionsAsync(
+                // If custom From/To pickers are set (non-default), apply range filter
+                if (dtpFrom != null && dtpTo != null &&
+                    (dtpFrom.Value.Date != DateTime.Today.AddMonths(-3).Date || dtpTo.Value.Date != DateTime.Today.Date))
+                {
+                    fromDate = dtpFrom.Value.Date;
+                    toDate = dtpTo.Value.Date;
+                    period = $"range:{fromDate:yyyy-MM-dd}:{toDate:yyyy-MM-dd}";
+                }
+
+                // Query database with pagination
+                var paged = await CrmDataService.GetOverallTransactionsPagedAsync(
                     period: period,
                     filterDate: selectedDate,
                     typeFilter: typeFilter,
-                    searchQuery: activeSearchQuery
+                    searchQuery: activeSearchQuery,
+                    page: currentPage,
+                    pageSize: PageSize
                 );
+
+                if (paged.TotalPages > 0 && currentPage > paged.TotalPages)
+                {
+                    currentPage = paged.TotalPages;
+                    paged = await CrmDataService.GetOverallTransactionsPagedAsync(
+                        period: period,
+                        filterDate: selectedDate,
+                        typeFilter: typeFilter,
+                        searchQuery: activeSearchQuery,
+                        page: currentPage,
+                        pageSize: PageSize
+                    );
+                }
+
+                currentRecords = paged.Items;
 
                 // Update Grid
                 gridTransactions.Rows.Clear();
@@ -712,7 +828,8 @@ namespace CC.Forms.Manager.Reports
                 }
 
                 // Update Subtitle count
-                lblSubtitle.Text = $"{currentRecords.Count} transaction(s) found \u00B7 {activeFilter} view";
+                lblSubtitle.Text = $"{paged.TotalCount} transaction(s) found \u00B7 {activeFilter} view";
+                pagination.SetPagination(paged.Page, paged.PageSize, paged.TotalCount, "transactions");
 
                 // Refresh KPI Summary Cards
                 var metrics = await CrmDataService.GetReportSummaryMetricsAsync(selectedDate);

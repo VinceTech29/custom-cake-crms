@@ -19,7 +19,7 @@ namespace CC.Forms.Admin.Users
     /// - Table showing user initials avatar, role pill, last login, active status, and action buttons
     /// - Full CRUD (Add User, Edit User, Activate/Deactivate)
     /// </summary>
-    public class UserListForm : Form
+    public class UserListForm : Form, INavigationAware
     {
         private Panel topPanel = null!;
         private Label lblTitle = null!;
@@ -40,6 +40,9 @@ namespace CC.Forms.Admin.Users
 
         private Panel tableCardPanel = null!;
         private DataGridView gridUsers = null!;
+        private PaginationControl pagination = null!;
+        private int currentPage = 1;
+        private const int PageSize = 10;
 
         private List<SystemUser> usersList = new List<SystemUser>();
         private string activeSearchQuery = string.Empty;
@@ -58,13 +61,9 @@ namespace CC.Forms.Admin.Users
             Controls.Add(searchFilterPanel);
             Controls.Add(kpiTable);
             Controls.Add(topPanel);
-
-            Load += async (s, e) => await RefreshDataAsync();
-            VisibleChanged += async (s, e) =>
-            {
-                if (Visible) await RefreshDataAsync();
-            };
         }
+
+        public async Task InitializeDataAsync() => await RefreshDataAsync();
 
         private void InitializeComponent()
         {
@@ -160,7 +159,16 @@ namespace CC.Forms.Admin.Users
                 using var modal = new UserModal();
                 if (modal.ShowDialog(this.FindForm() ?? this) == DialogResult.OK)
                 {
+                    txtSearchBox.Text = string.Empty;
+                    activeSearchQuery = string.Empty;
+                    cmbRoleFilter.SelectedIndex = 0;
+                    cmbStatusFilter.SelectedIndex = 0;
+                    currentPage = 1;
                     await RefreshDataAsync();
+                    if (gridUsers.Rows.Count > 0)
+                    {
+                        UITheme.HighlightNewRow(gridUsers, 0);
+                    }
                 }
             };
 
@@ -374,6 +382,7 @@ namespace CC.Forms.Admin.Users
             txtSearchBox.TextChanged += async (s, e) =>
             {
                 activeSearchQuery = txtSearchBox.Text.Trim();
+                currentPage = 1;
                 await RefreshDataAsync();
             };
             searchPill.Controls.Add(txtSearchBox);
@@ -408,6 +417,7 @@ namespace CC.Forms.Admin.Users
             cmbRoleFilter.SelectedIndexChanged += async (s, e) =>
             {
                 activeRoleFilter = cmbRoleFilter.SelectedItem?.ToString() ?? "All Roles";
+                currentPage = 1;
                 await RefreshDataAsync();
             };
             roleFilterPill.Controls.Add(cmbRoleFilter);
@@ -442,6 +452,7 @@ namespace CC.Forms.Admin.Users
             cmbStatusFilter.SelectedIndexChanged += async (s, e) =>
             {
                 activeStatusFilter = cmbStatusFilter.SelectedItem?.ToString() ?? "All Status";
+                currentPage = 1;
                 await RefreshDataAsync();
             };
             statusFilterPill.Controls.Add(cmbStatusFilter);
@@ -473,32 +484,15 @@ namespace CC.Forms.Admin.Users
             gridUsers = new DataGridView
             {
                 Dock = DockStyle.Fill,
-                BackgroundColor = Color.White,
-                BorderStyle = BorderStyle.None,
-                CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
-                GridColor = Color.FromArgb(240, 235, 230),
-                EnableHeadersVisualStyles = false,
-                RowHeadersVisible = false,
+                RowTemplate = { Height = 64 },
                 AllowUserToAddRows = false,
                 AllowUserToDeleteRows = false,
                 AllowUserToResizeRows = false,
-                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-                MultiSelect = false,
                 ReadOnly = true,
-                RowTemplate = { Height = 60 },
-                ColumnHeadersHeight = 44,
-                ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                MultiSelect = false
             };
-
-            gridUsers.DefaultCellStyle.SelectionBackColor = Color.FromArgb(250, 248, 246);
-            gridUsers.DefaultCellStyle.SelectionForeColor = UITheme.TextDark;
-
-            // Custom header styling
-            gridUsers.ColumnHeadersDefaultCellStyle.BackColor = Color.White;
-            gridUsers.ColumnHeadersDefaultCellStyle.ForeColor = UITheme.TextMuted;
-            gridUsers.ColumnHeadersDefaultCellStyle.Font = new Font(UITheme.FontSans, 8F, FontStyle.Bold);
-            gridUsers.ColumnHeadersDefaultCellStyle.SelectionBackColor = Color.White;
-            gridUsers.ColumnHeadersDefaultCellStyle.Padding = new Padding(16, 0, 0, 0);
+            UITheme.ApplyTableStyle(gridUsers);
 
             // Columns
             var colUser = new DataGridViewTextBoxColumn
@@ -506,7 +500,7 @@ namespace CC.Forms.Admin.Users
                 Name = "colUser",
                 HeaderText = "USER",
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                FillWeight = 36F
+                FillWeight = 24F
             };
 
             var colRole = new DataGridViewTextBoxColumn
@@ -546,7 +540,18 @@ namespace CC.Forms.Admin.Users
             gridUsers.CellPainting += GridUsers_CellPainting;
             gridUsers.CellClick += GridUsers_CellClick;
 
+            pagination = new PaginationControl
+            {
+                Dock = DockStyle.Bottom
+            };
+            pagination.PageChanged += async (newPage) =>
+            {
+                currentPage = newPage;
+                await RefreshDataAsync();
+            };
+
             tableCardPanel.Controls.Add(gridUsers);
+            tableCardPanel.Controls.Add(pagination);
         }
 
         // =========================================================
@@ -795,12 +800,28 @@ namespace CC.Forms.Admin.Users
         {
             try
             {
-                // Query users from database
-                usersList = await CrmDataService.GetUsersAsync(
+                // Query users from database with pagination
+                var paged = await CrmDataService.GetUsersPagedAsync(
                     searchQuery: activeSearchQuery,
                     roleFilter: activeRoleFilter,
-                    statusFilter: activeStatusFilter
+                    statusFilter: activeStatusFilter,
+                    page: currentPage,
+                    pageSize: PageSize
                 );
+
+                if (paged.TotalPages > 0 && currentPage > paged.TotalPages)
+                {
+                    currentPage = paged.TotalPages;
+                    paged = await CrmDataService.GetUsersPagedAsync(
+                        searchQuery: activeSearchQuery,
+                        roleFilter: activeRoleFilter,
+                        statusFilter: activeStatusFilter,
+                        page: currentPage,
+                        pageSize: PageSize
+                    );
+                }
+
+                usersList = paged.Items;
 
                 // Update Grid
                 gridUsers.Rows.Clear();
@@ -811,7 +832,8 @@ namespace CC.Forms.Admin.Users
                 }
 
                 // Update Subtitle count
-                lblSubtitle.Text = $"{usersList.Count} team member(s) listed \u00B7 {activeRoleFilter}";
+                lblSubtitle.Text = $"{paged.TotalCount} team member(s) listed \u00B7 {activeRoleFilter}";
+                pagination.SetPagination(paged.Page, paged.PageSize, paged.TotalCount, "users");
 
                 // Update KPI Cards
                 var metrics = await CrmDataService.GetUserSummaryMetricsAsync();

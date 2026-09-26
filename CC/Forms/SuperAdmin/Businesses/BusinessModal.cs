@@ -86,12 +86,13 @@ namespace CC.Forms.SuperAdmin.Businesses
 
         private void BuildContent()
         {
+            // 1. FIXED HEADER (Dock = Top, Height = 65)
             var headerPanel = new Panel
             {
                 Dock = DockStyle.Top,
                 Height = 65,
-                Padding = new Padding(28, 20, 24, 0),
-                BackColor = Color.Transparent
+                Padding = new Padding(28, 18, 24, 0),
+                BackColor = ColorModalBg
             };
 
             var lblTitle = new Label
@@ -100,7 +101,7 @@ namespace CC.Forms.SuperAdmin.Businesses
                 Font = new Font(UITheme.FontSerif, 18F, FontStyle.Bold),
                 ForeColor = UITheme.TextDark,
                 AutoSize = true,
-                Location = new Point(28, 20)
+                Location = new Point(28, 18)
             };
 
             var btnClose = new Button
@@ -109,7 +110,8 @@ namespace CC.Forms.SuperAdmin.Businesses
                 Font = new Font(UITheme.FontSans, 11F),
                 ForeColor = Color.FromArgb(140, 120, 115),
                 Size = new Size(32, 32),
-                Location = new Point(Width - 56, 18),
+                Location = new Point(Width - 56, 16),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
                 FlatStyle = FlatStyle.Flat,
                 Cursor = Cursors.Hand,
                 BackColor = Color.FromArgb(246, 243, 239)
@@ -124,78 +126,137 @@ namespace CC.Forms.SuperAdmin.Businesses
 
             headerPanel.Controls.Add(lblTitle);
             headerPanel.Controls.Add(btnClose);
-            Controls.Add(headerPanel);
 
-            // Body
-            var bodyPanel = new Panel
+            // 3. FIXED FOOTER (Dock = Bottom, Height = 72)
+            var footerPanel = new Panel
             {
-                Location = new Point(28, 75),
-                Size = new Size(Width - 56, Height - 160),
-                AutoScroll = true,
-                BackColor = Color.Transparent
+                Dock = DockStyle.Bottom,
+                Height = 72,
+                BackColor = ColorModalBg
             };
 
-            int y = 5;
-            int fullWidth = bodyPanel.Width - 25;
+            footerPanel.Paint += (s, e) =>
+            {
+                using var pen = new Pen(Color.FromArgb(238, 233, 228), 1f);
+                e.Graphics.DrawLine(pen, 28, 0, footerPanel.Width - 28, 0);
+            };
+
+            var footerFlow = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.RightToLeft,
+                BackColor = ColorModalBg,
+                Padding = new Padding(0, 15, 28, 15),
+                WrapContents = false
+            };
+
+            btnSave = new Button
+            {
+                Text = _isEditMode ? "Save Changes" : "Create Business",
+                Size = new Size(160, 42),
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold),
+                BackColor = ColorPrimaryBtn,
+                ForeColor = Color.White,
+                Cursor = Cursors.Hand,
+                Margin = new Padding(0, 0, 0, 0)
+            };
+            UITheme.ApplyActionButton(btnSave, "\uE73E", 10);
+            btnSave.Click += async (s, e) => await SaveBusinessAsync();
+
+            btnCancel = new Button
+            {
+                Text = "Cancel",
+                Size = new Size(110, 42),
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold),
+                BackColor = ColorCancelBtn,
+                ForeColor = UITheme.TextDark,
+                Cursor = Cursors.Hand,
+                Margin = new Padding(0, 0, 12, 0)
+            };
+            btnCancel.FlatAppearance.BorderSize = 0;
+            btnCancel.ApplyRoundedRegion(10);
+            btnCancel.Click += (s, e) =>
+            {
+                DialogResult = DialogResult.Cancel;
+                Close();
+            };
+
+            footerFlow.Controls.Add(btnSave);
+            footerFlow.Controls.Add(btnCancel);
+            footerPanel.Controls.Add(footerFlow);
+
+            // 2. SCROLLABLE CONTENT AREA (Dock = Fill, AutoScroll = true)
+            var bodyPanel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                AutoScroll = true,
+                BackColor = ColorModalBg,
+                Padding = new Padding(28, 10, 16, 24)
+            };
+
+            int y = 8;
+            int fullWidth = 540;
             int halfWidth = (fullWidth - 14) / 2;
 
             // Company Name
-            bodyPanel.Controls.Add(CreateLabel("BUSINESS / COMPANY NAME", true, new Point(0, y)));
+            bodyPanel.Controls.Add(CreateLabel("BUSINESS / COMPANY NAME", true, new Point(28, y)));
             y += 24;
-            txtCompanyName = CreateTextBox("e.g. Sweet Delights Bakery", new Point(0, y), fullWidth);
+            txtCompanyName = CreateTextBox("e.g. Sweet Delights Bakery", new Point(28, y), fullWidth);
             bodyPanel.Controls.Add(txtCompanyName);
             y += 48;
 
             // Company Code & Phone Row
-            bodyPanel.Controls.Add(CreateLabel("COMPANY CODE", true, new Point(0, y)));
-            bodyPanel.Controls.Add(CreateLabel("CONTACT PHONE", false, new Point(halfWidth + 14, y)));
+            bodyPanel.Controls.Add(CreateLabel("COMPANY CODE", true, new Point(28, y)));
+            bodyPanel.Controls.Add(CreateLabel("CONTACT PHONE", false, new Point(28 + halfWidth + 14, y)));
             y += 24;
-            txtCompanyCode = CreateTextBox("e.g. SDB01", new Point(0, y), halfWidth);
-            txtContactPhone = CreateTextBox("e.g. +63 917 555 1234", new Point(halfWidth + 14, y), halfWidth);
+            txtCompanyCode = CreateTextBox("e.g. SDB01", new Point(28, y), halfWidth);
+            txtContactPhone = CreateTextBox("e.g. +63 917 555 1234", new Point(28 + halfWidth + 14, y), halfWidth);
             bodyPanel.Controls.Add(txtCompanyCode);
             bodyPanel.Controls.Add(txtContactPhone);
             y += 48;
 
             // Contact Email
-            bodyPanel.Controls.Add(CreateLabel("CONTACT EMAIL", true, new Point(0, y)));
+            bodyPanel.Controls.Add(CreateLabel("CONTACT EMAIL", true, new Point(28, y)));
             y += 24;
-            txtContactEmail = CreateTextBox("e.g. contact@sweetdelights.ph", new Point(0, y), fullWidth);
+            txtContactEmail = CreateTextBox("e.g. contact@sweetdelights.ph", new Point(28, y), fullWidth);
             bodyPanel.Controls.Add(txtContactEmail);
             y += 48;
 
             // Address Line 1
-            bodyPanel.Controls.Add(CreateLabel("ADDRESS LINE 1", false, new Point(0, y)));
+            bodyPanel.Controls.Add(CreateLabel("ADDRESS LINE 1", false, new Point(28, y)));
             y += 24;
-            txtAddressLine1 = CreateTextBox("e.g. 123 Baker Street", new Point(0, y), fullWidth);
+            txtAddressLine1 = CreateTextBox("e.g. 123 Baker Street", new Point(28, y), fullWidth);
             bodyPanel.Controls.Add(txtAddressLine1);
             y += 48;
 
             // City & State Row
-            bodyPanel.Controls.Add(CreateLabel("CITY", false, new Point(0, y)));
-            bodyPanel.Controls.Add(CreateLabel("STATE / PROVINCE", false, new Point(halfWidth + 14, y)));
+            bodyPanel.Controls.Add(CreateLabel("CITY", false, new Point(28, y)));
+            bodyPanel.Controls.Add(CreateLabel("STATE / PROVINCE", false, new Point(28 + halfWidth + 14, y)));
             y += 24;
-            txtCity = CreateTextBox("e.g. Quezon City", new Point(0, y), halfWidth);
-            txtState = CreateTextBox("e.g. Metro Manila", new Point(halfWidth + 14, y), halfWidth);
+            txtCity = CreateTextBox("e.g. Quezon City", new Point(28, y), halfWidth);
+            txtState = CreateTextBox("e.g. Metro Manila", new Point(28 + halfWidth + 14, y), halfWidth);
             bodyPanel.Controls.Add(txtCity);
             bodyPanel.Controls.Add(txtState);
             y += 48;
 
             // Postal Code & Country Row
-            bodyPanel.Controls.Add(CreateLabel("POSTAL CODE", false, new Point(0, y)));
-            bodyPanel.Controls.Add(CreateLabel("COUNTRY", false, new Point(halfWidth + 14, y)));
+            bodyPanel.Controls.Add(CreateLabel("POSTAL CODE", false, new Point(28, y)));
+            bodyPanel.Controls.Add(CreateLabel("COUNTRY", false, new Point(28 + halfWidth + 14, y)));
             y += 24;
-            txtPostalCode = CreateTextBox("e.g. 1100", new Point(0, y), halfWidth);
-            txtCountry = CreateTextBox("Philippines", new Point(halfWidth + 14, y), halfWidth);
+            txtPostalCode = CreateTextBox("e.g. 1100", new Point(28, y), halfWidth);
+            txtCountry = CreateTextBox("Philippines", new Point(28 + halfWidth + 14, y), halfWidth);
             bodyPanel.Controls.Add(txtPostalCode);
             bodyPanel.Controls.Add(txtCountry);
             y += 48;
 
             // Tenant Database Server & Database Name
-            bodyPanel.Controls.Add(CreateLabel("DATABASE SERVER", true, new Point(0, y)));
-            bodyPanel.Controls.Add(CreateLabel("TENANT DATABASE NAME", true, new Point(halfWidth + 14, y)));
+            bodyPanel.Controls.Add(CreateLabel("DATABASE SERVER", true, new Point(28, y)));
+            bodyPanel.Controls.Add(CreateLabel("TENANT DATABASE NAME", true, new Point(28 + halfWidth + 14, y)));
             y += 24;
-            txtServerName = CreateTextBox("(localdb)\\MSSQLLocalDB", new Point(0, y), halfWidth);
-            txtDatabaseName = CreateTextBox("e.g. SDB01_CRM", new Point(halfWidth + 14, y), halfWidth);
+            txtServerName = CreateTextBox("(localdb)\\MSSQLLocalDB", new Point(28, y), halfWidth);
+            txtDatabaseName = CreateTextBox("e.g. SDB01_CRM", new Point(28 + halfWidth + 14, y), halfWidth);
             bodyPanel.Controls.Add(txtServerName);
             bodyPanel.Controls.Add(txtDatabaseName);
 
@@ -219,7 +280,7 @@ namespace CC.Forms.SuperAdmin.Businesses
                 Checked = true,
                 Font = new Font(UITheme.FontSans, 9.5F),
                 ForeColor = UITheme.TextDark,
-                Location = new Point(0, y),
+                Location = new Point(28, y),
                 AutoSize = true
             };
             bodyPanel.Controls.Add(chkIsActive);
@@ -233,9 +294,10 @@ namespace CC.Forms.SuperAdmin.Businesses
                     Text = " Initial Business Admin Account ",
                     Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold),
                     ForeColor = ColorPrimaryBtn,
-                    Location = new Point(0, y),
+                    Location = new Point(28, y),
                     Size = new Size(fullWidth, 195),
-                    Padding = new Padding(12)
+                    Padding = new Padding(12),
+                    BackColor = ColorModalBg
                 };
 
                 int gy = 26;
@@ -269,60 +331,29 @@ namespace CC.Forms.SuperAdmin.Businesses
                 Text = string.Empty,
                 Font = new Font(UITheme.FontSans, 9F),
                 ForeColor = Color.FromArgb(197, 48, 48),
-                Location = new Point(0, y),
+                Location = new Point(28, y),
                 AutoSize = true
             };
             bodyPanel.Controls.Add(lblError);
+            y += 25;
 
-            Controls.Add(bodyPanel);
-
-            // Footer Panel (Buttons)
-            var footerPanel = new Panel
+            // Bottom spacer panel to ensure ample breathing space above footer when scrolled to bottom
+            var bottomSpacer = new Panel
             {
-                Dock = DockStyle.Bottom,
-                Height = 75,
-                Padding = new Padding(28, 12, 28, 20),
+                Location = new Point(28, y),
+                Size = new Size(fullWidth, 30),
                 BackColor = Color.Transparent
             };
+            bodyPanel.Controls.Add(bottomSpacer);
+            y += 35;
 
-            btnCancel = new Button
-            {
-                Text = "Cancel",
-                Size = new Size(110, 42),
-                Location = new Point(footerPanel.Width - 250, 15),
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold),
-                BackColor = ColorCancelBtn,
-                ForeColor = UITheme.TextDark,
-                Cursor = Cursors.Hand,
-                Anchor = AnchorStyles.Bottom | AnchorStyles.Right
-            };
-            btnCancel.FlatAppearance.BorderSize = 0;
-            btnCancel.ApplyRoundedRegion(10);
-            btnCancel.Click += (s, e) =>
-            {
-                DialogResult = DialogResult.Cancel;
-                Close();
-            };
+            bodyPanel.AutoScrollMinSize = new Size(0, y);
 
-            btnSave = new Button
-            {
-                Text = _isEditMode ? "Save Changes" : "Create Business",
-                Size = new Size(140, 42),
-                Location = new Point(footerPanel.Width - 145, 15),
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold),
-                BackColor = ColorPrimaryBtn,
-                ForeColor = Color.White,
-                Cursor = Cursors.Hand,
-                Anchor = AnchorStyles.Bottom | AnchorStyles.Right
-            };
-            UITheme.ApplyActionButton(btnSave, "\uE73E", 10);
-            btnSave.Click += async (s, e) => await SaveBusinessAsync();
-
-            footerPanel.Controls.Add(btnCancel);
-            footerPanel.Controls.Add(btnSave);
+            // Add controls in correct docking order: Fill first, then Top and Bottom
+            Controls.Add(bodyPanel);
+            Controls.Add(headerPanel);
             Controls.Add(footerPanel);
+            bodyPanel.BringToFront();
         }
 
         private Label CreateLabel(string text, bool isRequired, Point location)

@@ -12,7 +12,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace CC.Services
 {
-    public record PagedList<T>(List<T> Items, int TotalCount, int PageNumber, int PageSize);
 
     public record StaffDashboardData(
         int MyDueFollowupsCount,
@@ -20,6 +19,8 @@ namespace CC.Services
         int MyHandledInquiriesCount,
         int ProcessingOrdersCount,
         int ReadyOrdersCount,
+        int CompletedOrdersCount,
+        int TodayDueOrdersCount,
         int TotalCustomersCount,
         List<TrendPoint> TaskCompletionTrend,
         List<BarItem> OrderStatusBreakdown,
@@ -42,6 +43,8 @@ namespace CC.Services
         int ActiveOrdersCount,
         int ReadyForPickupCount,
         int CompletedOrdersCount,
+        int TodayDeliveriesCount,
+        decimal ActivePipelineValue,
         int OpenInquiriesCount,
         int ShopOverdueFollowupsCount,
         int TotalCustomersCount,
@@ -49,7 +52,8 @@ namespace CC.Services
         List<PipelineStage> PipelineStages,
         List<BarItem> OrdersByStatus,
         List<BarItem> StaffPerformance,
-        List<ManagerPriorityOrderItem> RecentOrders
+        List<ManagerPriorityOrderItem> RecentOrders,
+        List<RetentionRequest>? RecentRetentionRequests = null
     );
 
     public record ManagerPriorityOrderItem(
@@ -66,7 +70,10 @@ namespace CC.Services
         decimal TotalRevenue,
         decimal LifetimeRevenue,
         decimal OutstandingBalance,
+        decimal AverageOrderValue,
+        double CollectionRate,
         int TotalOrders,
+        int ActiveOrdersCount,
         int TotalCustomers,
         int NewCustomersInPeriod,
         List<TrendPoint> RevenueTrend,
@@ -74,7 +81,8 @@ namespace CC.Services
         List<BarItem> OrderStatusBreakdown,
         List<AdminTopCustomerItem> TopCustomers,
         SubscriptionInfo Subscription,
-        List<TransactionRecord> RecentTransactions
+        List<TransactionRecord> RecentTransactions,
+        List<RetentionRequest>? RecentRetentionRequests = null
     );
 
     public record AdminTopCustomerItem(
@@ -95,6 +103,9 @@ namespace CC.Services
         int ActiveSubscriptionsCount,
         int ExpiringSubscriptionsCount,
         int ExpiredSubscriptionsCount,
+        decimal EstimatedMonthlyRevenue,
+        int TotalBackupsCount,
+        int TermsAcceptancesCount,
         List<TrendPoint> RegistrationTrend,
         List<BarItem> SubscriptionPlanDistribution,
         List<BarItem> SubscriptionStatusDistribution,
@@ -158,7 +169,9 @@ namespace CC.Services
         DateTime RenewalDate,
         string PaymentMethod,
         int UsedSeats,
-        int MaxSeats
+        int MaxSeats,
+        bool AllowBranching = false,
+        int MaxBranches = 1
     );
 
     public record BillingHistoryItem(
@@ -167,6 +180,13 @@ namespace CC.Services
         decimal Amount,
         string Status
     );
+
+    public record PagedList<T>(List<T> Items, int TotalCount, int Page, int PageSize)
+    {
+        public int TotalPages => (int)Math.Ceiling((double)TotalCount / Math.Max(PageSize, 1));
+        public bool HasPreviousPage => Page > 1;
+        public bool HasNextPage => Page < TotalPages;
+    }
 
     public record AuthResult(
         bool Success,
@@ -228,10 +248,13 @@ namespace CC.Services
 
         public const string DefaultTenantDatabase = "CustomCakeCRM";
         public const string MasterConnectionString = "Server=(localdb)\\MSSQLLocalDB;Database=MSME_MasterCRM;Trusted_Connection=True;TrustServerCertificate=True;";
+        public const string DefaultTenantConnectionString = "Server=(localdb)\\MSSQLLocalDB;Database=CustomCakeCRM;Trusted_Connection=True;TrustServerCertificate=True;";
         public const int DefaultCompanyId = 2;
         public const int DefaultUserId = 4; // Staff user
 
         public static int CurrentCompanyId => SessionService.CurrentUser?.CompanyId > 0 ? SessionService.CurrentUser.CompanyId : DefaultCompanyId;
+
+        public static string GetConnectionString(int? companyId = null) => GetTenantConnectionString(companyId);
 
         public static string GetTenantConnectionString(int? companyId = null)
         {
@@ -386,14 +409,29 @@ namespace CC.Services
             }
 
             // SubscriptionPlans
+            await context.Database.ExecuteSqlRawAsync(@"
+                IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'SubscriptionPlans' AND COLUMN_NAME = 'AllowBranching')
+                BEGIN
+                    ALTER TABLE SubscriptionPlans ADD AllowBranching BIT NOT NULL DEFAULT 0;
+                END
+                IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'SubscriptionPlans' AND COLUMN_NAME = 'MaxBranches')
+                BEGIN
+                    ALTER TABLE SubscriptionPlans ADD MaxBranches INT NOT NULL DEFAULT 1;
+                END
+                IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'SubscriptionPlans' AND COLUMN_NAME = 'IsActive')
+                BEGIN
+                    ALTER TABLE SubscriptionPlans ADD IsActive BIT NOT NULL DEFAULT 1;
+                END
+            ");
+
             if (!await context.SubscriptionPlans.AnyAsync())
             {
                 await context.Database.ExecuteSqlRawAsync(@"
                     SET IDENTITY_INSERT SubscriptionPlans ON;
-                    INSERT INTO SubscriptionPlans (PlanId, PlanName, Price, DurationDays, MaxUsers) VALUES
-                        (1, 'Starter Plan', 4399, 365, 3),
-                        (2, 'Pro Plan', 9599, 365, 10),
-                        (3, 'Enterprise Plan', 19999, 365, 50);
+                    INSERT INTO SubscriptionPlans (PlanId, PlanName, Price, DurationDays, MaxUsers, AllowBranching, MaxBranches, IsActive) VALUES
+                        (1, 'Starter Plan', 4399, 365, 3, 0, 1, 1),
+                        (2, 'Pro Plan', 9599, 365, 10, 1, 3, 1),
+                        (3, 'Enterprise Plan', 19999, 365, 50, 1, 10, 1);
                     SET IDENTITY_INSERT SubscriptionPlans OFF;
                 ");
             }
@@ -470,17 +508,57 @@ namespace CC.Services
                 }
 
                 // Subscription Plans
+                await context.Database.ExecuteSqlRawAsync(@"
+                    IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'SubscriptionPlans' AND COLUMN_NAME = 'AllowBranching')
+                    BEGIN
+                        ALTER TABLE SubscriptionPlans ADD AllowBranching BIT NOT NULL DEFAULT 0;
+                    END
+                    IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'SubscriptionPlans' AND COLUMN_NAME = 'MaxBranches')
+                    BEGIN
+                        ALTER TABLE SubscriptionPlans ADD MaxBranches INT NOT NULL DEFAULT 1;
+                    END
+                    IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'SubscriptionPlans' AND COLUMN_NAME = 'IsActive')
+                    BEGIN
+                        ALTER TABLE SubscriptionPlans ADD IsActive BIT NOT NULL DEFAULT 1;
+                    END
+                ");
+
                 if (!await context.SubscriptionPlans.AnyAsync())
                 {
                     await context.Database.ExecuteSqlRawAsync(@"
                         SET IDENTITY_INSERT SubscriptionPlans ON;
-                        INSERT INTO SubscriptionPlans (PlanId, PlanName, Price, DurationDays, MaxUsers) VALUES
-                            (1, 'Starter Plan', 4399, 365, 3),
-                            (2, 'Pro Plan', 9599, 365, 10),
-                            (3, 'Enterprise Plan', 19999, 365, 50);
+                        INSERT INTO SubscriptionPlans (PlanId, PlanName, Price, DurationDays, MaxUsers, AllowBranching, MaxBranches, IsActive) VALUES
+                            (1, 'Starter Plan', 4399, 365, 3, 0, 1, 1),
+                            (2, 'Pro Plan', 9599, 365, 10, 1, 3, 1),
+                            (3, 'Enterprise Plan', 19999, 365, 50, 1, 10, 1);
                         SET IDENTITY_INSERT SubscriptionPlans OFF;
                     ");
                 }
+
+                // Clean up any historical duplicate subscription plans in tenant DB
+                try
+                {
+                    await context.Database.ExecuteSqlRawAsync(@"
+                        WITH RankedPlans AS (
+                            SELECT PlanId, PlanName, ROW_NUMBER() OVER (PARTITION BY LOWER(PlanName) ORDER BY PlanId DESC) as rn,
+                                   FIRST_VALUE(PlanId) OVER (PARTITION BY LOWER(PlanName) ORDER BY PlanId DESC) as MasterPlanId
+                            FROM SubscriptionPlans
+                        )
+                        UPDATE s
+                        SET s.PlanId = r.MasterPlanId
+                        FROM Subscriptions s
+                        JOIN RankedPlans r ON s.PlanId = r.PlanId
+                        WHERE r.rn > 1;
+
+                        WITH RankedPlans AS (
+                            SELECT PlanId, ROW_NUMBER() OVER (PARTITION BY LOWER(PlanName) ORDER BY PlanId DESC) as rn
+                            FROM SubscriptionPlans
+                        )
+                        DELETE FROM SubscriptionPlans
+                        WHERE PlanId IN (SELECT PlanId FROM RankedPlans WHERE rn > 1);
+                    ");
+                }
+                catch { }
 
                 // Subscription Statuses
                 if (!await context.SubscriptionStatuses.AnyAsync())
@@ -597,6 +675,9 @@ namespace CC.Services
                     await context.SaveChangesAsync();
                 }
 
+                // 8. Retention Email Templates, Settings & Logs
+                await EnsureRetentionTablesAndSeedsAsync(context);
+
                 // 1. Ensure IsActive column exists on CustomCakeCRM Companies
                 await context.Database.ExecuteSqlRawAsync(@"
                     IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Companies' AND COLUMN_NAME = 'IsActive')
@@ -648,8 +729,24 @@ namespace CC.Services
                                 PlanName NVARCHAR(100) NOT NULL,
                                 Price DECIMAL(18,2) NOT NULL,
                                 DurationDays INT NOT NULL DEFAULT 365,
-                                MaxUsers INT NOT NULL DEFAULT 10
+                                MaxUsers INT NOT NULL DEFAULT 10,
+                                AllowBranching BIT NOT NULL DEFAULT 0,
+                                MaxBranches INT NOT NULL DEFAULT 1,
+                                IsActive BIT NOT NULL DEFAULT 1
                             );
+                        END
+
+                        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'SubscriptionPlans' AND COLUMN_NAME = 'AllowBranching')
+                        BEGIN
+                            ALTER TABLE SubscriptionPlans ADD AllowBranching BIT NOT NULL DEFAULT 0;
+                        END
+                        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'SubscriptionPlans' AND COLUMN_NAME = 'MaxBranches')
+                        BEGIN
+                            ALTER TABLE SubscriptionPlans ADD MaxBranches INT NOT NULL DEFAULT 1;
+                        END
+                        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'SubscriptionPlans' AND COLUMN_NAME = 'IsActive')
+                        BEGIN
+                            ALTER TABLE SubscriptionPlans ADD IsActive BIT NOT NULL DEFAULT 1;
                         END
 
                         IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'SubscriptionStatuses')
@@ -676,12 +773,53 @@ namespace CC.Services
                     if (!await masterContext.SubscriptionPlans.AnyAsync())
                     {
                         masterContext.SubscriptionPlans.AddRange(
-                            new SubscriptionPlan { PlanName = "Starter Plan", Price = 4399m, DurationDays = 365, MaxUsers = 3 },
-                            new SubscriptionPlan { PlanName = "Pro Plan", Price = 9599m, DurationDays = 365, MaxUsers = 10 },
-                            new SubscriptionPlan { PlanName = "Enterprise Plan", Price = 19999m, DurationDays = 365, MaxUsers = 50 }
+                            new SubscriptionPlan { PlanName = "Starter Plan", Price = 4399m, DurationDays = 365, MaxUsers = 3, AllowBranching = false, MaxBranches = 1, IsActive = true },
+                            new SubscriptionPlan { PlanName = "Pro Plan", Price = 9599m, DurationDays = 365, MaxUsers = 10, AllowBranching = true, MaxBranches = 3, IsActive = true },
+                            new SubscriptionPlan { PlanName = "Enterprise Plan", Price = 19999m, DurationDays = 365, MaxUsers = 50, AllowBranching = true, MaxBranches = 10, IsActive = true }
                         );
                         await masterContext.SaveChangesAsync();
                     }
+                    else
+                    {
+                        var pro = await masterContext.SubscriptionPlans.FirstOrDefaultAsync(p => p.PlanName == "Pro Plan");
+                        if (pro != null && (!pro.AllowBranching || pro.MaxBranches <= 1))
+                        {
+                            pro.AllowBranching = true;
+                            pro.MaxBranches = 3;
+                        }
+                        var ent = await masterContext.SubscriptionPlans.FirstOrDefaultAsync(p => p.PlanName == "Enterprise Plan");
+                        if (ent != null && (!ent.AllowBranching || ent.MaxBranches <= 1))
+                        {
+                            ent.AllowBranching = true;
+                            ent.MaxBranches = 10;
+                        }
+                        await masterContext.SaveChangesAsync();
+                    }
+
+                    // Clean up any historical duplicate subscription plans in Master DB
+                    try
+                    {
+                        await masterContext.Database.ExecuteSqlRawAsync(@"
+                            WITH RankedPlans AS (
+                                SELECT PlanId, PlanName, ROW_NUMBER() OVER (PARTITION BY LOWER(PlanName) ORDER BY PlanId DESC) as rn,
+                                       FIRST_VALUE(PlanId) OVER (PARTITION BY LOWER(PlanName) ORDER BY PlanId DESC) as MasterPlanId
+                                FROM SubscriptionPlans
+                            )
+                            UPDATE s
+                            SET s.PlanId = r.MasterPlanId
+                            FROM Subscriptions s
+                            JOIN RankedPlans r ON s.PlanId = r.PlanId
+                            WHERE r.rn > 1;
+
+                            WITH RankedPlans AS (
+                                SELECT PlanId, ROW_NUMBER() OVER (PARTITION BY LOWER(PlanName) ORDER BY PlanId DESC) as rn
+                                FROM SubscriptionPlans
+                            )
+                            DELETE FROM SubscriptionPlans
+                            WHERE PlanId IN (SELECT PlanId FROM RankedPlans WHERE rn > 1);
+                        ");
+                    }
+                    catch { }
 
                     if (!await masterContext.SubscriptionStatuses.AnyAsync())
                     {
@@ -899,9 +1037,43 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             }
 
             return await query
-                .OrderBy(c => c.FirstName)
-                .ThenBy(c => c.LastName)
+                .OrderByDescending(c => c.CustomerId)
                 .ToListAsync();
+        }
+
+        public static async Task<PagedList<Customer>> GetCustomersPagedAsync(string? searchQuery = null, int page = 1, int pageSize = 10, int? companyId = null)
+        {
+            pageSize = Math.Max(1, pageSize);
+            page = Math.Max(1, page);
+
+            int targetCompanyId = companyId ?? CurrentCompanyId;
+            await using var context = CreateDbContext(targetCompanyId);
+            IQueryable<Customer> query = context.Customers
+                .Where(c => c.CompanyId == targetCompanyId)
+                .AsNoTracking()
+                .Include(c => c.Orders);
+
+            if (!string.IsNullOrWhiteSpace(searchQuery))
+            {
+                string s = searchQuery.Trim().ToLower();
+                query = query.Where(c =>
+                    c.FirstName.ToLower().Contains(s) ||
+                    c.LastName.ToLower().Contains(s) ||
+                    c.Email.ToLower().Contains(s) ||
+                    c.Phone.ToLower().Contains(s));
+            }
+
+            int totalCount = await query.CountAsync();
+            int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
+            if (page > totalPages) page = totalPages;
+
+            var items = await query
+                .OrderByDescending(c => c.CustomerId)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return new PagedList<Customer>(items, totalCount, page, pageSize);
         }
 
         public static async Task<Customer?> GetCustomerByIdAsync(int customerId, int? companyId = null)
@@ -1015,6 +1187,99 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             return await query
                 .OrderByDescending(o => o.OrderId)
                 .ToListAsync();
+        }
+
+        public static async Task<PagedList<SalesOrder>> GetOrdersPagedAsync(string? statusFilter = null, string? searchQuery = null, int page = 1, int pageSize = 10)
+        {
+            pageSize = Math.Max(1, pageSize);
+            page = Math.Max(1, page);
+
+            await using var context = CreateDbContext();
+            IQueryable<SalesOrder> query = context.SalesOrders
+                .AsNoTracking()
+                .Include(o => o.Customer)
+                .Include(o => o.OrderDetails)
+                .Include(o => o.Payments)
+                    .ThenInclude(p => p.Method);
+
+            if (!string.IsNullOrWhiteSpace(statusFilter) && !statusFilter.Equals("All", StringComparison.OrdinalIgnoreCase))
+            {
+                if (statusFilter.Equals("Active", StringComparison.OrdinalIgnoreCase))
+                {
+                    query = query.Where(o => o.StatusId == 1 || o.StatusId == 2 || o.StatusId == 4);
+                }
+                else if (statusFilter.Equals("Today", StringComparison.OrdinalIgnoreCase))
+                {
+                    var today = DateTime.UtcNow.Date;
+                    query = query.Where(o => o.DeliveryDate.HasValue && o.DeliveryDate.Value.Date == today);
+                }
+                else
+                {
+                    int targetStatus = statusFilter switch
+                    {
+                        "Pending" => 0,
+                        "Confirmed" => 1,
+                        "Processing" => 2,
+                        "Completed" => 3,
+                        "Ready" => 4,
+                        "Cancelled" => 5,
+                        _ => -1
+                    };
+
+                    if (targetStatus >= 0)
+                    {
+                        query = query.Where(o => o.StatusId == targetStatus);
+                    }
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(searchQuery))
+            {
+                string s = searchQuery.Trim().ToLower();
+                query = query.Where(o =>
+                    o.OrderId.ToString().Contains(s) ||
+                    (o.DesignTheme != null && o.DesignTheme.ToLower().Contains(s)) ||
+                    (o.CakeSize != null && o.CakeSize.ToLower().Contains(s)) ||
+                    (o.Flavor != null && o.Flavor.ToLower().Contains(s)) ||
+                    (o.Customer != null && (o.Customer.FirstName.ToLower().Contains(s) || o.Customer.LastName.ToLower().Contains(s))));
+            }
+
+            int totalCount = await query.CountAsync();
+            int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
+            if (page > totalPages) page = totalPages;
+
+            var items = await query
+                .OrderByDescending(o => o.OrderId)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return new PagedList<SalesOrder>(items, totalCount, page, pageSize);
+        }
+
+        public static async Task<PagedList<SalesOrder>> GetCustomerOrdersPagedAsync(int customerId, int page = 1, int pageSize = 10)
+        {
+            pageSize = Math.Max(1, pageSize);
+            page = Math.Max(1, page);
+
+            await using var context = CreateDbContext();
+            var query = context.SalesOrders
+                .AsNoTracking()
+                .Include(o => o.OrderDetails)
+                .Include(o => o.Payments)
+                .Where(o => o.CustomerId == customerId);
+
+            int totalCount = await query.CountAsync();
+            int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
+            if (page > totalPages) page = totalPages;
+
+            var items = await query
+                .OrderByDescending(o => o.OrderDate)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return new PagedList<SalesOrder>(items, totalCount, page, pageSize);
         }
 
         public static async Task<SalesOrder?> GetOrderByIdAsync(int orderId)
@@ -1146,6 +1411,44 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             return await query
                 .OrderByDescending(i => i.InquiryId)
                 .ToListAsync();
+        }
+
+        public static async Task<PagedList<CustomerInquiry>> GetInquiriesPagedAsync(string? statusFilter = null, string? searchQuery = null, int page = 1, int pageSize = 10)
+        {
+            pageSize = Math.Max(1, pageSize);
+            page = Math.Max(1, page);
+
+            await using var context = CreateDbContext();
+            IQueryable<CustomerInquiry> query = context.CustomerInquiries
+                .AsNoTracking()
+                .Include(i => i.Customer);
+
+            if (!string.IsNullOrWhiteSpace(statusFilter) && !statusFilter.Equals("All", StringComparison.OrdinalIgnoreCase))
+            {
+                query = query.Where(i => i.Status == statusFilter);
+            }
+
+            if (!string.IsNullOrWhiteSpace(searchQuery))
+            {
+                string s = searchQuery.Trim().ToLower();
+                query = query.Where(i =>
+                    i.InquiryCode.ToLower().Contains(s) ||
+                    i.CakeType.ToLower().Contains(s) ||
+                    i.AssignedTo.ToLower().Contains(s) ||
+                    (i.Customer != null && (i.Customer.FirstName.ToLower().Contains(s) || i.Customer.LastName.ToLower().Contains(s))));
+            }
+
+            int totalCount = await query.CountAsync();
+            int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
+            if (page > totalPages) page = totalPages;
+
+            var items = await query
+                .OrderByDescending(i => i.InquiryId)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return new PagedList<CustomerInquiry>(items, totalCount, page, pageSize);
         }
 
         public static async Task<CustomerInquiry?> GetInquiryByIdAsync(int inquiryId)
@@ -1305,8 +1608,68 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             }
 
             return await query
-                .OrderByDescending(f => f.FollowUpDate)
+                .OrderByDescending(f => f.FollowUpId)
                 .ToListAsync();
+        }
+
+        public static async Task<PagedList<CustomerFollowUp>> GetFollowUpsPagedAsync(string? statusFilter = null, string? searchQuery = null, int page = 1, int pageSize = 10)
+        {
+            pageSize = Math.Max(1, pageSize);
+            page = Math.Max(1, page);
+
+            await using var context = CreateDbContext();
+            IQueryable<CustomerFollowUp> query = context.CustomerFollowUps
+                .AsNoTracking()
+                .Include(f => f.Customer);
+
+            if (!string.IsNullOrWhiteSpace(statusFilter) && !statusFilter.Equals("All", StringComparison.OrdinalIgnoreCase))
+            {
+                var today = DateTime.UtcNow.Date;
+                if (statusFilter.Equals("Due", StringComparison.OrdinalIgnoreCase))
+                {
+                    query = query.Where(f => f.StatusId == 0 || f.StatusId == 3);
+                }
+                else if (statusFilter.Equals("Overdue", StringComparison.OrdinalIgnoreCase))
+                {
+                    query = query.Where(f => f.StatusId == 3 || (f.StatusId == 0 && f.FollowUpDate.Date < today));
+                }
+                else
+                {
+                    int targetStatus = statusFilter switch
+                    {
+                        "Pending" => 0,
+                        "Completed" => 1,
+                        "Cancelled" => 2,
+                        _ => -1
+                    };
+
+                    if (targetStatus >= 0)
+                    {
+                        query = query.Where(f => f.StatusId == targetStatus);
+                    }
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(searchQuery))
+            {
+                string s = searchQuery.Trim().ToLower();
+                query = query.Where(f =>
+                    f.FollowUpId.ToString().Contains(s) ||
+                    (f.Notes != null && f.Notes.ToLower().Contains(s)) ||
+                    (f.Customer != null && (f.Customer.FirstName.ToLower().Contains(s) || f.Customer.LastName.ToLower().Contains(s))));
+            }
+
+            int totalCount = await query.CountAsync();
+            int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
+            if (page > totalPages) page = totalPages;
+
+            var items = await query
+                .OrderByDescending(f => f.FollowUpId)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return new PagedList<CustomerFollowUp>(items, totalCount, page, pageSize);
         }
 
         public static async Task<CustomerFollowUp> CreateFollowUpAsync(CustomerFollowUp followUp)
@@ -1410,8 +1773,60 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             }
 
             return await query
-                .OrderByDescending(p => p.PaymentDate)
+                .OrderByDescending(p => p.PaymentId)
                 .ToListAsync();
+        }
+
+        public static async Task<PagedList<Payment>> GetPaymentsPagedAsync(string? statusFilter = null, string? searchQuery = null, int page = 1, int pageSize = 10)
+        {
+            pageSize = Math.Max(1, pageSize);
+            page = Math.Max(1, page);
+
+            await using var context = CreateDbContext();
+            IQueryable<Payment> query = context.Payments
+                .AsNoTracking()
+                .Include(p => p.Method)
+                .Include(p => p.Order)
+                    .ThenInclude(o => o!.Customer);
+
+            if (!string.IsNullOrWhiteSpace(statusFilter) && !statusFilter.Equals("All", StringComparison.OrdinalIgnoreCase))
+            {
+                int targetStatus = statusFilter switch
+                {
+                    "Pending" => 0,
+                    "Completed" => 1,
+                    "Failed" => 2,
+                    "Refunded" => 3,
+                    _ => -1
+                };
+
+                if (targetStatus >= 0)
+                {
+                    query = query.Where(p => p.StatusId == targetStatus);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(searchQuery))
+            {
+                string s = searchQuery.Trim().ToLower();
+                query = query.Where(p =>
+                    p.PaymentId.ToString().Contains(s) ||
+                    p.TransactionReference.ToLower().Contains(s) ||
+                    (p.Order != null && p.Order.Customer != null &&
+                        (p.Order.Customer.FirstName.ToLower().Contains(s) || p.Order.Customer.LastName.ToLower().Contains(s))));
+            }
+
+            int totalCount = await query.CountAsync();
+            int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
+            if (page > totalPages) page = totalPages;
+
+            var items = await query
+                .OrderByDescending(p => p.PaymentId)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return new PagedList<Payment>(items, totalCount, page, pageSize);
         }
 
         public static async Task<Payment> CreatePaymentAsync(Payment payment)
@@ -1544,8 +1959,10 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
         public static async Task<List<TransactionRecord>> GetOverallTransactionsAsync(
             string period = "All", // "All", "Daily", "Monthly"
             DateTime? filterDate = null,
-            string? typeFilter = null, // "All", "Orders", "Payments"
-            string? searchQuery = null)
+            string? typeFilter = null, // "All", "Orders", "Payments", "Retention"
+            string? searchQuery = null,
+            DateTime? fromDate = null,
+            DateTime? toDate = null)
         {
             await using var context = CreateDbContext();
             var target = filterDate ?? DateTime.Today;
@@ -1621,8 +2038,44 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 }
             }
 
-            // 3. Filter by Period
-            if (string.Equals(period, "Daily", StringComparison.OrdinalIgnoreCase))
+            // 3. Fetch Retention Requests
+            if (string.Equals(typeFilter, "Retention", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(typeFilter, "Retention Requests", StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrEmpty(typeFilter) || typeFilter == "All")
+            {
+                await EnsureRetentionTablesAndSeedsAsync(context);
+                var retList = await context.RetentionRequests.AsNoTracking().ToListAsync();
+                foreach (var req in retList)
+                {
+                    list.Add(new TransactionRecord(
+                        Id: req.RequestId,
+                        ReferenceNo: $"#RET-{req.RequestId:D4}",
+                        Date: req.RequestedDate,
+                        Type: "Retention Request",
+                        CustomerName: req.CustomerName,
+                        Details: $"{req.ActionType} ({req.DiscountPercent:0.#}%) - {req.ReasonCategory}",
+                        Amount: req.DiscountPercent,
+                        PaymentMethod: $"By: {req.RequestedByUserName}",
+                        Status: req.Status
+                    ));
+                }
+            }
+
+            // 4. Filter by Period and Custom Dates
+            if (fromDate.HasValue || toDate.HasValue)
+            {
+                if (fromDate.HasValue)
+                {
+                    var f = fromDate.Value.Date;
+                    list = list.Where(t => t.Date.Date >= f).ToList();
+                }
+                if (toDate.HasValue)
+                {
+                    var maxDate = toDate.Value.Date.AddDays(1).AddTicks(-1);
+                    list = list.Where(item => item.Date <= maxDate).ToList();
+                }
+            }
+            else if (string.Equals(period, "Daily", StringComparison.OrdinalIgnoreCase))
             {
                 list = list.Where(t => t.Date.Date == target.Date).ToList();
             }
@@ -1635,7 +2088,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 list = list.Where(t => t.Date.Year == target.Year).ToList();
             }
 
-            // 4. Filter by Search Query
+            // 5. Filter by Search Query
             if (!string.IsNullOrWhiteSpace(searchQuery))
             {
                 var q = searchQuery.Trim().ToLowerInvariant();
@@ -1651,6 +2104,32 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
 
             // Sort newest first
             return list.OrderByDescending(t => t.Date).ToList();
+        }
+
+        public static async Task<PagedList<TransactionRecord>> GetOverallTransactionsPagedAsync(
+            string period = "All",
+            DateTime? filterDate = null,
+            string? typeFilter = null,
+            string? searchQuery = null,
+            int page = 1,
+            int pageSize = 10,
+            DateTime? fromDate = null,
+            DateTime? toDate = null)
+        {
+            pageSize = Math.Max(1, pageSize);
+            page = Math.Max(1, page);
+
+            var all = await GetOverallTransactionsAsync(period, filterDate, typeFilter, searchQuery, fromDate, toDate);
+            int totalCount = all.Count;
+            int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
+            if (page > totalPages) page = totalPages;
+
+            var items = all
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToList();
+
+            return new PagedList<TransactionRecord>(items, totalCount, page, pageSize);
         }
 
         public static async Task<ReportSummaryMetrics> GetReportSummaryMetricsAsync(DateTime? targetDate = null)
@@ -1778,9 +2257,59 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             }
 
             return await query
-                .OrderBy(u => u.RoleId)
-                .ThenBy(u => u.LastName)
+                .OrderByDescending(u => u.UserId)
                 .ToListAsync();
+        }
+
+        public static async Task<PagedList<SystemUser>> GetUsersPagedAsync(
+            string? searchQuery = null,
+            string? roleFilter = null,
+            string? statusFilter = null,
+            int page = 1,
+            int pageSize = 10)
+        {
+            pageSize = Math.Max(1, pageSize);
+            page = Math.Max(1, page);
+
+            await using var context = CreateDbContext();
+            IQueryable<SystemUser> query = context.AppUsers
+                .Include(u => u.Role)
+                .Where(u => u.CompanyId == DefaultCompanyId)
+                .AsNoTracking();
+
+            if (!string.IsNullOrWhiteSpace(searchQuery))
+            {
+                var q = searchQuery.Trim().ToLowerInvariant();
+                query = query.Where(u =>
+                    u.FirstName.ToLower().Contains(q) ||
+                    u.LastName.ToLower().Contains(q) ||
+                    u.Username.ToLower().Contains(q) ||
+                    u.Email.ToLower().Contains(q) ||
+                    (u.Role != null && u.Role.RoleName.ToLower().Contains(q)));
+            }
+
+            if (!string.IsNullOrWhiteSpace(roleFilter) && roleFilter != "All Roles")
+            {
+                query = query.Where(u => u.Role != null && u.Role.RoleName == roleFilter);
+            }
+
+            if (!string.IsNullOrWhiteSpace(statusFilter) && statusFilter != "All Status")
+            {
+                bool activeOnly = statusFilter.Equals("Active", StringComparison.OrdinalIgnoreCase);
+                query = query.Where(u => u.IsActive == activeOnly);
+            }
+
+            int totalCount = await query.CountAsync();
+            int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
+            if (page > totalPages) page = totalPages;
+
+            var items = await query
+                .OrderByDescending(u => u.UserId)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return new PagedList<SystemUser>(items, totalCount, page, pageSize);
         }
 
         public static async Task<UserSummaryMetrics> GetUserSummaryMetricsAsync()
@@ -1938,7 +2467,9 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                     RenewalDate: sub.EndDate,
                     PaymentMethod: "Visa ending in 4242",
                     UsedSeats: usedSeats,
-                    MaxSeats: sub.Plan.MaxUsers
+                    MaxSeats: sub.Plan.MaxUsers,
+                    AllowBranching: sub.Plan.AllowBranching,
+                    MaxBranches: sub.Plan.MaxBranches
                 );
             }
 
@@ -1951,7 +2482,9 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 RenewalDate: DateTime.Today.AddMonths(11),
                 PaymentMethod: "Visa ending in 4242",
                 UsedSeats: usedSeats > 0 ? usedSeats : 1,
-                MaxSeats: 10
+                MaxSeats: 10,
+                AllowBranching: true,
+                MaxBranches: 3
             );
         }
 
@@ -1981,6 +2514,24 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             }
 
             return list;
+        }
+
+        public static async Task<PagedList<BillingHistoryItem>> GetBillingHistoryPagedAsync(int page = 1, int pageSize = 10, int? companyId = null)
+        {
+            pageSize = Math.Max(1, pageSize);
+            page = Math.Max(1, page);
+
+            var all = await GetBillingHistoryAsync(companyId);
+            int totalCount = all.Count;
+            int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
+            if (page > totalPages) page = totalPages;
+
+            var items = all
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToList();
+
+            return new PagedList<BillingHistoryItem>(items, totalCount, page, pageSize);
         }
 
         public static async Task RenewSubscriptionAsync(int? companyId = null)
@@ -2087,11 +2638,23 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
         // SUPER ADMIN SUBSCRIPTION PLANS & ASSIGNMENTS
         // =========================================================
 
-        public static async Task<List<SubscriptionPlanListItem>> GetSubscriptionPlansAsync()
+        public static async Task<List<SubscriptionPlanListItem>> GetSubscriptionPlansAsync(bool includeArchived = false)
         {
             await using var masterContext = CreateMasterDbContext();
-            var plans = await masterContext.SubscriptionPlans.ToListAsync();
+            var query = masterContext.SubscriptionPlans.AsQueryable();
+            if (!includeArchived)
+            {
+                query = query.Where(p => p.IsActive);
+            }
+            var rawPlans = await query.ToListAsync();
             var subs = await masterContext.Subscriptions.Where(s => s.StatusId == 1).ToListAsync();
+
+            // Group by PlanName to prevent duplicate plan cards
+            var plans = rawPlans
+                .GroupBy(p => p.PlanName.Trim(), StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.OrderByDescending(p => p.PlanId).First())
+                .OrderBy(p => p.Price)
+                .ToList();
 
             var list = new List<SubscriptionPlanListItem>();
             foreach (var p in plans)
@@ -2103,45 +2666,100 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                     p.Price,
                     p.DurationDays,
                     p.MaxUsers,
-                    activeCount
+                    activeCount,
+                    p.AllowBranching,
+                    p.MaxBranches,
+                    p.IsActive
                 ));
             }
-            return list.OrderBy(p => p.Price).ToList();
+            return list;
         }
 
-        public static async Task<SubscriptionPlan> CreateSubscriptionPlanAsync(string name, decimal price, int durationDays, int maxUsers)
+        public static async Task<SubscriptionPlan> CreateSubscriptionPlanAsync(
+            string name,
+            decimal price,
+            int durationDays,
+            int maxUsers,
+            bool allowBranching = false,
+            int maxBranches = 1)
         {
             await using var masterContext = CreateMasterDbContext();
-            var plan = new SubscriptionPlan
+            var existing = await masterContext.SubscriptionPlans
+                .FirstOrDefaultAsync(p => p.PlanName.ToLower() == name.Trim().ToLower());
+
+            SubscriptionPlan plan;
+            if (existing != null)
             {
-                PlanName = name,
-                Price = price,
-                DurationDays = durationDays,
-                MaxUsers = maxUsers
-            };
-            masterContext.SubscriptionPlans.Add(plan);
-            await masterContext.SaveChangesAsync();
+                existing.Price = price;
+                existing.DurationDays = durationDays;
+                existing.MaxUsers = maxUsers;
+                existing.AllowBranching = allowBranching;
+                existing.MaxBranches = allowBranching ? Math.Max(1, maxBranches) : 1;
+                existing.IsActive = true;
+                await masterContext.SaveChangesAsync();
+                plan = existing;
+            }
+            else
+            {
+                plan = new SubscriptionPlan
+                {
+                    PlanName = name.Trim(),
+                    Price = price,
+                    DurationDays = durationDays,
+                    MaxUsers = maxUsers,
+                    AllowBranching = allowBranching,
+                    MaxBranches = allowBranching ? Math.Max(1, maxBranches) : 1,
+                    IsActive = true
+                };
+                masterContext.SubscriptionPlans.Add(plan);
+                await masterContext.SaveChangesAsync();
+            }
 
             // Synchronize with tenant DBs
             try
             {
                 await using var tenantContext = CreateDbContext(DefaultCompanyId);
-                tenantContext.SubscriptionPlans.Add(new SubscriptionPlan
+                var tenantExisting = await tenantContext.SubscriptionPlans
+                    .FirstOrDefaultAsync(p => p.PlanName.ToLower() == name.Trim().ToLower());
+                if (tenantExisting != null)
                 {
-                    PlanName = name,
-                    Price = price,
-                    DurationDays = durationDays,
-                    MaxUsers = maxUsers
-                });
+                    tenantExisting.Price = price;
+                    tenantExisting.DurationDays = durationDays;
+                    tenantExisting.MaxUsers = maxUsers;
+                    tenantExisting.AllowBranching = allowBranching;
+                    tenantExisting.MaxBranches = allowBranching ? Math.Max(1, maxBranches) : 1;
+                    tenantExisting.IsActive = true;
+                }
+                else
+                {
+                    tenantContext.SubscriptionPlans.Add(new SubscriptionPlan
+                    {
+                        PlanName = name.Trim(),
+                        Price = price,
+                        DurationDays = durationDays,
+                        MaxUsers = maxUsers,
+                        AllowBranching = allowBranching,
+                        MaxBranches = allowBranching ? Math.Max(1, maxBranches) : 1,
+                        IsActive = true
+                    });
+                }
                 await tenantContext.SaveChangesAsync();
             }
             catch { }
 
-            await LogAuditAsync("SUBSCRIPTION_PLAN_CREATED", $"New subscription plan '{name}' created at ₱{price:N2} ({maxUsers} seats, {durationDays} days).");
+            await LogAuditAsync("SUBSCRIPTION_PLAN_SAVED", $"Subscription plan '{name}' saved at ₱{price:N2} ({maxUsers} seats, {durationDays} days, Branching={(allowBranching ? $"Max {maxBranches}" : "No")}).");
             return plan;
         }
 
-        public static async Task<SubscriptionPlan> UpdateSubscriptionPlanAsync(int planId, string name, decimal price, int durationDays, int maxUsers)
+        public static async Task<SubscriptionPlan> UpdateSubscriptionPlanAsync(
+            int planId,
+            string name,
+            decimal price,
+            int durationDays,
+            int maxUsers,
+            bool allowBranching = false,
+            int maxBranches = 1,
+            bool isActive = true)
         {
             await using var masterContext = CreateMasterDbContext();
             var plan = await masterContext.SubscriptionPlans.FirstOrDefaultAsync(p => p.PlanId == planId);
@@ -2151,6 +2769,9 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             plan.Price = price;
             plan.DurationDays = durationDays;
             plan.MaxUsers = maxUsers;
+            plan.AllowBranching = allowBranching;
+            plan.MaxBranches = allowBranching ? Math.Max(1, maxBranches) : 1;
+            plan.IsActive = isActive;
             await masterContext.SaveChangesAsync();
 
             try
@@ -2163,6 +2784,9 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                     tenantPlan.Price = price;
                     tenantPlan.DurationDays = durationDays;
                     tenantPlan.MaxUsers = maxUsers;
+                    tenantPlan.AllowBranching = allowBranching;
+                    tenantPlan.MaxBranches = allowBranching ? Math.Max(1, maxBranches) : 1;
+                    tenantPlan.IsActive = isActive;
                     await tenantContext.SaveChangesAsync();
                 }
             }
@@ -2170,6 +2794,56 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
 
             await LogAuditAsync("SUBSCRIPTION_PLAN_UPDATED", $"Subscription plan #{planId} '{name}' updated.");
             return plan;
+        }
+
+        public static async Task ArchiveSubscriptionPlanAsync(int planId)
+        {
+            await using var masterContext = CreateMasterDbContext();
+            var plan = await masterContext.SubscriptionPlans.FirstOrDefaultAsync(p => p.PlanId == planId);
+            if (plan != null)
+            {
+                plan.IsActive = false;
+                await masterContext.SaveChangesAsync();
+
+                try
+                {
+                    await using var tenantContext = CreateDbContext(DefaultCompanyId);
+                    var tenantPlan = await tenantContext.SubscriptionPlans.FirstOrDefaultAsync(p => p.PlanId == planId || p.PlanName.ToLower() == plan.PlanName.ToLower());
+                    if (tenantPlan != null)
+                    {
+                        tenantPlan.IsActive = false;
+                        await tenantContext.SaveChangesAsync();
+                    }
+                }
+                catch { }
+
+                await LogAuditAsync("SUBSCRIPTION_PLAN_ARCHIVED", $"Subscription plan #{planId} '{plan.PlanName}' archived.");
+            }
+        }
+
+        public static async Task RestoreSubscriptionPlanAsync(int planId)
+        {
+            await using var masterContext = CreateMasterDbContext();
+            var plan = await masterContext.SubscriptionPlans.FirstOrDefaultAsync(p => p.PlanId == planId);
+            if (plan != null)
+            {
+                plan.IsActive = true;
+                await masterContext.SaveChangesAsync();
+
+                try
+                {
+                    await using var tenantContext = CreateDbContext(DefaultCompanyId);
+                    var tenantPlan = await tenantContext.SubscriptionPlans.FirstOrDefaultAsync(p => p.PlanId == planId || p.PlanName.ToLower() == plan.PlanName.ToLower());
+                    if (tenantPlan != null)
+                    {
+                        tenantPlan.IsActive = true;
+                        await tenantContext.SaveChangesAsync();
+                    }
+                }
+                catch { }
+
+                await LogAuditAsync("SUBSCRIPTION_PLAN_RESTORED", $"Subscription plan #{planId} '{plan.PlanName}' restored to active.");
+            }
         }
 
         public static async Task<List<CompanySubscriptionListItem>> GetCompanySubscriptionsAsync(string? searchQuery = null)
@@ -2201,7 +2875,9 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                     StatusId: sub?.StatusId ?? 2,
                     StatusName: sub?.Status?.StatusName ?? (sub != null && sub.EndDate >= DateTime.UtcNow ? "Active" : "Expired"),
                     StartDate: sub?.StartDate ?? c.CreatedDate,
-                    EndDate: sub?.EndDate ?? c.CreatedDate.AddYears(1)
+                    EndDate: sub?.EndDate ?? c.CreatedDate.AddYears(1),
+                    AllowBranching: sub?.Plan?.AllowBranching ?? false,
+                    MaxBranches: sub?.Plan?.MaxBranches ?? 1
                 ));
             }
 
@@ -3033,38 +3709,33 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
         // ROLE-BASED DASHBOARD ANALYTICS (REAL DATABASE QUERIES)
         // =========================================================
 
-        private static DateTime? GetPeriodStartDate(string period) => period?.ToLowerInvariant() switch
+        public static (DateTime? StartDate, DateTime? EndDate) GetPeriodDateRange(string? period)
         {
-            "1d" => DateTime.Today,
-            "7d" => DateTime.Today.AddDays(-7),
-            "30d" => DateTime.Today.AddDays(-30),
-            "90d" => DateTime.Today.AddDays(-90),
-            _ => null // All time
-        };
+            if (string.IsNullOrWhiteSpace(period)) return (null, null);
 
-        public static async Task<PagedList<TransactionRecord>> GetOverallTransactionsPagedAsync(
-            string period = "All",
-            DateTime? filterDate = null,
-            string? typeFilter = null,
-            string? searchQuery = null,
-            int page = 1,
-            int pageSize = 10)
-        {
-            pageSize = Math.Max(1, pageSize);
-            page = Math.Max(1, page);
+            if (period.StartsWith("range:", StringComparison.OrdinalIgnoreCase))
+            {
+                var parts = period.Substring(6).Split(':');
+                DateTime? start = null;
+                DateTime? end = null;
+                if (parts.Length > 0 && DateTime.TryParse(parts[0], out var s))
+                    start = s.Date;
+                if (parts.Length > 1 && DateTime.TryParse(parts[1], out var e))
+                    end = e.Date.AddDays(1).AddTicks(-1);
+                return (start, end);
+            }
 
-            var all = await GetOverallTransactionsAsync(period, filterDate, typeFilter, searchQuery);
-            int totalCount = all.Count;
-            int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
-            if (page > totalPages) page = totalPages;
-
-            var items = all
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize)
-                .ToList();
-
-            return new PagedList<TransactionRecord>(items, totalCount, page, pageSize);
+            return period.ToLowerInvariant() switch
+            {
+                "1d" => (DateTime.Today, DateTime.Today.AddDays(1).AddTicks(-1)),
+                "7d" => (DateTime.Today.AddDays(-7), DateTime.Today.AddDays(1).AddTicks(-1)),
+                "30d" => (DateTime.Today.AddDays(-30), DateTime.Today.AddDays(1).AddTicks(-1)),
+                "90d" => (DateTime.Today.AddDays(-90), DateTime.Today.AddDays(1).AddTicks(-1)),
+                _ => (null, null) // All time
+            };
         }
+
+        private static DateTime? GetPeriodStartDate(string period) => GetPeriodDateRange(period).StartDate;
 
         public static async Task<StaffDashboardData> GetStaffDashboardDataAsync(int? userId = null, int? companyId = null, string period = "1d")
         {
@@ -3102,6 +3773,14 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             int readyOrders = await context.SalesOrders
                 .Include(o => o.Customer)
                 .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId == 4);
+
+            int completedOrders = await context.SalesOrders
+                .Include(o => o.Customer)
+                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId == 3 && (startDate == null || o.OrderDate >= startDate));
+
+            int todayDueOrders = await context.SalesOrders
+                .Include(o => o.Customer)
+                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (o.StatusId == 1 || o.StatusId == 2 || o.StatusId == 4) && o.DeliveryDate != null && o.DeliveryDate.Value.Date == today);
 
             var orderStatusCounts = await context.SalesOrders
                 .Include(o => o.Customer)
@@ -3236,6 +3915,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 myHandledInquiries,
                 processingOrders,
                 readyOrders,
+                completedOrders,
+                todayDueOrders,
                 totalCustomers,
                 taskTrend,
                 orderStatusBars,
@@ -3266,6 +3947,15 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             int completedOrders = await context.SalesOrders
                 .Include(o => o.Customer)
                 .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId == 3 && (startDate == null || o.OrderDate >= startDate));
+
+            int todayDeliveries = await context.SalesOrders
+                .Include(o => o.Customer)
+                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (o.StatusId == 1 || o.StatusId == 2 || o.StatusId == 4) && o.DeliveryDate != null && o.DeliveryDate.Value.Date == today);
+
+            decimal activePipelineValue = await context.SalesOrders
+                .Include(o => o.Customer)
+                .Where(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (o.StatusId == 1 || o.StatusId == 2 || o.StatusId == 4))
+                .SumAsync(o => (decimal?)o.TotalAmount) ?? 0m;
 
             int openInquiries = await context.CustomerInquiries
                 .Include(i => i.Customer)
@@ -3380,10 +4070,18 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 ))
                 .ToListAsync();
 
+            var recentRetention = await context.RetentionRequests
+                .Where(r => r.CompanyId == targetCompanyId)
+                .OrderByDescending(r => r.RequestedDate)
+                .Take(6)
+                .ToListAsync();
+
             return new ManagerDashboardData(
                 activeOrders,
                 readyOrders,
                 completedOrders,
+                todayDeliveries,
+                activePipelineValue,
                 openInquiries,
                 shopOverdueFollowups,
                 totalCustomers,
@@ -3391,7 +4089,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 stages,
                 orderStatusBars,
                 staffPerformance,
-                recentOrders
+                recentOrders,
+                recentRetention
             );
         }
 
@@ -3405,19 +4104,31 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
 
             decimal periodRevenue = await context.Payments
                 .Include(p => p.Order)
-                .ThenInclude(o => o.Customer)
+                .ThenInclude(o => o!.Customer)
                 .Where(p => p.Order != null && p.Order.Customer != null && p.Order.Customer.CompanyId == targetCompanyId && p.StatusId == 1 && (startDate == null || p.PaymentDate >= startDate))
                 .SumAsync(p => (decimal?)p.Amount) ?? 0m;
 
             decimal lifetimeRevenue = await context.Payments
                 .Include(p => p.Order)
-                .ThenInclude(o => o.Customer)
+                .ThenInclude(o => o!.Customer)
                 .Where(p => p.Order != null && p.Order.Customer != null && p.Order.Customer.CompanyId == targetCompanyId && p.StatusId == 1)
                 .SumAsync(p => (decimal?)p.Amount) ?? 0m;
 
             int totalOrders = await context.SalesOrders
                 .Include(o => o.Customer)
                 .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (startDate == null || o.OrderDate >= startDate));
+
+            int activeOrders = await context.SalesOrders
+                .Include(o => o.Customer)
+                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (o.StatusId == 1 || o.StatusId == 2 || o.StatusId == 4));
+
+            decimal averageOrderValue = totalOrders > 0 ? periodRevenue / totalOrders : 0m;
+
+            decimal totalBilledPeriod = await context.SalesOrders
+                .Include(o => o.Customer)
+                .Where(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (startDate == null || o.OrderDate >= startDate))
+                .SumAsync(o => (decimal?)o.TotalAmount) ?? 0m;
+            double collectionRate = totalBilledPeriod > 0 ? Math.Min(100.0, (double)(periodRevenue / totalBilledPeriod) * 100.0) : 100.0;
 
             int totalCustomers = await context.Customers
                 .CountAsync(c => c.CompanyId == targetCompanyId);
@@ -3432,7 +4143,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
 
             var revTrendRaw = await context.Payments
                 .Include(p => p.Order)
-                .ThenInclude(o => o.Customer)
+                .ThenInclude(o => o!.Customer)
                 .Where(p => p.Order != null && p.Order.Customer != null && p.Order.Customer.CompanyId == targetCompanyId && p.StatusId == 1 && (startDate == null || p.PaymentDate >= startDate))
                 .GroupBy(p => p.PaymentDate.Date)
                 .Select(g => new { Date = g.Key, Total = g.Sum(p => p.Amount) })
@@ -3443,7 +4154,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             {
                 var todayPayments = await context.Payments
                     .Include(p => p.Order)
-                    .ThenInclude(o => o.Customer)
+                    .ThenInclude(o => o!.Customer)
                     .Where(p => p.Order != null && p.Order.Customer != null && p.Order.Customer.CompanyId == targetCompanyId && p.StatusId == 1 && p.PaymentDate >= today)
                     .Select(p => new { p.PaymentDate, p.Amount })
                     .ToListAsync();
@@ -3477,7 +4188,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
 
             var methodCounts = await context.Payments
                 .Include(p => p.Order)
-                .ThenInclude(o => o.Customer)
+                .ThenInclude(o => o!.Customer)
                 .Include(p => p.Method)
                 .Where(p => p.Order != null && p.Order.Customer != null && p.Order.Customer.CompanyId == targetCompanyId && p.StatusId == 1 && (startDate == null || p.PaymentDate >= startDate))
                 .GroupBy(p => p.Method != null ? p.Method.MethodName : "Cash")
@@ -3550,12 +4261,20 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
 
             var subInfo = await GetSubscriptionInfoAsync();
             var pagedTx = await GetOverallTransactionsPagedAsync(page: 1, pageSize: 6);
+            var recentRetention = await context.RetentionRequests
+                .Where(r => r.CompanyId == targetCompanyId)
+                .OrderByDescending(r => r.RequestedDate)
+                .Take(6)
+                .ToListAsync();
 
             return new AdminDashboardData(
                 periodRevenue,
                 lifetimeRevenue,
                 outstanding,
+                averageOrderValue,
+                collectionRate,
                 totalOrders,
+                activeOrders,
                 totalCustomers,
                 newCustomers,
                 revenueTrend,
@@ -3563,7 +4282,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 orderStatusBars,
                 topCustomers,
                 subInfo,
-                pagedTx.Items
+                pagedTx.Items,
+                recentRetention
             );
         }
 
@@ -3623,6 +4343,9 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             int activeSubsCount = 0;
             int expiringSubsCount = 0;
             int expiredSubsCount = 0;
+            decimal estimatedMonthlyRevenue = 0m;
+            int totalBackupsCount = 0;
+            int termsAcceptancesCount = 0;
             var planDistribution = new List<BarItem>();
             var statusDistribution = new List<BarItem>();
 
@@ -3637,6 +4360,11 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 activeSubsCount = subs.Count(s => s.EndDate >= today && (s.Status == null || s.Status.StatusName == "Active" || s.StatusId == 1));
                 expiringSubsCount = subs.Count(s => s.EndDate >= today && s.EndDate <= today.AddDays(30));
                 expiredSubsCount = subs.Count(s => s.EndDate < today || (s.Status != null && s.Status.StatusName == "Expired"));
+
+                estimatedMonthlyRevenue = subs
+                    .Where(s => s.EndDate >= today && (s.Status == null || s.Status.StatusName == "Active" || s.StatusId == 1))
+                    .Sum(s => s.Plan?.Price ?? 0m);
+                if (estimatedMonthlyRevenue == 0m) estimatedMonthlyRevenue = 1499m;
 
                 foreach (var p in plans)
                 {
@@ -3673,6 +4401,27 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 System.Diagnostics.Debug.WriteLine($"SuperAdmin dashboard tenant query warning: {ex.Message}");
                 platformUsers = 12;
                 activeSubsCount = 1;
+                estimatedMonthlyRevenue = 1499m;
+            }
+
+            try
+            {
+                var backups = BackupService.GetBackupHistory();
+                totalBackupsCount = backups.Count;
+            }
+            catch
+            {
+                totalBackupsCount = 0;
+            }
+
+            try
+            {
+                await using var termsContext = CreateDbContext(DefaultCompanyId);
+                termsAcceptancesCount = await termsContext.TermsAcceptances.CountAsync();
+            }
+            catch
+            {
+                termsAcceptancesCount = 0;
             }
 
             return new SuperAdminDashboardData(
@@ -3683,6 +4432,9 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 activeSubsCount,
                 expiringSubsCount,
                 expiredSubsCount,
+                estimatedMonthlyRevenue,
+                totalBackupsCount,
+                termsAcceptancesCount,
                 regTrend,
                 planDistribution,
                 statusDistribution,
@@ -3798,6 +4550,36 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                             LastRecalculatedBy NVARCHAR(100) NOT NULL DEFAULT 'System',
                             UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
                             UpdatedBy NVARCHAR(100) NOT NULL DEFAULT 'System'
+                        );
+                    END;
+
+                    IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'RetentionRequests')
+                    BEGIN
+                        CREATE TABLE RetentionRequests (
+                            RequestId INT IDENTITY(1,1) PRIMARY KEY,
+                            CompanyId INT NOT NULL,
+                            CustomerId INT NOT NULL,
+                            CustomerName NVARCHAR(150) NOT NULL,
+                            CustomerEmail NVARCHAR(150) NOT NULL,
+                            TargetSegment NVARCHAR(50) NOT NULL DEFAULT 'At Risk',
+                            ActionType NVARCHAR(100) NOT NULL DEFAULT 'Special Discount',
+                            DiscountPercent DECIMAL(18,2) NOT NULL DEFAULT 0,
+                            RetentionDetails NVARCHAR(MAX) NOT NULL,
+                            ReasonCategory NVARCHAR(100) NOT NULL,
+                            ReasonCustomDetails NVARCHAR(MAX) NULL,
+                            Status NVARCHAR(50) NOT NULL DEFAULT 'Pending',
+                            RequestedDate DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                            RequestedByUserId INT NOT NULL,
+                            RequestedByUserName NVARCHAR(100) NOT NULL,
+                            ReviewedDate DATETIME2 NULL,
+                            ReviewedByUserId INT NULL,
+                            ReviewedByUserName NVARCHAR(100) NULL,
+                            ReviewAction NVARCHAR(50) NULL,
+                            RejectionDate DATETIME2 NULL,
+                            RejectedByUserId INT NULL,
+                            RejectedByUserName NVARCHAR(100) NULL,
+                            RejectionReason NVARCHAR(MAX) NULL,
+                            AdminRemarks NVARCHAR(MAX) NULL
                         );
                     END;
 
@@ -3985,6 +4767,95 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                             completedOrders[i].DeliveryDate = completedOrders[i].OrderDate.AddDays(3);
                     }
                     await context.SaveChangesAsync();
+                }
+
+                if (!await context.RetentionRequests.AnyAsync())
+                {
+                    var seededCustomers = await context.Customers.Take(3).ToListAsync();
+                    var sampleRequests = new List<RetentionRequest>();
+
+                    if (seededCustomers.Count > 0)
+                    {
+                        var c1 = seededCustomers[0];
+                        sampleRequests.Add(new RetentionRequest
+                        {
+                            CompanyId = DefaultCompanyId,
+                            CustomerId = c1.CustomerId,
+                            CustomerName = $"{c1.FirstName} {c1.LastName}".Trim(),
+                            CustomerEmail = c1.Email,
+                            TargetSegment = "At Risk",
+                            ActionType = "Special Discount",
+                            DiscountPercent = 10m,
+                            RetentionDetails = "Provide a 10% anniversary discount voucher to incentivize a repeat purchase before churn.",
+                            ReasonCategory = "Prevent Customer Churn",
+                            Status = "Pending",
+                            RequestedDate = DateTime.UtcNow.AddDays(-2),
+                            RequestedByUserId = 2,
+                            RequestedByUserName = "Manager User"
+                        });
+                    }
+
+                    if (seededCustomers.Count > 1)
+                    {
+                        var c2 = seededCustomers[1];
+                        sampleRequests.Add(new RetentionRequest
+                        {
+                            CompanyId = DefaultCompanyId,
+                            CustomerId = c2.CustomerId,
+                            CustomerName = $"{c2.FirstName} {c2.LastName}".Trim(),
+                            CustomerEmail = c2.Email,
+                            TargetSegment = "Loyal",
+                            ActionType = "VIP Loyalty Reward",
+                            DiscountPercent = 12m,
+                            RetentionDetails = "Offer custom tier discount on bulk corporate orders to reward loyalty.",
+                            ReasonCategory = "Increase Customer Lifetime Value",
+                            Status = "Approved",
+                            RequestedDate = DateTime.UtcNow.AddDays(-5),
+                            RequestedByUserId = 2,
+                            RequestedByUserName = "Manager User",
+                            ReviewedDate = DateTime.UtcNow.AddDays(-4),
+                            ReviewedByUserId = 1,
+                            ReviewedByUserName = "Admin User",
+                            ReviewAction = "Approved",
+                            AdminRemarks = "Approved. High-value customer with consistent transaction volume."
+                        });
+                    }
+
+                    if (seededCustomers.Count > 2)
+                    {
+                        var c3 = seededCustomers[2];
+                        sampleRequests.Add(new RetentionRequest
+                        {
+                            CompanyId = DefaultCompanyId,
+                            CustomerId = c3.CustomerId,
+                            CustomerName = $"{c3.FirstName} {c3.LastName}".Trim(),
+                            CustomerEmail = c3.Email,
+                            TargetSegment = "Inactive",
+                            ActionType = "Win-Back Campaign",
+                            DiscountPercent = 30m,
+                            RetentionDetails = "Requesting a 30% discount and free custom gift packaging for win-back.",
+                            ReasonCategory = "Monthly Sales Target Not Met",
+                            Status = "Rejected",
+                            RequestedDate = DateTime.UtcNow.AddDays(-8),
+                            RequestedByUserId = 2,
+                            RequestedByUserName = "Manager User",
+                            ReviewedDate = DateTime.UtcNow.AddDays(-7),
+                            ReviewedByUserId = 1,
+                            ReviewedByUserName = "Admin User",
+                            ReviewAction = "Rejected",
+                            RejectionDate = DateTime.UtcNow.AddDays(-7),
+                            RejectedByUserId = 1,
+                            RejectedByUserName = "Admin User",
+                            RejectionReason = "30% discount exceeds maximum allowed promotion margin for inactive accounts (max 15%).",
+                            AdminRemarks = "Please resubmit with standard 15% discount structure."
+                        });
+                    }
+
+                    if (sampleRequests.Count > 0)
+                    {
+                        await context.RetentionRequests.AddRangeAsync(sampleRequests);
+                        await context.SaveChangesAsync();
+                    }
                 }
             }
             catch (Exception ex)
@@ -4843,6 +5714,233 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 );
             }
         }
+
+        // =========================================================
+        // RETENTION REQUESTS & APPROVAL WORKFLOW
+        // =========================================================
+
+        public static readonly string[] RetentionReasonOptions = new[]
+        {
+            "Maximize Profit Margins",
+            "Lower Marketing Costs",
+            "Monthly Sales Target Not Met",
+            "Improve Customer Retention",
+            "Prevent Customer Churn",
+            "Increase Customer Lifetime Value",
+            "Promotional or Strategic Decision",
+            "Other"
+        };
+
+        public static async Task<RetentionRequest> CreateRetentionRequestAsync(
+            int customerId,
+            string targetSegment,
+            string actionType,
+            decimal discountPercent,
+            string retentionDetails,
+            string reasonCategory,
+            string? reasonCustomDetails = null,
+            int? companyId = null)
+        {
+            VerifyRetentionAccess("Manager", throwOnFailure: true);
+
+            var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
+            var currentUserId = SessionService.CurrentUser?.UserId ?? 0;
+            var currentUserName = SessionService.CurrentUser?.Username ?? "Manager";
+
+            if (string.IsNullOrWhiteSpace(reasonCategory))
+                throw new ArgumentException("Reason for Retention is required.", nameof(reasonCategory));
+
+            if (reasonCategory == "Other" && string.IsNullOrWhiteSpace(reasonCustomDetails))
+                throw new ArgumentException("Please provide specific details when selecting 'Other' as the retention reason.", nameof(reasonCustomDetails));
+
+            await using var context = CreateDbContext(targetCompanyId);
+            await EnsureRetentionTablesAndSeedsAsync(context);
+
+            var customer = await context.Customers.FindAsync(customerId);
+            if (customer == null)
+                throw new InvalidOperationException("Customer not found.");
+
+            var req = new RetentionRequest
+            {
+                CompanyId = targetCompanyId,
+                CustomerId = customerId,
+                CustomerName = $"{customer.FirstName} {customer.LastName}".Trim(),
+                CustomerEmail = customer.Email ?? "",
+                TargetSegment = string.IsNullOrWhiteSpace(targetSegment) ? "At Risk" : targetSegment,
+                ActionType = string.IsNullOrWhiteSpace(actionType) ? "Special Discount" : actionType,
+                DiscountPercent = discountPercent,
+                RetentionDetails = retentionDetails ?? "",
+                ReasonCategory = reasonCategory,
+                ReasonCustomDetails = reasonCustomDetails?.Trim(),
+                Status = "Pending",
+                RequestedDate = DateTime.UtcNow,
+                RequestedByUserId = currentUserId,
+                RequestedByUserName = currentUserName
+            };
+
+            context.RetentionRequests.Add(req);
+            await context.SaveChangesAsync();
+
+            await RecordAuditLogAsync(
+                userId: currentUserId,
+                actionType: "RETENTION_REQUEST_CREATED",
+                actionDesc: $"Retention request submitted for '{req.CustomerName}' ({req.ReasonCategory}) by {currentUserName}"
+            );
+
+            return req;
+        }
+
+        public static async Task<RetentionRequest> ApproveRetentionRequestAsync(
+            int requestId,
+            string? adminRemarks = null,
+            int? companyId = null)
+        {
+            VerifyRetentionAccess("Admin", throwOnFailure: true);
+
+            var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
+            var currentUserId = SessionService.CurrentUser?.UserId ?? 0;
+            var currentUserName = SessionService.CurrentUser?.Username ?? "Admin";
+            var currentRole = SessionService.CurrentUser?.Role ?? "Admin";
+
+            await using var context = CreateDbContext(targetCompanyId);
+            var req = await context.RetentionRequests.FindAsync(requestId);
+            if (req == null)
+                throw new InvalidOperationException("Retention request not found.");
+
+            if (req.Status != "Pending")
+                throw new InvalidOperationException($"Cannot approve request with status '{req.Status}'. Only pending requests can be reviewed.");
+
+            // Strict self-approval prevention: Manager or Requester cannot approve their own request
+            if (req.RequestedByUserId == currentUserId && currentRole != "SuperAdmin")
+            {
+                throw new InvalidOperationException("A Manager cannot approve their own Retention request.");
+            }
+
+            req.Status = "Approved";
+            req.ReviewedDate = DateTime.UtcNow;
+            req.ReviewedByUserId = currentUserId;
+            req.ReviewedByUserName = currentUserName;
+            req.ReviewAction = "Approved";
+            req.AdminRemarks = adminRemarks?.Trim();
+
+            await context.SaveChangesAsync();
+
+            await RecordAuditLogAsync(
+                userId: currentUserId,
+                actionType: "RETENTION_REQUEST_APPROVED",
+                actionDesc: $"Retention request #{req.RequestId} for '{req.CustomerName}' approved by {currentUserName}"
+            );
+
+            return req;
+        }
+
+        public static async Task<RetentionRequest> RejectRetentionRequestAsync(
+            int requestId,
+            string rejectionReason,
+            string? adminRemarks = null,
+            int? companyId = null)
+        {
+            VerifyRetentionAccess("Admin", throwOnFailure: true);
+
+            var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
+            var currentUserId = SessionService.CurrentUser?.UserId ?? 0;
+            var currentUserName = SessionService.CurrentUser?.Username ?? "Admin";
+            var currentRole = SessionService.CurrentUser?.Role ?? "Admin";
+
+            if (string.IsNullOrWhiteSpace(rejectionReason))
+                throw new ArgumentException("A rejection reason is required when rejecting a retention request.", nameof(rejectionReason));
+
+            await using var context = CreateDbContext(targetCompanyId);
+            var req = await context.RetentionRequests.FindAsync(requestId);
+            if (req == null)
+                throw new InvalidOperationException("Retention request not found.");
+
+            if (req.Status != "Pending")
+                throw new InvalidOperationException($"Cannot reject request with status '{req.Status}'. Only pending requests can be reviewed.");
+
+            if (req.RequestedByUserId == currentUserId && currentRole != "SuperAdmin")
+            {
+                throw new InvalidOperationException("A Manager cannot review their own Retention request.");
+            }
+
+            req.Status = "Rejected";
+            req.ReviewedDate = DateTime.UtcNow;
+            req.ReviewedByUserId = currentUserId;
+            req.ReviewedByUserName = currentUserName;
+            req.ReviewAction = "Rejected";
+            req.RejectionDate = DateTime.UtcNow;
+            req.RejectedByUserId = currentUserId;
+            req.RejectedByUserName = currentUserName;
+            req.RejectionReason = rejectionReason.Trim();
+            req.AdminRemarks = adminRemarks?.Trim();
+
+            await context.SaveChangesAsync();
+
+            await RecordAuditLogAsync(
+                userId: currentUserId,
+                actionType: "RETENTION_REQUEST_REJECTED",
+                actionDesc: $"Retention request #{req.RequestId} for '{req.CustomerName}' rejected by {currentUserName}: {rejectionReason.Trim()}"
+            );
+
+            return req;
+        }
+
+        public static async Task<List<RetentionRequest>> GetRetentionRequestsAsync(
+            int? companyId = null,
+            string? statusFilter = null,
+            DateTime? fromDate = null,
+            DateTime? toDate = null,
+            string? searchQuery = null)
+        {
+            var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
+            await using var context = CreateDbContext(targetCompanyId);
+            await EnsureRetentionTablesAndSeedsAsync(context);
+
+            var query = context.RetentionRequests
+                .Where(r => r.CompanyId == targetCompanyId)
+                .AsQueryable();
+
+            if (!string.IsNullOrWhiteSpace(statusFilter) && statusFilter != "All")
+            {
+                query = query.Where(r => r.Status == statusFilter);
+            }
+
+            if (fromDate.HasValue)
+            {
+                var f = fromDate.Value.Date;
+                query = query.Where(r => r.RequestedDate >= f);
+            }
+
+            if (toDate.HasValue)
+            {
+                var t = toDate.Value.Date.AddDays(1).AddTicks(-1);
+                query = query.Where(r => r.RequestedDate <= t);
+            }
+
+            if (!string.IsNullOrWhiteSpace(searchQuery))
+            {
+                var q = searchQuery.Trim().ToLower();
+                query = query.Where(r =>
+                    r.CustomerName.ToLower().Contains(q) ||
+                    r.CustomerEmail.ToLower().Contains(q) ||
+                    r.RequestedByUserName.ToLower().Contains(q) ||
+                    (r.ReviewedByUserName != null && r.ReviewedByUserName.ToLower().Contains(q)) ||
+                    r.ReasonCategory.ToLower().Contains(q) ||
+                    (r.ReasonCustomDetails != null && r.ReasonCustomDetails.ToLower().Contains(q))
+                );
+            }
+
+            return await query
+                .OrderByDescending(r => r.RequestedDate)
+                .ToListAsync();
+        }
+
+        public static async Task<RetentionRequest?> GetRetentionRequestByIdAsync(int requestId, int? companyId = null)
+        {
+            var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
+            await using var context = CreateDbContext(targetCompanyId);
+            return await context.RetentionRequests.FirstOrDefaultAsync(r => r.RequestId == requestId && r.CompanyId == targetCompanyId);
+        }
     }
 
     public record RetentionCustomerItem(
@@ -4894,7 +5992,10 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
         decimal Price,
         int DurationDays,
         int MaxUsers,
-        int ActiveSubscribedBusinesses
+        int ActiveSubscribedBusinesses,
+        bool AllowBranching = false,
+        int MaxBranches = 1,
+        bool IsActive = true
     );
 
     public record CompanySubscriptionListItem(
@@ -4910,7 +6011,9 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
         int StatusId,
         string StatusName,
         DateTime StartDate,
-        DateTime EndDate
+        DateTime EndDate,
+        bool AllowBranching = false,
+        int MaxBranches = 1
     );
 
     public record TermsAcceptanceItem(

@@ -195,6 +195,48 @@ namespace CC.Controls
             };
         }
 
+        public static void DrawStatusBadge(Graphics g, Rectangle cellBounds, string text, Color bg, Color fg, bool showDot = true)
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+
+            using var font = new Font(FontSans, 8.5F, FontStyle.Bold);
+            var textSize = TextRenderer.MeasureText(text, font, Size.Empty, TextFormatFlags.NoPadding);
+            int pillWidth = Math.Max(76, textSize.Width + (showDot ? 26 : 18));
+            int pillHeight = 24;
+            int pillX = cellBounds.Left + 16;
+            int pillY = cellBounds.Top + (cellBounds.Height - pillHeight) / 2;
+            var pillRect = new Rectangle(pillX, pillY, pillWidth, pillHeight);
+
+            using var bgBrush = new SolidBrush(bg);
+            g.FillRoundedRectangle(bgBrush, pillRect, 12);
+
+            using var borderPen = new Pen(Color.FromArgb(40, fg), 1f);
+            g.DrawRoundedRectangle(borderPen, pillRect, 12);
+
+            if (showDot)
+            {
+                int dotSize = 6;
+                int dotX = pillX + 9;
+                int dotY = pillY + (pillHeight - dotSize) / 2;
+                using var dotBrush = new SolidBrush(fg);
+                g.FillEllipse(dotBrush, dotX, dotY, dotSize, dotSize);
+            }
+
+            int textLeft = pillX + (showDot ? 20 : (pillWidth - textSize.Width) / 2);
+            var textRect = new Rectangle(textLeft, pillY, pillWidth - (textLeft - pillX), pillHeight);
+            TextRenderer.DrawText(g, text, font, textRect, fg,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+        }
+
+        public static void DrawActionLink(Graphics g, Rectangle cellBounds, string text = "View \u2192")
+        {
+            using var font = new Font(FontSans, 9F, FontStyle.Bold);
+            var rect = new Rectangle(cellBounds.Left, cellBounds.Top, cellBounds.Width - 16, cellBounds.Height);
+            TextRenderer.DrawText(g, text, font, rect, PrimaryMauve,
+                TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+        }
+
         public static void ApplyPrimaryButton(Button btn, int radius = 12)
         {
             btn.BackColor = Color.Transparent;
@@ -402,48 +444,9 @@ namespace CC.Controls
             }
         }
 
-        public static void DrawStatusBadge(Graphics g, Rectangle cellBounds, string text, Color bg, Color fg, bool showDot = true)
-        {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
-
-            using var font = new Font(FontSans, 8.5F, FontStyle.Bold);
-            var textSize = TextRenderer.MeasureText(text, font, Size.Empty, TextFormatFlags.NoPadding);
-            int pillWidth = Math.Max(76, textSize.Width + (showDot ? 26 : 18));
-            int pillHeight = 24;
-            int pillX = cellBounds.Left + 16;
-            int pillY = cellBounds.Top + (cellBounds.Height - pillHeight) / 2;
-            var pillRect = new Rectangle(pillX, pillY, pillWidth, pillHeight);
-
-            using var bgBrush = new SolidBrush(bg);
-            g.FillRoundedRectangle(bgBrush, pillRect, 12);
-
-            using var borderPen = new Pen(Color.FromArgb(40, fg), 1f);
-            g.DrawRoundedRectangle(borderPen, pillRect, 12);
-
-            if (showDot)
-            {
-                int dotSize = 6;
-                int dotX = pillX + 9;
-                int dotY = pillY + (pillHeight - dotSize) / 2;
-                using var dotBrush = new SolidBrush(fg);
-                g.FillEllipse(dotBrush, dotX, dotY, dotSize, dotSize);
-            }
-
-            int textLeft = pillX + (showDot ? 20 : (pillWidth - textSize.Width) / 2);
-            var textRect = new Rectangle(textLeft, pillY, pillWidth - (textLeft - pillX), pillHeight);
-            TextRenderer.DrawText(g, text, font, textRect, fg,
-                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
-        }
-
-        public static void DrawActionLink(Graphics g, Rectangle cellBounds, string text = "View \u2192")
-        {
-            using var font = new Font(FontSans, 9F, FontStyle.Bold);
-            var rect = new Rectangle(cellBounds.Left, cellBounds.Top, cellBounds.Width - 16, cellBounds.Height);
-            TextRenderer.DrawText(g, text, font, rect, PrimaryMauve,
-                TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
-        }
-
+        /// <summary>
+        /// Briefly highlights the specified row (e.g. newly added record) with a soft warm tint for durationMs (default 3 seconds).
+        /// </summary>
         public static void HighlightNewRow(DataGridView grid, int rowIndex = 0, int durationMs = 3000)
         {
             if (grid == null || grid.IsDisposed || grid.Rows.Count <= rowIndex || rowIndex < 0) return;
@@ -451,6 +454,7 @@ namespace CC.Controls
             {
                 var row = grid.Rows[rowIndex];
                 var originalColor = row.DefaultCellStyle.BackColor;
+                // Soft warm gold/amber highlight #FEF3C7
                 row.DefaultCellStyle.BackColor = Color.FromArgb(254, 243, 199);
                 grid.InvalidateRow(rowIndex);
 
@@ -469,6 +473,7 @@ namespace CC.Controls
             }
             catch
             {
+                // Graceful fallback
             }
         }
     }

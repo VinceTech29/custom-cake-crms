@@ -17,6 +17,12 @@ namespace CC.Domain.Entities
 
         public int MaxUsers { get; set; }
 
+        public bool AllowBranching { get; set; }
+
+        public int MaxBranches { get; set; } = 1;
+
+        public bool IsActive { get; set; } = true;
+
         // Navigation
         public ICollection<Subscription> Subscriptions { get; set; }
             = new List<Subscription>();

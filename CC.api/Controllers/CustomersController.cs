@@ -1,5 +1,6 @@
 using CC.Domain.Entities;
 using CC.infrastructure.Data;
+using CC.api.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -16,18 +17,38 @@ namespace CC.api.Controllers
             _context = context;
         }
 
-        // GET: api/customers
+        // GET: api/customers?page=1&pageSize=10&search=...
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<CustomerDto>>> GetCustomers(
-            [FromHeader(Name = "X-Company-Id")] int companyId)
+        public async Task<ActionResult<PagedResult<CustomerDto>>> GetCustomers(
+            [FromHeader(Name = "X-Company-Id")] int? companyId,
+            [FromQuery] string? search = null,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 10)
         {
-            if (companyId <= 0)
-                return BadRequest("A valid company ID is required.");
+            // Default and strictly enforce max 10 rows per page
+            pageSize = 10;
+            page = Math.Max(1, page);
 
-            var customers = await _context.Customers
-                .AsNoTracking()
-                .Where(c => c.CompanyId == companyId)
+            IQueryable<Customer> query = _context.Customers.AsNoTracking();
+
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                string s = search.Trim().ToLower();
+                query = query.Where(c =>
+                    c.FirstName.ToLower().Contains(s) ||
+                    c.LastName.ToLower().Contains(s) ||
+                    c.Email.ToLower().Contains(s) ||
+                    c.Phone.ToLower().Contains(s));
+            }
+
+            int totalCount = await query.CountAsync();
+            int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
+            if (page > totalPages) page = totalPages;
+
+            var items = await query
                 .OrderByDescending(c => c.RegisteredDate)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
                 .Select(c => new CustomerDto
                 {
                     CustomerId = c.CustomerId,
@@ -43,7 +64,13 @@ namespace CC.api.Controllers
                 })
                 .ToListAsync();
 
-            return Ok(customers);
+            return Ok(new PagedResult<CustomerDto>
+            {
+                Items = items,
+                Page = page,
+                PageSize = pageSize,
+                TotalCount = totalCount
+            });
         }
 
         // GET: api/customers/1

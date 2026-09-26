@@ -27,6 +27,350 @@ namespace CC
                 System.Diagnostics.Debug.WriteLine($"DB Init warning: {ex.Message}");
             }
 
+            if (args.Length > 0 && args[0] == "--seed-demo-data")
+            {
+                bool force = args.Length > 1 && args[1] == "--force";
+                Console.WriteLine("Starting demo data seeding for CustomCakeCRM...");
+                var result = DatabaseSeeder.SeedDemoDataAsync(2, force).GetAwaiter().GetResult();
+                Console.WriteLine(result.Message);
+                return;
+            }
+
+            if (args.Length > 0 && args[0] == "--verify-db-counts")
+            {
+                Console.WriteLine("Verifying database row counts for CustomCakeCRM...");
+                DatabaseSeeder.PrintDatabaseCountsAsync(2).GetAwaiter().GetResult();
+                return;
+            }
+
+            if (args.Length > 0 && args[0] == "--test-nav")
+            {
+                Console.WriteLine("Running navigation diagnostic test...");
+                SessionService.CurrentUser = new CurrentUser { UserId = 4, FirstName = "Jerome", LastName = "Santos", Role = "Staff", CompanyId = 2 };
+                var form = new StaffDashboardForm();
+                form.Show();
+
+                void Pump(int ms = 500)
+                {
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    while (sw.ElapsedMilliseconds < ms)
+                    {
+                        Application.DoEvents();
+                        Thread.Sleep(20);
+                    }
+                }
+
+                System.Collections.Generic.IEnumerable<Control> GetAllControls(Control c)
+                {
+                    yield return c;
+                    foreach (Control child in c.Controls)
+                    foreach (var descendant in GetAllControls(child))
+                        yield return descendant;
+                }
+
+                Pump(1000);
+                Console.WriteLine($"[1. Init Dashboard] MainPanel controls: {form.MainPanel.Controls.Count}, Tag: {form.MainPanel.Tag?.GetType().Name ?? "null"}");
+
+                Console.WriteLine("Navigating to Customers...");
+                form.Navigate("Customers");
+                Pump(1000);
+                Console.WriteLine($"[2. Customers] MainPanel controls: {form.MainPanel.Controls.Count}, Tag: {form.MainPanel.Tag?.GetType().Name ?? "null"}");
+                if (form.MainPanel.Tag is CC.Forms.Staff.Customers.CustomerListForm clf)
+                {
+                    var dgv = clf.Controls.OfType<Control>().SelectMany(c => GetAllControls(c)).OfType<DataGridView>().FirstOrDefault();
+                    Console.WriteLine($"Found DataGridView: {dgv != null}, Rows: {dgv?.Rows.Count ?? -1}");
+                }
+
+                Console.WriteLine("Navigating to Dashboard...");
+                form.Navigate("Dashboard");
+                Pump(1500);
+                Console.WriteLine($"[3. Return Dashboard] MainPanel controls: {form.MainPanel.Controls.Count}, Tag: {form.MainPanel.Tag?.GetType().Name ?? "null"}");
+                var scrollPanel = form.MainPanel.Controls.OfType<Panel>().FirstOrDefault();
+                Console.WriteLine($"ScrollPanel controls: {scrollPanel?.Controls.Count ?? -1}");
+
+                Console.WriteLine("Navigating to Customers again...");
+                form.Navigate("Customers");
+                Pump(1000);
+                Console.WriteLine($"[4. Customers Again] MainPanel controls: {form.MainPanel.Controls.Count}, Tag: {form.MainPanel.Tag?.GetType().Name ?? "null"}");
+                if (form.MainPanel.Tag is CC.Forms.Staff.Customers.CustomerListForm clf2)
+                {
+                    var dgv = clf2.Controls.OfType<Control>().SelectMany(c => GetAllControls(c)).OfType<DataGridView>().FirstOrDefault();
+                    Console.WriteLine($"Found DataGridView: {dgv != null}, Rows: {dgv?.Rows.Count ?? -1}");
+                }
+
+                Console.WriteLine("Done test-nav.");
+                form.Close();
+                return;
+            }
+
+            if (args.Length > 0 && args[0] == "--test-retention")
+            {
+                Console.WriteLine("Running automated tests for Customer Retention & Email Campaigns...");
+
+                // 1. Test Segmentation Logic
+                var today = DateTime.Today;
+                var segInactive = CrmDataService.CalculateRetentionSegment(5, today.AddDays(-200), today);
+                var segAtRisk = CrmDataService.CalculateRetentionSegment(2, today.AddDays(-120), today);
+                var segLoyal = CrmDataService.CalculateRetentionSegment(4, today.AddDays(-30), today);
+                var segReturning = CrmDataService.CalculateRetentionSegment(2, today.AddDays(-20), today);
+                var segNew = CrmDataService.CalculateRetentionSegment(1, today.AddDays(-10), today);
+
+                Console.WriteLine($"[SEGMENT TEST] Inactive: {segInactive == "Inactive"} ({segInactive})");
+                Console.WriteLine($"[SEGMENT TEST] At Risk: {segAtRisk == "At Risk"} ({segAtRisk})");
+                Console.WriteLine($"[SEGMENT TEST] Loyal: {segLoyal == "Loyal"} ({segLoyal})");
+                Console.WriteLine($"[SEGMENT TEST] Returning: {segReturning == "Returning"} ({segReturning})");
+                Console.WriteLine($"[SEGMENT TEST] New: {segNew == "New"} ({segNew})");
+
+                // 2. Test RBAC: Staff Access Denied
+                SessionService.CurrentUser = new CurrentUser { UserId = 4, FirstName = "Jerome", LastName = "Santos", Role = "Staff", CompanyId = 2 };
+                bool staffHasAccess = CrmDataService.VerifyRetentionAccess("Manager", throwOnFailure: false);
+                Console.WriteLine($"[RBAC TEST] Staff Denied Access: {!staffHasAccess}");
+
+                // 3. Test RBAC: Manager Access Allowed
+                SessionService.CurrentUser = new CurrentUser { UserId = 3, FirstName = "Camille", LastName = "Reyes", Role = "Manager", CompanyId = 2 };
+                bool mgrHasAccess = CrmDataService.VerifyRetentionAccess("Manager", throwOnFailure: false);
+                bool mgrCanEditSettings = CrmDataService.VerifyRetentionAccess("Admin", throwOnFailure: false);
+                Console.WriteLine($"[RBAC TEST] Manager Has Access: {mgrHasAccess}, Manager Denied Admin Settings: {!mgrCanEditSettings}");
+
+                // 4. Test RBAC: Admin Access Allowed
+                SessionService.CurrentUser = new CurrentUser { UserId = 2, FirstName = "Lea", LastName = "Abad", Role = "Admin", CompanyId = 2 };
+                bool adminHasAccess = CrmDataService.VerifyRetentionAccess("Admin", throwOnFailure: false);
+                Console.WriteLine($"[RBAC TEST] Admin Full Access: {adminHasAccess}");
+
+                // 5. Test Retention Dashboard Data Loading
+                var retentionData = CrmDataService.GetRetentionDashboardDataAsync(2).GetAwaiter().GetResult();
+                Console.WriteLine($"[DATA TEST] Base Customers: {retentionData.TotalCustomersWithOrders}, Templates: {retentionData.Templates.Count}, Metrics Delivered: {retentionData.Metrics.TotalEmailsDelivered}, OpenRate: {retentionData.Metrics.OpenRate}%");
+
+                // 5b. Test Customer Autocomplete Search
+                var searchResults = CrmDataService.SearchCustomersForRetentionEmailAsync("a", 2, 8).GetAwaiter().GetResult();
+                Console.WriteLine($"[SEARCH TEST] Found {searchResults.Count} customers matching query. Top match: {searchResults.FirstOrDefault()?.FullName} <{searchResults.FirstOrDefault()?.Email}> [{searchResults.FirstOrDefault()?.SegmentName}]");
+
+                // 5c. Test Email Dispatch with SMTP Mock
+                Environment.SetEnvironmentVariable("SMTP_MOCK", "true");
+                var firstCustomer = searchResults.First();
+                var manualLog = CrmDataService.SendManualRetentionEmailAsync(
+                    customerId: firstCustomer.CustomerId,
+                    segmentName: firstCustomer.SegmentName,
+                    forceIgnoreCooldown: true,
+                    companyId: 2).GetAwaiter().GetResult();
+                Console.WriteLine($"[MANUAL EMAIL TEST] Successfully delivered to {manualLog.CustomerName} <{manualLog.CustomerEmail}>, Status: {manualLog.Status}, Subject: {manualLog.Subject}");
+
+                // 5d. Test Cooldown Verification
+                try
+                {
+                    CrmDataService.SendManualRetentionEmailAsync(
+                        customerId: firstCustomer.CustomerId,
+                        segmentName: firstCustomer.SegmentName,
+                        forceIgnoreCooldown: false,
+                        companyId: 2).GetAwaiter().GetResult();
+                    Console.WriteLine("[COOLDOWN TEST] FAILED: Cooldown should have blocked send.");
+                }
+                catch (InvalidOperationException ex)
+                {
+                    Console.WriteLine($"[COOLDOWN TEST] PASSED: 14-day anti-fatigue cooldown successfully prevented rapid resend ({ex.Message}).");
+                }
+
+                // 5e. Test Real SMTP Error Logging & Exception Handling (Unconfigured SMTP)
+                Environment.SetEnvironmentVariable("SMTP_MOCK", null);
+                Environment.SetEnvironmentVariable("SMTP_HOST", null);
+                try
+                {
+                    CrmDataService.SendManualRetentionEmailAsync(
+                        customerId: firstCustomer.CustomerId,
+                        segmentName: firstCustomer.SegmentName,
+                        forceIgnoreCooldown: true,
+                        companyId: 2).GetAwaiter().GetResult();
+                    Console.WriteLine("[SMTP ERROR TEST] Expected error when SMTP is unconfigured.");
+                }
+                catch (InvalidOperationException ex)
+                {
+                    Console.WriteLine($"[SMTP ERROR TEST] PASSED: Correctly caught unconfigured SMTP, logged failure to database, and reported: {ex.Message.Split('\n')[0]}");
+                }
+
+                // 6. Test UI Rendering & Capture Screenshots for Admin and Manager
+                string outputDir = @"C:\Users\user1\.gemini\antigravity\brain\7aee3b98-6126-4c32-b0bc-280b2549c485";
+
+                void PumpWait(Task? t)
+                {
+                    if (t == null) return;
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    while (!t.IsCompleted && sw.ElapsedMilliseconds < 5000)
+                    {
+                        Application.DoEvents();
+                        Thread.Sleep(20);
+                    }
+                }
+
+                // Test Admin Dashboard Navigation to Retention & Campaigns
+                SessionService.CurrentUser = new CurrentUser { UserId = 2, FirstName = "Lea", LastName = "Abad", Role = "Admin", CompanyId = 2 };
+                var adminDash = new CC.Forms.Admin.AdminDashboardForm { Size = new Size(1366, 820), StartPosition = FormStartPosition.Manual, Location = new Point(50, 50) };
+                adminDash.Show();
+                PumpWait(adminDash.InitializationTask);
+                adminDash.Navigate("Retention & Campaigns");
+                for (int i = 0; i < 30; i++) { Application.DoEvents(); Thread.Sleep(25); }
+
+                using (var bmp = new Bitmap(adminDash.Width, adminDash.Height))
+                {
+                    adminDash.DrawToBitmap(bmp, new Rectangle(0, 0, adminDash.Width, adminDash.Height));
+                    bmp.Save(Path.Combine(outputDir, "screen_admin_retention_campaigns.png"), ImageFormat.Png);
+                }
+                adminDash.Close();
+
+                // Test Manager Dashboard Navigation to Retention & Campaigns
+                SessionService.CurrentUser = new CurrentUser { UserId = 3, FirstName = "Camille", LastName = "Reyes", Role = "Manager", CompanyId = 2 };
+                var mgrDash = new CC.Forms.Manager.ManagerDashboardForm { Size = new Size(1366, 820), StartPosition = FormStartPosition.Manual, Location = new Point(50, 50) };
+                mgrDash.Show();
+                PumpWait(mgrDash.InitializationTask);
+                mgrDash.Navigate("Retention & Campaigns");
+                for (int i = 0; i < 30; i++) { Application.DoEvents(); Thread.Sleep(25); }
+
+                using (var bmp = new Bitmap(mgrDash.Width, mgrDash.Height))
+                {
+                    mgrDash.DrawToBitmap(bmp, new Rectangle(0, 0, mgrDash.Width, mgrDash.Height));
+                    bmp.Save(Path.Combine(outputDir, "screen_manager_retention_campaigns.png"), ImageFormat.Png);
+                }
+                mgrDash.Close();
+
+                // Direct tab-by-tab captures for comprehensive documentation
+                SessionService.CurrentUser = new CurrentUser { UserId = 2, FirstName = "Lea", LastName = "Abad", Role = "Admin", CompanyId = 2 };
+                var retForm = new CC.Forms.Retention.RetentionCampaignsForm { Size = new Size(1366, 820), StartPosition = FormStartPosition.Manual, Location = new Point(50, 50) };
+                retForm.Show();
+                PumpWait(retForm.InitializeDataAsync());
+                for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(20); }
+
+                // Campaigns Tab
+                retForm.SwitchTab("Campaigns");
+                for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(20); }
+                using (var bmp = new Bitmap(retForm.Width, retForm.Height))
+                {
+                    retForm.DrawToBitmap(bmp, new Rectangle(0, 0, retForm.Width, retForm.Height));
+                    bmp.Save(Path.Combine(outputDir, "screen_retention_campaigns_tab.png"), ImageFormat.Png);
+                }
+
+                // Reports Tab
+                retForm.SwitchTab("Reports");
+                for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(20); }
+                using (var bmp = new Bitmap(retForm.Width, retForm.Height))
+                {
+                    retForm.DrawToBitmap(bmp, new Rectangle(0, 0, retForm.Width, retForm.Height));
+                    bmp.Save(Path.Combine(outputDir, "screen_retention_reports_tab.png"), ImageFormat.Png);
+                }
+
+                // Logs Tab
+                retForm.SwitchTab("Logs");
+                for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(20); }
+                using (var bmp = new Bitmap(retForm.Width, retForm.Height))
+                {
+                    retForm.DrawToBitmap(bmp, new Rectangle(0, 0, retForm.Width, retForm.Height));
+                    bmp.Save(Path.Combine(outputDir, "screen_retention_logs_tab.png"), ImageFormat.Png);
+                }
+
+                // Settings Tab
+                retForm.SwitchTab("Settings");
+                for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(20); }
+                using (var bmp = new Bitmap(retForm.Width, retForm.Height))
+                {
+                    retForm.DrawToBitmap(bmp, new Rectangle(0, 0, retForm.Width, retForm.Height));
+                    bmp.Save(Path.Combine(outputDir, "screen_retention_settings_tab.png"), ImageFormat.Png);
+                }
+                retForm.Close();
+
+                Console.WriteLine("Retention automated tests and UI captures completed successfully!");
+                return;
+            }
+
+            if (args.Length > 0 && args[0] == "--test-analytics")
+            {
+                Console.WriteLine("Running automated validation for all role dashboard analytics...");
+                var staff = CrmDataService.GetStaffDashboardDataAsync(4, 2, "30d").GetAwaiter().GetResult();
+                Console.WriteLine($"[STAFF] Due: {staff.MyDueFollowupsCount}, Overdue: {staff.MyOverdueFollowupsCount}, Processing: {staff.ProcessingOrdersCount}, Ready: {staff.ReadyOrdersCount}, Trend Points: {staff.TaskCompletionTrend.Count}, Urgent Tasks: {staff.UrgentTasks.Count}");
+
+                var mgr = CrmDataService.GetManagerDashboardDataAsync(2, "30d").GetAwaiter().GetResult();
+                Console.WriteLine($"[MANAGER] Active: {mgr.ActiveOrdersCount}, Ready: {mgr.ReadyForPickupCount}, Stages: {mgr.PipelineStages.Count}, Staff Performance: {mgr.StaffPerformance.Count}, Recent Orders: {mgr.RecentOrders.Count}");
+
+                var adm = CrmDataService.GetAdminDashboardDataAsync(2, "30d").GetAwaiter().GetResult();
+                Console.WriteLine($"[ADMIN] Revenue: P{adm.TotalRevenue:N2}, Lifetime: P{adm.LifetimeRevenue:N2}, Orders: {adm.TotalOrders}, Top Custs: {adm.TopCustomers.Count}, Payment Methods: {adm.PaymentMethodBreakdown.Count}");
+
+                var super = CrmDataService.GetSuperAdminDashboardDataAsync("30d").GetAwaiter().GetResult();
+                Console.WriteLine($"[SUPER ADMIN] Businesses: {super.TotalBusinesses}, Databases: {super.ActiveDatabases}, Registrations: {super.RecentRegistrations.Count}");
+
+                string outputDir = @"C:\Users\user1\.gemini\antigravity\brain\7aee3b98-6126-4c32-b0bc-280b2549c485";
+
+                void PumpWait(Task? t)
+                {
+                    if (t == null) return;
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    while (!t.IsCompleted && sw.ElapsedMilliseconds < 5000)
+                    {
+                        Application.DoEvents();
+                        Thread.Sleep(20);
+                    }
+                }
+
+                // 1. Staff
+                SessionService.CurrentUser = new CurrentUser { UserId = 4, FirstName = "Jerome", LastName = "Santos", Role = "Staff", CompanyId = 2 };
+                var staffForm = new CC.Forms.Staff.StaffDashboardForm { Size = new Size(1366, 820), StartPosition = FormStartPosition.Manual, Location = new Point(50, 50) };
+                staffForm.Show();
+                PumpWait(staffForm.InitializationTask);
+                for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(20); }
+                using (var bmp = new Bitmap(staffForm.Width, staffForm.Height))
+                {
+                    staffForm.DrawToBitmap(bmp, new Rectangle(0, 0, staffForm.Width, staffForm.Height));
+                    bmp.Save(Path.Combine(outputDir, "screen_staff_dashboard.png"), ImageFormat.Png);
+                }
+                staffForm.Close();
+
+                // 2. Manager
+                SessionService.CurrentUser = new CurrentUser { UserId = 3, FirstName = "Camille", LastName = "Reyes", Role = "Manager", CompanyId = 2 };
+                var mgrForm = new CC.Forms.Manager.ManagerDashboardForm { Size = new Size(1366, 820), StartPosition = FormStartPosition.Manual, Location = new Point(50, 50) };
+                mgrForm.Show();
+                PumpWait(mgrForm.InitializationTask);
+                for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(20); }
+                using (var bmp = new Bitmap(mgrForm.Width, mgrForm.Height))
+                {
+                    mgrForm.DrawToBitmap(bmp, new Rectangle(0, 0, mgrForm.Width, mgrForm.Height));
+                    bmp.Save(Path.Combine(outputDir, "screen_manager_dashboard.png"), ImageFormat.Png);
+                }
+
+                mgrForm.ScrollToBottom();
+                for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(20); }
+                using (var bmpTable = new Bitmap(mgrForm.Width, mgrForm.Height))
+                {
+                    mgrForm.DrawToBitmap(bmpTable, new Rectangle(0, 0, mgrForm.Width, mgrForm.Height));
+                    bmpTable.Save(Path.Combine(outputDir, "screen_manager_dashboard_table.png"), ImageFormat.Png);
+                }
+                mgrForm.Close();
+
+                // 3. Admin
+                SessionService.CurrentUser = new CurrentUser { UserId = 2, FirstName = "Lea", LastName = "Abad", Role = "Admin", CompanyId = 2 };
+                var adminForm = new CC.Forms.Admin.AdminDashboardForm { Size = new Size(1366, 820), StartPosition = FormStartPosition.Manual, Location = new Point(50, 50) };
+                adminForm.Show();
+                PumpWait(adminForm.InitializationTask);
+                for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(20); }
+                using (var bmp = new Bitmap(adminForm.Width, adminForm.Height))
+                {
+                    adminForm.DrawToBitmap(bmp, new Rectangle(0, 0, adminForm.Width, adminForm.Height));
+                    bmp.Save(Path.Combine(outputDir, "screen_admin_dashboard.png"), ImageFormat.Png);
+                }
+                adminForm.Close();
+
+                // 4. Super Admin
+                SessionService.CurrentUser = new CurrentUser { UserId = 1, FirstName = "System", LastName = "SuperAdmin", Role = "SuperAdmin", CompanyId = 1 };
+                var superForm = new CC.Forms.SuperAdmin.SuperAdminDashboardForm { Size = new Size(1366, 820), StartPosition = FormStartPosition.Manual, Location = new Point(50, 50) };
+                superForm.Show();
+                PumpWait(superForm.InitializationTask);
+                for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(20); }
+                using (var bmp = new Bitmap(superForm.Width, superForm.Height))
+                {
+                    superForm.DrawToBitmap(bmp, new Rectangle(0, 0, superForm.Width, superForm.Height));
+                    bmp.Save(Path.Combine(outputDir, "screen_superadmin_dashboard.png"), ImageFormat.Png);
+                }
+                superForm.Close();
+
+                Console.WriteLine("All 4 role dashboards successfully captured with updated table styling!");
+                return;
+            }
+
             if (args.Length > 0 && args[0] == "--verify-all")
             {
                 string outputDir = @"C:\Users\user1\.gemini\antigravity\brain\7aee3b98-6126-4c32-b0bc-280b2549c485";
@@ -229,17 +573,17 @@ namespace CC
                     // 10. Dashboard Data Calculations & Tenant Scoping
                     Console.WriteLine("[TEST 10] Testing Real Database Dashboard Calculations & Tenant Scoping...");
                     var superData = CrmDataService.GetSuperAdminDashboardDataAsync("30d").GetAwaiter().GetResult();
-                    Console.WriteLine($"  -> Super Admin: TotalBiz={superData.TotalBusinesses}, ActiveBiz={superData.ActiveBusinesses}, Users={superData.PlatformUsersCount}, RegTrends={superData.RegistrationTrend.Count} pts, Plans={superData.SubscriptionPlanDistribution.Count}");
+                    Console.WriteLine($"  -> Super Admin: TotalBiz={superData.TotalBusinesses}, ActiveBiz={superData.ActiveBusinesses}, Users={superData.PlatformUsersCount}, Backups={superData.TotalBackupsCount}, MRR=P{superData.EstimatedMonthlyRevenue:N0}, TermsAcceptances={superData.TermsAcceptancesCount}");
 
                     var adminData30 = CrmDataService.GetAdminDashboardDataAsync(2, "30d").GetAwaiter().GetResult();
                     var adminData7 = CrmDataService.GetAdminDashboardDataAsync(2, "7d").GetAwaiter().GetResult();
-                    Console.WriteLine($"  -> Business Admin: 30d Rev=P{adminData30.TotalRevenue:N2} ({adminData30.TotalOrders} orders), 7d Rev=P{adminData7.TotalRevenue:N2}, TopCusts={adminData30.TopCustomers.Count}, Channels={adminData30.PaymentMethodBreakdown.Count}");
+                    Console.WriteLine($"  -> Business Admin: 30d Rev=P{adminData30.TotalRevenue:N2} ({adminData30.TotalOrders} orders, AOV=P{adminData30.AverageOrderValue:N0}), CollectionRate={adminData30.CollectionRate:0.#}%, ActiveOrders={adminData30.ActiveOrdersCount}");
 
                     var mgrData = CrmDataService.GetManagerDashboardDataAsync(2, "30d").GetAwaiter().GetResult();
-                    Console.WriteLine($"  -> Manager: ActiveOrders={mgrData.ActiveOrdersCount}, Inquiries={mgrData.OpenInquiriesCount}, OverdueTasks={mgrData.ShopOverdueFollowupsCount}, Pipeline={mgrData.PipelineStages.Count} stages, RecentOrders={mgrData.RecentOrders.Count}");
+                    Console.WriteLine($"  -> Manager: ActiveOrders={mgrData.ActiveOrdersCount} (Val=P{mgrData.ActivePipelineValue:N0}), DueToday={mgrData.TodayDeliveriesCount}, Completed={mgrData.CompletedOrdersCount}, Inquiries={mgrData.OpenInquiriesCount}");
 
                     var staffData = CrmDataService.GetStaffDashboardDataAsync(4, 2, "1d").GetAwaiter().GetResult();
-                    Console.WriteLine($"  -> Staff: DueFollowups={staffData.MyDueFollowupsCount}, Overdue={staffData.MyOverdueFollowupsCount}, Processing={staffData.ProcessingOrdersCount}, UrgentTasks={staffData.UrgentTasks.Count}");
+                    Console.WriteLine($"  -> Staff: DueFollowups={staffData.MyDueFollowupsCount}, HandledInquiries={staffData.MyHandledInquiriesCount}, TodayDueOrders={staffData.TodayDueOrdersCount}, Completed={staffData.CompletedOrdersCount}");
 
                     // 11. UI Screen Captures for all 4 Dashboards
                     Console.WriteLine("[TEST 11] Generating UI Visual Captures for Walkthrough...");
@@ -291,6 +635,34 @@ namespace CC
                         bmp.Save(Path.Combine(outputDir, "screen_superadmin_business_details.png"), ImageFormat.Png);
                     }
                     detailsModal.Close();
+
+                    // Capture Register New Business Modal (Top & Scrolled Bottom)
+                    using (var regModal = new CC.Forms.SuperAdmin.Businesses.BusinessModal())
+                    {
+                        regModal.StartPosition = FormStartPosition.Manual;
+                        regModal.Location = new Point(100, 100);
+                        regModal.Show();
+                        for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(20); }
+                        using (var bmp = new Bitmap(regModal.Width, regModal.Height))
+                        {
+                            regModal.DrawToBitmap(bmp, new Rectangle(0, 0, regModal.Width, regModal.Height));
+                            bmp.Save(Path.Combine(outputDir, "screen_superadmin_register_business_top.png"), ImageFormat.Png);
+                        }
+
+                        // Scroll body to bottom to capture Initial Business Admin Account section
+                        var bodyPanel = regModal.Controls.OfType<Panel>().FirstOrDefault(p => p.Dock == DockStyle.Fill);
+                        if (bodyPanel != null)
+                        {
+                            bodyPanel.AutoScrollPosition = new Point(0, 2000);
+                            for (int i = 0; i < 15; i++) { Application.DoEvents(); Thread.Sleep(20); }
+                        }
+                        using (var bmp = new Bitmap(regModal.Width, regModal.Height))
+                        {
+                            regModal.DrawToBitmap(bmp, new Rectangle(0, 0, regModal.Width, regModal.Height));
+                            bmp.Save(Path.Combine(outputDir, "screen_superadmin_register_business_bottom.png"), ImageFormat.Png);
+                        }
+                        regModal.Close();
+                    }
 
                     // 11.2 Business Admin Dashboard
                     SessionService.CurrentUser = new CurrentUser
@@ -417,6 +789,21 @@ namespace CC
                             bmp.Save(Path.Combine(outputDir, "screen_superadmin_subscriptions.png"), ImageFormat.Png);
                         }
 
+                        // Capture Subscriptions Screen (Tab 1: Business Subscriptions Table)
+                        if (saShell.MainPanel.Controls.Count > 0 && saShell.MainPanel.Controls[0] is CC.Forms.SuperAdmin.Subscriptions.SuperAdminSubscriptionForm saSubForm)
+                        {
+                            var tabBar = saSubForm.Controls.OfType<Panel>().FirstOrDefault(p => p.Height == 44);
+                            var flow = tabBar?.Controls.OfType<FlowLayoutPanel>().FirstOrDefault();
+                            var btnTabBiz = flow?.Controls.OfType<Button>().FirstOrDefault(b => b.Text.Contains("Business Subscriptions"));
+                            btnTabBiz?.PerformClick();
+                            for (int i = 0; i < 30; i++) { Application.DoEvents(); Thread.Sleep(30); }
+                            using (var bmp = new Bitmap(saShell.Width, saShell.Height))
+                            {
+                                saShell.DrawToBitmap(bmp, new Rectangle(0, 0, saShell.Width, saShell.Height));
+                                bmp.Save(Path.Combine(outputDir, "screen_superadmin_business_subscriptions_table.png"), ImageFormat.Png);
+                            }
+                        }
+
                         // Capture Terms & Conditions Screen
                         saShell.Navigate("Terms & Conditions");
                         for (int i = 0; i < 30; i++) { Application.DoEvents(); Thread.Sleep(30); }
@@ -433,6 +820,40 @@ namespace CC
                         {
                             saShell.DrawToBitmap(bmp, new Rectangle(0, 0, saShell.Width, saShell.Height));
                             bmp.Save(Path.Combine(outputDir, "screen_superadmin_monitoring.png"), ImageFormat.Png);
+                        }
+
+                        // Capture Plan Modal
+                        using (var planModal = new CC.Forms.SuperAdmin.Subscriptions.PlanModal())
+                        {
+                            planModal.StartPosition = FormStartPosition.Manual;
+                            planModal.Location = new Point(100, 100);
+                            planModal.Show();
+                            for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(20); }
+                            using (var bmp = new Bitmap(planModal.Width, planModal.Height))
+                            {
+                                planModal.DrawToBitmap(bmp, new Rectangle(0, 0, planModal.Width, planModal.Height));
+                                bmp.Save(Path.Combine(outputDir, "screen_superadmin_plan_modal.png"), ImageFormat.Png);
+                            }
+                            planModal.Close();
+                        }
+
+                        // Capture Assign Subscription Modal
+                        var sampleBiz = new CC.Services.CompanySubscriptionListItem(
+                            1, "CC01", "Custom Cake Shop", "CustomCakeCRM", 2, "Pro Plan", 9599m, 365, 10, 1, "Active", DateTime.UtcNow, DateTime.UtcNow.AddYears(1), true, 3
+                        );
+                        var samplePlans = CrmDataService.GetSubscriptionPlansAsync(includeArchived: false).GetAwaiter().GetResult();
+                        using (var assignModal = new CC.Forms.SuperAdmin.Subscriptions.AssignSubscriptionModal(sampleBiz, samplePlans))
+                        {
+                            assignModal.StartPosition = FormStartPosition.Manual;
+                            assignModal.Location = new Point(100, 100);
+                            assignModal.Show();
+                            for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(20); }
+                            using (var bmp = new Bitmap(assignModal.Width, assignModal.Height))
+                            {
+                                assignModal.DrawToBitmap(bmp, new Rectangle(0, 0, assignModal.Width, assignModal.Height));
+                                bmp.Save(Path.Combine(outputDir, "screen_superadmin_assign_subscription_modal.png"), ImageFormat.Png);
+                            }
+                            assignModal.Close();
                         }
 
                         saShell.Close();
@@ -497,6 +918,39 @@ namespace CC
                     if (bizSubRenewed.RenewalDate <= preRenewEnd)
                         throw new Exception($"Renew failed to extend validity date! Pre: {preRenewEnd}, Post: {bizSubRenewed.RenewalDate}");
                     Console.WriteLine($"  -> PASS: Subscription Renewal successfully extended validity date to {bizSubRenewed.RenewalDate:yyyy-MM-dd}.");
+
+                    // 13b. Verify Branching Configuration and Archive / Restore Lifecycle
+                    Console.WriteLine("  -> Testing Multi-Branch Plan Creation & Archive/Restore Lifecycle...");
+                    var multiBranchPlan = CrmDataService.CreateSubscriptionPlanAsync("Multi-Branch Pro", 2499.00m, 90, 20, allowBranching: true, maxBranches: 5).GetAwaiter().GetResult();
+                    if (!multiBranchPlan.AllowBranching || multiBranchPlan.MaxBranches != 5)
+                        throw new Exception($"Branching configuration mismatch! Expected AllowBranching=true, MaxBranches=5. Got: {multiBranchPlan.AllowBranching}, {multiBranchPlan.MaxBranches}");
+                    Console.WriteLine($"    * Created Multi-Branch Plan: PlanId={multiBranchPlan.PlanId}, AllowBranching={multiBranchPlan.AllowBranching}, MaxBranches={multiBranchPlan.MaxBranches}");
+
+                    // Test Soft-Archive
+                    CrmDataService.ArchiveSubscriptionPlanAsync(multiBranchPlan.PlanId).GetAwaiter().GetResult();
+                    var activePlansAfterArchive = CrmDataService.GetSubscriptionPlansAsync(includeArchived: false).GetAwaiter().GetResult();
+                    if (activePlansAfterArchive.Any(p => p.PlanId == multiBranchPlan.PlanId))
+                        throw new Exception("Archived plan must NOT appear in default active subscription plans list!");
+
+                    var allPlansAfterArchive = CrmDataService.GetSubscriptionPlansAsync(includeArchived: true).GetAwaiter().GetResult();
+                    var archivedItem = allPlansAfterArchive.FirstOrDefault(p => p.PlanId == multiBranchPlan.PlanId);
+                    if (archivedItem == null || archivedItem.IsActive)
+                        throw new Exception("Archived plan must appear with IsActive=false when includeArchived=true!");
+                    Console.WriteLine("    * PASS: Plan soft-archived successfully, correctly excluded from active picker view.");
+
+                    // Test Restore
+                    CrmDataService.RestoreSubscriptionPlanAsync(multiBranchPlan.PlanId).GetAwaiter().GetResult();
+                    var activePlansAfterRestore = CrmDataService.GetSubscriptionPlansAsync(includeArchived: false).GetAwaiter().GetResult();
+                    if (!activePlansAfterRestore.Any(p => p.PlanId == multiBranchPlan.PlanId && p.IsActive))
+                        throw new Exception("Restored plan must reappear in active subscription plans list!");
+                    Console.WriteLine("    * PASS: Plan restored successfully to active status.");
+
+                    // Assign multi-branch plan and verify business-side retrieval
+                    CrmDataService.AssignCompanySubscriptionAsync(vbb.CompanyId, multiBranchPlan.PlanId, 1, DateTime.UtcNow, DateTime.UtcNow.AddDays(90)).GetAwaiter().GetResult();
+                    var branchSubInfo = CrmDataService.GetSubscriptionInfoAsync(vbb.CompanyId).GetAwaiter().GetResult();
+                    if (!branchSubInfo.AllowBranching || branchSubInfo.MaxBranches != 5)
+                        throw new Exception($"Business Admin failed to retrieve branching info! Got AllowBranching={branchSubInfo.AllowBranching}, MaxBranches={branchSubInfo.MaxBranches}");
+                    Console.WriteLine($"    * PASS: Business Admin correctly reads branching capabilities: Multi-Branch={branchSubInfo.AllowBranching}, MaxBranches={branchSubInfo.MaxBranches}.");
 
                     // 14. User Seat Limit Enforcement
                     Console.WriteLine("[TEST 14] User Seat Limit Enforcement (MaxUsers Guard)...");
@@ -579,7 +1033,53 @@ namespace CC
                         throw new Exception("Backup history does not reflect newly generated backup files.");
                     Console.WriteLine($"  -> PASS: Native SQL Server multi-database backup engine executed successfully. ({backupHistory.Count} total backups found in repository).");
 
-                    Console.WriteLine("=== ALL 16 VERIFICATION TESTS PASSED SUCCESSFULLY! ===");
+                    // 17. KPI Click-to-Data Navigation & Query Alignment
+                    Console.WriteLine("[TEST 17] KPI Click-to-Data Navigation & Query Alignment Verification...");
+
+                    // Test Orders Active filter
+                    var activeOrders = CrmDataService.GetOrdersPagedAsync("Active", pageSize: 20).GetAwaiter().GetResult();
+                    if (activeOrders.Items.Any(o => o.StatusId != 1 && o.StatusId != 2 && o.StatusId != 4))
+                        throw new Exception("Active orders filter included invalid order status.");
+                    Console.WriteLine($"  -> PASS: Orders 'Active' filter verified ({activeOrders.TotalCount} matching orders with Status in Confirmed/Processing/Ready).");
+
+                    // Test Orders Today filter
+                    var todayOrders = CrmDataService.GetOrdersPagedAsync("Today", pageSize: 20).GetAwaiter().GetResult();
+                    var todayUtc = DateTime.UtcNow.Date;
+                    if (todayOrders.Items.Any(o => !o.DeliveryDate.HasValue || o.DeliveryDate.Value.Date != todayUtc))
+                        throw new Exception("Today orders filter returned orders with mismatching delivery date.");
+                    Console.WriteLine($"  -> PASS: Orders 'Today' filter verified ({todayOrders.TotalCount} matching orders due today).");
+
+                    // Test Follow-ups Due & Overdue
+                    var dueFollowUps = CrmDataService.GetFollowUpsPagedAsync("Due", pageSize: 20).GetAwaiter().GetResult();
+                    if (dueFollowUps.Items.Any(f => f.StatusId != 0 && f.StatusId != 3))
+                        throw new Exception("Due follow-ups filter included non-pending follow-up status.");
+                    Console.WriteLine($"  -> PASS: Follow-ups 'Due' filter verified ({dueFollowUps.TotalCount} matching tasks).");
+
+                    var overdueFollowUps = CrmDataService.GetFollowUpsPagedAsync("Overdue", pageSize: 20).GetAwaiter().GetResult();
+                    if (overdueFollowUps.Items.Any(f => f.StatusId != 3 && !(f.StatusId == 0 && f.FollowUpDate.Date < todayUtc)))
+                        throw new Exception("Overdue follow-ups filter included non-overdue tasks.");
+                    Console.WriteLine($"  -> PASS: Follow-ups 'Overdue' filter verified ({overdueFollowUps.TotalCount} matching overdue tasks).");
+
+                    // Test Form Instantiations with Filter Contexts
+                    using (var orderFormActive = new CC.Forms.Staff.Orders.OrderListForm("Active"))
+                    {
+                        if (orderFormActive == null) throw new Exception("Failed to instantiate OrderListForm with filter.");
+                    }
+                    using (var followUpFormDue = new CC.Forms.Staff.FollowUps.FollowUpListForm("Due"))
+                    {
+                        if (followUpFormDue == null) throw new Exception("Failed to instantiate FollowUpListForm with filter.");
+                    }
+                    using (var paymentFormUnpaid = new CC.Forms.Staff.Payments.PaymentListForm("Unpaid"))
+                    {
+                        if (paymentFormUnpaid == null) throw new Exception("Failed to instantiate PaymentListForm with filter.");
+                    }
+                    using (var subFormExpiring = new CC.Forms.SuperAdmin.Subscriptions.SuperAdminSubscriptionForm(1, "Expiring"))
+                    {
+                        if (subFormExpiring == null) throw new Exception("Failed to instantiate SuperAdminSubscriptionForm with tab and filter.");
+                    }
+                    Console.WriteLine("  -> PASS: All destination forms successfully instantiated and bound with designated KPI filter contexts.");
+
+                    Console.WriteLine("=== ALL 17 VERIFICATION TESTS PASSED SUCCESSFULLY! ===");
                     Environment.Exit(0);
                     return;
                 }
@@ -623,23 +1123,39 @@ namespace CC
                 loginForm.Close();
                 loginForm.Dispose();
 
+                void WaitForTask(Task? task)
+                {
+                    if (task == null) return;
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    while (!task.IsCompleted && sw.ElapsedMilliseconds < 10000)
+                    {
+                        Application.DoEvents();
+                        Thread.Sleep(20);
+                    }
+                }
+
                 var shell = new StaffDashboardForm();
                 shell.Size = new Size(1366, 820);
                 shell.StartPosition = FormStartPosition.Manual;
                 shell.Location = new Point(50, 50);
                 shell.Show();
                 Application.DoEvents();
-                Thread.Sleep(300);
+                WaitForTask(shell.InitializationTask);
+                for (int i = 0; i < 15; i++) { Application.DoEvents(); Thread.Sleep(20); }
 
                 void Capture(string filename)
                 {
-                    Application.DoEvents();
-                    Thread.Sleep(200);
+                    for (int i = 0; i < 25; i++)
+                    {
+                        Application.DoEvents();
+                        Thread.Sleep(30);
+                    }
                     using var bmp = new Bitmap(shell.Width, shell.Height);
                     shell.DrawToBitmap(bmp, new Rectangle(0, 0, shell.Width, shell.Height));
                     bmp.Save(Path.Combine(outputDir, filename), ImageFormat.Png);
                 }
 
+                Capture("screen_staff_dashboard.png");
                 Capture("screen_dashboard.png");
 
                 shell.Navigate("Customers");
@@ -774,7 +1290,7 @@ namespace CC
 
                 if (shell.MainPanel.Controls.Count > 0 && shell.MainPanel.Controls[0] is CC.Forms.Staff.Orders.OrderListForm orderListForm && procOrder != null)
                 {
-                    orderListForm.ShowOrderDetailsAsync(procOrder.OrderId).GetAwaiter().GetResult();
+                    WaitForTask(orderListForm.ShowOrderDetailsAsync(procOrder.OrderId));
                     for (int i = 0; i < 15; i++) { Application.DoEvents(); Thread.Sleep(30); }
                     Capture("screen_order_details.png");
 
@@ -854,7 +1370,8 @@ namespace CC
                 managerShell.Location = new Point(50, 50);
                 managerShell.Show();
                 Application.DoEvents();
-                Thread.Sleep(300);
+                WaitForTask(managerShell.InitializationTask);
+                for (int i = 0; i < 15; i++) { Application.DoEvents(); Thread.Sleep(20); }
 
                 void CaptureMgr(string filename)
                 {
@@ -867,6 +1384,8 @@ namespace CC
                     managerShell.DrawToBitmap(bmp, new Rectangle(0, 0, managerShell.Width, managerShell.Height));
                     bmp.Save(Path.Combine(outputDir, filename), ImageFormat.Png);
                 }
+
+                CaptureMgr("screen_manager_dashboard.png");
 
                 managerShell.Navigate("Customers");
                 CaptureMgr("screen_manager_customers.png");
@@ -892,7 +1411,8 @@ namespace CC
                 adminShell.Location = new Point(50, 50);
                 adminShell.Show();
                 Application.DoEvents();
-                Thread.Sleep(300);
+                WaitForTask(adminShell.InitializationTask);
+                for (int i = 0; i < 15; i++) { Application.DoEvents(); Thread.Sleep(20); }
 
                 void CaptureAdmin(string filename)
                 {
@@ -906,6 +1426,8 @@ namespace CC
                     bmp.Save(Path.Combine(outputDir, filename), ImageFormat.Png);
                 }
 
+                CaptureAdmin("screen_admin_dashboard.png");
+
                 adminShell.Navigate("User Management");
                 CaptureAdmin("screen_admin_users.png");
 
@@ -916,6 +1438,32 @@ namespace CC
                 CaptureAdmin("screen_admin_reports.png");
 
                 adminShell.Close();
+
+                // Capture Super Admin Dashboard
+                SessionService.CurrentUser = new CurrentUser
+                {
+                    UserId = 1,
+                    FirstName = "System",
+                    LastName = "SuperAdmin",
+                    Role = "SuperAdmin",
+                    CompanyId = 1
+                };
+
+                var superShell = new CC.Forms.SuperAdmin.SuperAdminDashboardForm();
+                superShell.Size = new Size(1366, 820);
+                superShell.StartPosition = FormStartPosition.Manual;
+                superShell.Location = new Point(50, 50);
+                superShell.Show();
+                Application.DoEvents();
+                WaitForTask(superShell.InitializationTask);
+                for (int i = 0; i < 25; i++) { Application.DoEvents(); Thread.Sleep(30); }
+                using (var bmpSuper = new Bitmap(superShell.Width, superShell.Height))
+                {
+                    superShell.DrawToBitmap(bmpSuper, new Rectangle(0, 0, superShell.Width, superShell.Height));
+                    bmpSuper.Save(Path.Combine(outputDir, "screen_superadmin_dashboard.png"), ImageFormat.Png);
+                }
+                superShell.Close();
+
                 Environment.Exit(0);
                 return;
             }

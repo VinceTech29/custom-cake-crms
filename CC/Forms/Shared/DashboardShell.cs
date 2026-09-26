@@ -78,7 +78,7 @@ namespace CC.Forms.Shared
                 };
                 SidebarCtrl.SetUserRole(roleDisplay);
             }
-            SidebarCtrl.NavigationRequested += (s, key) => OnNavigationRequested(key);
+            SidebarCtrl.NavigationRequested += (s, key) => Navigate(key);
             SidebarCtrl.SignOutRequested += (s, e) => OnSignOutRequested();
 
             // 2. Top Header Bar (Hidden/removed per design requirement)
@@ -242,15 +242,33 @@ namespace CC.Forms.Shared
             return header;
         }
 
+        private string _currentActiveKey = "Dashboard";
+
+        public string CurrentActiveKey => _currentActiveKey;
+
+        public void Navigate(string key, object? filterContext = null)
+        {
+            if (string.IsNullOrWhiteSpace(key)) return;
+
+            // Prevent redundant re-navigation to the currently active view if no filter context is provided
+            if (string.Equals(_currentActiveKey, key, StringComparison.OrdinalIgnoreCase) && filterContext == null)
+            {
+                return;
+            }
+
+            _currentActiveKey = key;
+            SidebarCtrl.SetActiveItem(key);
+            OnNavigationRequested(key, filterContext);
+        }
+
+        protected virtual void OnNavigationRequested(string key, object? filterContext)
+        {
+            OnNavigationRequested(key);
+        }
+
         protected virtual void OnNavigationRequested(string key)
         {
             PageTitle = key;
-        }
-
-        public void Navigate(string key)
-        {
-            SidebarCtrl.SetActiveItem(key);
-            OnNavigationRequested(key);
         }
 
         protected virtual void OnSignOutRequested()

@@ -31,9 +31,11 @@ namespace CC.Forms.Manager
             InitializationTask = LoadDashboardDataAsync();
         }
 
-        protected override void OnNavigationRequested(string key)
+        protected override void OnNavigationRequested(string key, object? filterContext)
         {
-            base.OnNavigationRequested(key);
+            base.OnNavigationRequested(key, filterContext);
+
+            string? filterStr = filterContext as string;
 
             switch (key)
             {
@@ -48,13 +50,13 @@ namespace CC.Forms.Manager
                     CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Staff.Inquiries.InquiryListForm());
                     break;
                 case "Orders":
-                    CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Staff.Orders.OrderListForm());
+                    CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Staff.Orders.OrderListForm(filterStr));
                     break;
                 case "Payments":
-                    CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Staff.Payments.PaymentListForm());
+                    CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Staff.Payments.PaymentListForm(filterStr));
                     break;
                 case "Follow-ups":
-                    CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Staff.FollowUps.FollowUpListForm());
+                    CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Staff.FollowUps.FollowUpListForm(filterStr));
                     break;
                 case "Reports":
                     CC.Controls.ViewHost.ShowFormInPanel(MainPanel, new CC.Forms.Manager.Reports.ReportListForm());
@@ -173,43 +175,34 @@ namespace CC.Forms.Manager
             topPanel.Controls.Add(titleStack);
             rootLayout.Controls.Add(topPanel, 0, 0);
 
-            // 2. 5 MANAGER KPI CARDS (Including Customer Card)
+            // 2. 8 MANAGER KPI CARDS (4x2 GRID)
             var kpiTable = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
-                ColumnCount = 5,
-                RowCount = 1,
-                Height = 145,
+                ColumnCount = 4,
+                RowCount = 2,
+                Height = 290,
                 Margin = new Padding(0, 0, 0, 18),
                 BackColor = Color.Transparent
             };
-            kpiTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20F));
-            kpiTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20F));
-            kpiTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20F));
-            kpiTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20F));
-            kpiTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20F));
+            kpiTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25F));
+            kpiTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25F));
+            kpiTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25F));
+            kpiTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25F));
+            kpiTable.RowStyles.Add(new RowStyle(SizeType.Percent, 50F));
+            kpiTable.RowStyles.Add(new RowStyle(SizeType.Percent, 50F));
 
-            var cardCustomers = new DashboardKpiCard
-            {
-                Dock = DockStyle.Fill,
-                Title = "Customers",
-                Value = data.TotalCustomersCount.ToString(),
-                Subtitle = "Registered customer base",
-                Margin = new Padding(0, 0, 6, 0)
-            };
-            cardCustomers.SetBadge("CRM", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
-            cardCustomers.CardClicked += (s, e) => Navigate("Customers");
-
+            // Row 1: Kitchen & Order Fulfillment
             var cardActive = new DashboardKpiCard
             {
                 Dock = DockStyle.Fill,
                 Title = "Active Orders",
                 Value = data.ActiveOrdersCount.ToString(),
                 Subtitle = "Orders currently in production",
-                Margin = new Padding(6, 0, 6, 0)
+                Margin = new Padding(0, 0, 6, 6)
             };
             cardActive.SetBadge("In Progress", UITheme.StatusBlueFg, UITheme.StatusBlueBg);
-            cardActive.CardClicked += (s, e) => Navigate("Orders");
+            cardActive.CardClicked += (s, e) => Navigate("Orders", "Active");
 
             var cardReady = new DashboardKpiCard
             {
@@ -217,20 +210,54 @@ namespace CC.Forms.Manager
                 Title = "Ready Pickup",
                 Value = data.ReadyForPickupCount.ToString(),
                 Subtitle = "Finished orders awaiting release",
-                Margin = new Padding(6, 0, 6, 0)
+                Margin = new Padding(6, 0, 6, 6)
             };
-            cardReady.SetBadge("Completed", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
-            cardReady.CardClicked += (s, e) => Navigate("Orders");
+            cardReady.SetBadge("Ready", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
+            cardReady.CardClicked += (s, e) => Navigate("Orders", "Ready");
+
+            var cardCompleted = new DashboardKpiCard
+            {
+                Dock = DockStyle.Fill,
+                Title = "Completed Orders",
+                Value = data.CompletedOrdersCount.ToString(),
+                Subtitle = "Fulfilled in selected period",
+                Margin = new Padding(6, 0, 6, 6)
+            };
+            cardCompleted.SetBadge("Fulfilled", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
+            cardCompleted.CardClicked += (s, e) => Navigate("Orders", "Completed");
+
+            var cardTodayDeliveries = new DashboardKpiCard
+            {
+                Dock = DockStyle.Fill,
+                Title = "Orders Due Today",
+                Value = data.TodayDeliveriesCount.ToString(),
+                Subtitle = "Scheduled for dispatch today",
+                Margin = new Padding(6, 0, 0, 6)
+            };
+            cardTodayDeliveries.SetBadge("Today", UITheme.PrimaryMauve, Color.FromArgb(245, 235, 240));
+            cardTodayDeliveries.CardClicked += (s, e) => Navigate("Orders", "Today");
+
+            // Row 2: Pipeline Value, CRM & Follow-ups
+            var cardPipelineVal = new DashboardKpiCard
+            {
+                Dock = DockStyle.Fill,
+                Title = "Active Pipeline Value",
+                Value = $"P{data.ActivePipelineValue:N0}",
+                Subtitle = "Monetary value in kitchen/prep",
+                Margin = new Padding(0, 6, 6, 0)
+            };
+            cardPipelineVal.SetBadge("Pipeline", UITheme.PrimaryMauve, Color.FromArgb(245, 235, 240));
+            cardPipelineVal.CardClicked += (s, e) => Navigate("Orders", "Active");
 
             var cardInquiries = new DashboardKpiCard
             {
                 Dock = DockStyle.Fill,
-                Title = "Inquiries",
+                Title = "Open Inquiries",
                 Value = data.OpenInquiriesCount.ToString(),
                 Subtitle = "Awaiting quote or response",
-                Margin = new Padding(6, 0, 6, 0)
+                Margin = new Padding(6, 6, 6, 0)
             };
-            cardInquiries.SetBadge("Pipeline", UITheme.StatusYellowFg, UITheme.StatusYellowBg);
+            cardInquiries.SetBadge("Quotations", UITheme.StatusYellowFg, UITheme.StatusYellowBg);
             cardInquiries.CardClicked += (s, e) => Navigate("Inquiries");
 
             var cardOverdue = new DashboardKpiCard
@@ -239,16 +266,30 @@ namespace CC.Forms.Manager
                 Title = "Overdue Tasks",
                 Value = data.ShopOverdueFollowupsCount.ToString(),
                 Subtitle = "Shop-wide overdue interactions",
-                Margin = new Padding(6, 0, 0, 0)
+                Margin = new Padding(6, 6, 6, 0)
             };
             cardOverdue.SetBadge("Urgent", UITheme.StatusRedFg, UITheme.StatusRedBg);
-            cardOverdue.CardClicked += (s, e) => Navigate("Follow-ups");
+            cardOverdue.CardClicked += (s, e) => Navigate("Follow-ups", "Overdue");
 
-            kpiTable.Controls.Add(cardCustomers, 0, 0);
-            kpiTable.Controls.Add(cardActive, 1, 0);
-            kpiTable.Controls.Add(cardReady, 2, 0);
-            kpiTable.Controls.Add(cardInquiries, 3, 0);
-            kpiTable.Controls.Add(cardOverdue, 4, 0);
+            var cardCustomers = new DashboardKpiCard
+            {
+                Dock = DockStyle.Fill,
+                Title = "Customer Base",
+                Value = data.TotalCustomersCount.ToString(),
+                Subtitle = "Registered client accounts",
+                Margin = new Padding(6, 6, 0, 0)
+            };
+            cardCustomers.SetBadge("CRM", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
+            cardCustomers.CardClicked += (s, e) => Navigate("Customers");
+
+            kpiTable.Controls.Add(cardActive, 0, 0);
+            kpiTable.Controls.Add(cardReady, 1, 0);
+            kpiTable.Controls.Add(cardCompleted, 2, 0);
+            kpiTable.Controls.Add(cardTodayDeliveries, 3, 0);
+            kpiTable.Controls.Add(cardPipelineVal, 0, 1);
+            kpiTable.Controls.Add(cardInquiries, 1, 1);
+            kpiTable.Controls.Add(cardOverdue, 2, 1);
+            kpiTable.Controls.Add(cardCustomers, 3, 1);
             rootLayout.Controls.Add(kpiTable, 0, 1);
 
             // 3. PIPELINE FUNNEL PROGRESS BAR

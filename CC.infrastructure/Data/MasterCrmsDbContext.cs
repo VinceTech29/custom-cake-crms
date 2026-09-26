@@ -47,6 +47,17 @@ namespace CC.infrastructure.Data
 
                 entity.HasIndex(x => x.CompanyCode)
                     .IsUnique();
+
+                // Master CRM only manages company accounts and their database mappings.
+                // Tenant-level entities belong to their respective tenant databases.
+                entity.Ignore(x => x.Address);
+                entity.Ignore(x => x.AddressId);
+                entity.Ignore(x => x.ContactEmail);
+                entity.Ignore(x => x.ContactPhone);
+                entity.Property(x => x.CreatedDate).HasColumnName("CreatedAt");
+                entity.Ignore(x => x.Users);
+                entity.Ignore(x => x.Customers);
+                entity.Ignore(x => x.Subscriptions);
             });
 
             builder.Entity<CompanyDatabase>(entity =>
@@ -74,6 +85,9 @@ namespace CC.infrastructure.Data
                 entity.HasKey(x => x.PlanId);
                 entity.Property(x => x.PlanName).HasMaxLength(100).IsRequired();
                 entity.Property(x => x.Price).HasPrecision(18, 2);
+                entity.Property(x => x.AllowBranching).HasDefaultValue(false);
+                entity.Property(x => x.MaxBranches).HasDefaultValue(1);
+                entity.Property(x => x.IsActive).HasDefaultValue(true);
             });
 
             builder.Entity<SubscriptionStatus>(entity =>
