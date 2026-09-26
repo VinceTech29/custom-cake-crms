@@ -644,14 +644,16 @@ namespace CC.Forms.SuperAdmin.Subscriptions
                 Dock = DockStyle.Top,
                 Height = 82,
                 Padding = new Padding(20, 16, 20, 6),
-                BackColor = Color.Transparent
+                BackColor = Color.White,
+                BorderStyle = BorderStyle.None
             };
 
             var topRow = new Panel
             {
                 Dock = DockStyle.Top,
                 Height = 24,
-                BackColor = Color.Transparent
+                BackColor = Color.White,
+                BorderStyle = BorderStyle.None
             };
 
             // Status Pill (Left)
@@ -682,7 +684,7 @@ namespace CC.Forms.SuperAdmin.Subscriptions
                 TextAlign = ContentAlignment.MiddleRight,
                 Font = new Font(UITheme.FontSans, 8F, FontStyle.Bold),
                 ForeColor = UITheme.PrimaryMauve,
-                BackColor = Color.Transparent
+                BackColor = Color.White
             };
             topRow.Controls.Add(lblBizBadge);
 
@@ -695,6 +697,7 @@ namespace CC.Forms.SuperAdmin.Subscriptions
                 Font = new Font(UITheme.FontSerif, 14.5F, FontStyle.Bold),
                 ForeColor = plan.IsActive ? UITheme.TextDark : UITheme.TextMuted,
                 TextAlign = ContentAlignment.BottomLeft,
+                BackColor = Color.White,
                 UseMnemonic = false
             };
 
@@ -707,7 +710,8 @@ namespace CC.Forms.SuperAdmin.Subscriptions
                 Dock = DockStyle.Top,
                 Height = 44,
                 Padding = new Padding(20, 2, 20, 6),
-                BackColor = Color.Transparent
+                BackColor = Color.White,
+                BorderStyle = BorderStyle.None
             };
 
             var lblPrice = new Label
@@ -716,7 +720,8 @@ namespace CC.Forms.SuperAdmin.Subscriptions
                 Font = new Font(UITheme.FontSerif, 17F, FontStyle.Bold),
                 ForeColor = plan.IsActive ? Color.FromArgb(46, 133, 90) : UITheme.TextMuted,
                 Dock = DockStyle.Left,
-                AutoSize = true
+                AutoSize = true,
+                BackColor = Color.White
             };
 
             string durText = plan.DurationDays >= 365 ? $" / {plan.DurationDays / 365} Year(s)" : $" / {plan.DurationDays} Days";
@@ -727,18 +732,19 @@ namespace CC.Forms.SuperAdmin.Subscriptions
                 ForeColor = UITheme.TextMuted,
                 Dock = DockStyle.Left,
                 AutoSize = true,
+                BackColor = Color.White,
                 Margin = new Padding(0, 5, 0, 0)
             };
 
             pnlPrice.Controls.Add(lblDuration);
             pnlPrice.Controls.Add(lblPrice);
 
-            // 3. Features Checklist (Middle) - cleanly stacked with zero divider lines
+            // 3. Features Checklist (Middle) - cleanly stacked with pure white background and zero lines
             var pnlFeatures = new Panel
             {
                 Dock = DockStyle.Fill,
                 Padding = new Padding(20, 10, 20, 6),
-                BackColor = Color.Transparent,
+                BackColor = Color.White,
                 BorderStyle = BorderStyle.None
             };
 
@@ -747,7 +753,7 @@ namespace CC.Forms.SuperAdmin.Subscriptions
                 Dock = DockStyle.Fill,
                 FlowDirection = FlowDirection.TopDown,
                 WrapContents = false,
-                BackColor = Color.Transparent,
+                BackColor = Color.White,
                 Margin = Padding.Empty,
                 Padding = Padding.Empty,
                 BorderStyle = BorderStyle.None
@@ -774,13 +780,14 @@ namespace CC.Forms.SuperAdmin.Subscriptions
 
             pnlFeatures.Controls.Add(featStack);
 
-            // 4. Actions Panel (Bottom) with responsive 50/50 button split and zero divider lines
+            // 4. Actions Panel (Bottom) with responsive 50/50 button split and pure white background
             var pnlActions = new Panel
             {
                 Dock = DockStyle.Bottom,
                 Height = 60,
                 Padding = new Padding(20, 8, 20, 16),
-                BackColor = Color.Transparent
+                BackColor = Color.White,
+                BorderStyle = BorderStyle.None
             };
 
             var actionsTable = new TableLayoutPanel
@@ -788,7 +795,8 @@ namespace CC.Forms.SuperAdmin.Subscriptions
                 Dock = DockStyle.Fill,
                 ColumnCount = 2,
                 RowCount = 1,
-                BackColor = Color.Transparent,
+                BackColor = Color.White,
+                CellBorderStyle = TableLayoutPanelCellBorderStyle.None,
                 Margin = Padding.Empty,
                 Padding = Padding.Empty
             };
@@ -870,7 +878,7 @@ namespace CC.Forms.SuperAdmin.Subscriptions
             {
                 Size = new Size(380, 28),
                 Margin = new Padding(0, 4, 0, 4),
-                BackColor = Color.Transparent,
+                BackColor = Color.White,
                 BorderStyle = BorderStyle.None
             };
 
@@ -882,7 +890,7 @@ namespace CC.Forms.SuperAdmin.Subscriptions
                 Location = new Point(0, 2),
                 Size = new Size(20, 22),
                 TextAlign = ContentAlignment.MiddleCenter,
-                BackColor = Color.Transparent
+                BackColor = Color.White
             };
 
             var lbl = new Label
@@ -892,7 +900,7 @@ namespace CC.Forms.SuperAdmin.Subscriptions
                 ForeColor = isPositive ? UITheme.TextDark : UITheme.TextMuted,
                 Location = new Point(26, 3),
                 AutoSize = true,
-                BackColor = Color.Transparent,
+                BackColor = Color.White,
                 UseMnemonic = false
             };
 
