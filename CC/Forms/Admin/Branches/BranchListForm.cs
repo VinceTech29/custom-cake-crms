@@ -190,7 +190,7 @@ namespace CC.Forms.Admin.Branches
             {
                 Dock = DockStyle.Fill,
                 BackColor = Color.White,
-                Margin = new Padding(0, 0, 12, 0),
+                Margin = new Padding(4, 0, 4, 0),
                 Padding = new Padding(16, 12, 16, 12)
             };
             card.Paint += (s, e) =>

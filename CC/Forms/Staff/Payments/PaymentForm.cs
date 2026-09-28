@@ -510,10 +510,10 @@ namespace CC.Forms.Staff.Payments
                     decimal paid = order.Payments.Sum(p => p.Amount);
                     decimal balance = Math.Max(0m, total - paid);
 
-                    lblOrderSummary.Text = $"Total: ₱{total:N0}  |  Paid: ₱{paid:N0}  |  Balance: ₱{balance:N0}";
+                    lblOrderSummary.Text = $"Total: ₱{total:N2}  |  Paid: ₱{paid:N2}  |  Balance: ₱{balance:N2}";
                     lblOrderSummary.ForeColor = balance > 0 ? Color.FromArgb(170, 80, 50) : UITheme.StatusGreenFg;
 
-                    txtAmount.Text = balance > 0 ? balance.ToString("0") : "0";
+                    txtAmount.Text = balance > 0 ? balance.ToString("N2") : "0.00";
                     txtRef.Text = $"REF-{DateTime.Now:yyyyMMddHHmm}";
                 }
             }

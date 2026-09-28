@@ -222,7 +222,7 @@ namespace CC.Forms.Staff
                 Title = "Follow-ups Due",
                 Value = data.MyDueFollowupsCount.ToString(),
                 Subtitle = "Pending client communications",
-                Margin = new Padding(0, 0, 6, 6)
+                Margin = new Padding(4)
             };
             cardDue.SetBadge("Schedule", UITheme.StatusYellowFg, UITheme.StatusYellowBg);
             cardDue.CardClicked += (s, e) => Navigate("Follow-ups", "Due");
@@ -233,7 +233,7 @@ namespace CC.Forms.Staff
                 Title = "Overdue Tasks",
                 Value = data.MyOverdueFollowupsCount.ToString(),
                 Subtitle = "Requires prompt response",
-                Margin = new Padding(6, 0, 6, 6)
+                Margin = new Padding(4)
             };
             cardOverdue.SetBadge("Urgent", UITheme.StatusRedFg, UITheme.StatusRedBg);
             cardOverdue.CardClicked += (s, e) => Navigate("Follow-ups", "Overdue");
@@ -244,7 +244,7 @@ namespace CC.Forms.Staff
                 Title = "Handled Inquiries",
                 Value = data.MyHandledInquiriesCount.ToString(),
                 Subtitle = "Open inquiries assigned",
-                Margin = new Padding(6, 0, 6, 6)
+                Margin = new Padding(4)
             };
             cardInquiries.SetBadge("Pipeline", UITheme.StatusBlueFg, UITheme.StatusBlueBg);
             cardInquiries.CardClicked += (s, e) => Navigate("Inquiries");
@@ -255,7 +255,7 @@ namespace CC.Forms.Staff
                 Title = "Orders Due Today",
                 Value = data.TodayDueOrdersCount.ToString(),
                 Subtitle = "Scheduled for release today",
-                Margin = new Padding(6, 0, 0, 6)
+                Margin = new Padding(4)
             };
             cardTodayDue.SetBadge("Today", UITheme.PrimaryMauve, Color.FromArgb(245, 235, 240));
             cardTodayDue.CardClicked += (s, e) => Navigate("Orders", "Today");
@@ -267,7 +267,7 @@ namespace CC.Forms.Staff
                 Title = "Processing",
                 Value = data.ProcessingOrdersCount.ToString(),
                 Subtitle = "Baking & decorating in progress",
-                Margin = new Padding(0, 6, 6, 0)
+                Margin = new Padding(4)
             };
             cardProcessing.SetBadge("Production", UITheme.StatusBlueFg, UITheme.StatusBlueBg);
             cardProcessing.CardClicked += (s, e) => Navigate("Orders", "Processing");
@@ -278,7 +278,7 @@ namespace CC.Forms.Staff
                 Title = "Ready Pickup",
                 Value = data.ReadyOrdersCount.ToString(),
                 Subtitle = "Awaiting customer collection",
-                Margin = new Padding(6, 6, 6, 0)
+                Margin = new Padding(4)
             };
             cardReady.SetBadge("Ready", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
             cardReady.CardClicked += (s, e) => Navigate("Orders", "Ready");
@@ -289,7 +289,7 @@ namespace CC.Forms.Staff
                 Title = "Completed Orders",
                 Value = data.CompletedOrdersCount.ToString(),
                 Subtitle = "Fulfilled in selected period",
-                Margin = new Padding(6, 6, 6, 0)
+                Margin = new Padding(4)
             };
             cardCompleted.SetBadge("Fulfilled", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
             cardCompleted.CardClicked += (s, e) => Navigate("Orders", "Completed");
@@ -300,7 +300,7 @@ namespace CC.Forms.Staff
                 Title = "Customers",
                 Value = data.TotalCustomersCount.ToString(),
                 Subtitle = "Registered client database",
-                Margin = new Padding(6, 6, 0, 0)
+                Margin = new Padding(4)
             };
             cardCustomers.SetBadge("CRM", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
             cardCustomers.CardClicked += (s, e) => Navigate("Customers");

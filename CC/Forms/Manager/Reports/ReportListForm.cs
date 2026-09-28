@@ -231,7 +231,7 @@ namespace CC.Forms.Manager.Reports
             {
                 Dock = DockStyle.Fill,
                 BackColor = Color.White,
-                Margin = new Padding(0, 0, 14, 0),
+                Margin = new Padding(4, 0, 4, 0),
                 Padding = new Padding(18, 14, 18, 14)
             };
             card.ApplyRoundedRegion(14);
@@ -931,10 +931,10 @@ namespace CC.Forms.Manager.Reports
 
                 // Refresh KPI Summary Cards
                 var metrics = await CrmDataService.GetReportSummaryMetricsAsync(toDate);
-                lblTotalRevenue.Text = $"₱{metrics.TotalRevenue:N0}";
+                lblTotalRevenue.Text = $"₱{metrics.TotalRevenue:N2}";
                 lblTotalTransactions.Text = metrics.TotalTransactions.ToString();
-                lblDailySummary.Text = $"{metrics.DailyCount} (₱{metrics.DailyRevenue:N0})";
-                lblMonthlySummary.Text = $"{metrics.MonthlyCount} (₱{metrics.MonthlyRevenue:N0})";
+                lblDailySummary.Text = $"{metrics.DailyCount} (₱{metrics.DailyRevenue:N2})";
+                lblMonthlySummary.Text = $"{metrics.MonthlyCount} (₱{metrics.MonthlyRevenue:N2})";
             }
             catch (Exception ex)
             {

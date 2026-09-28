@@ -714,10 +714,10 @@ namespace CC.Forms.Staff.Orders
             decimal totalPaid = downPaid + additionalPaid;
             decimal balance = Math.Max(0m, total - totalPaid);
 
-            lblTotalVal.Text = $"₱{total:N0}";
-            lblDownPaymentVal.Text = $"₱{downPaid:N0}";
-            lblAdditionalPaidVal.Text = $"₱{additionalPaid:N0}";
-            lblBalanceVal.Text = $"₱{balance:N0}";
+            lblTotalVal.Text = $"₱{total:N2}";
+            lblDownPaymentVal.Text = $"₱{downPaid:N2}";
+            lblAdditionalPaidVal.Text = $"₱{additionalPaid:N2}";
+            lblBalanceVal.Text = $"₱{balance:N2}";
 
             var lastPay = payments.OrderByDescending(p => p.PaymentDate).FirstOrDefault();
             string methodStr = lastPay?.Method?.MethodName ?? "GCash";

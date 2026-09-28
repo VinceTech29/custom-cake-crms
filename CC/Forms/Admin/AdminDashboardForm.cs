@@ -261,9 +261,9 @@ namespace CC.Forms.Admin
             {
                 Dock = DockStyle.Fill,
                 Title = "Revenue Collected",
-                Value = $"P{data.TotalRevenue:N0}",
-                Subtitle = $"Lifetime: P{data.LifetimeRevenue:N0}",
-                Margin = new Padding(0, 0, 6, 6)
+                Value = $"₱{data.TotalRevenue:N2}",
+                Subtitle = $"Lifetime: ₱{data.LifetimeRevenue:N2}",
+                Margin = new Padding(4)
             };
             cardRevenue.SetBadge("Collected", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
             cardRevenue.CardClicked += (s, e) => Navigate("Payments", "Fully Paid");
@@ -272,9 +272,9 @@ namespace CC.Forms.Admin
             {
                 Dock = DockStyle.Fill,
                 Title = "Outstanding Balance",
-                Value = $"P{data.OutstandingBalance:N0}",
+                Value = $"₱{data.OutstandingBalance:N2}",
                 Subtitle = "Uncollected on active orders",
-                Margin = new Padding(6, 0, 6, 6)
+                Margin = new Padding(4)
             };
             cardOutstanding.SetBadge("Receivables", UITheme.StatusYellowFg, UITheme.StatusYellowBg);
             cardOutstanding.CardClicked += (s, e) => Navigate("Payments", "Unpaid");
@@ -283,9 +283,9 @@ namespace CC.Forms.Admin
             {
                 Dock = DockStyle.Fill,
                 Title = "Average Order Value",
-                Value = $"P{data.AverageOrderValue:N0}",
+                Value = $"₱{data.AverageOrderValue:N2}",
                 Subtitle = "Avg spend per placed order",
-                Margin = new Padding(6, 0, 6, 6)
+                Margin = new Padding(4)
             };
             cardAov.SetBadge("Unit Econ", UITheme.PrimaryMauve, Color.FromArgb(245, 235, 240));
             cardAov.CardClicked += (s, e) => Navigate("Orders");
@@ -296,7 +296,7 @@ namespace CC.Forms.Admin
                 Title = "Collection Rate",
                 Value = $"{data.CollectionRate:0.#}%",
                 Subtitle = "Collected vs billed order total",
-                Margin = new Padding(6, 0, 0, 6)
+                Margin = new Padding(4)
             };
             cardCollectionRate.SetBadge("Efficiency", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
             cardCollectionRate.CardClicked += (s, e) => Navigate("Payments");
@@ -308,7 +308,7 @@ namespace CC.Forms.Admin
                 Title = "Customer Base",
                 Value = data.TotalCustomers.ToString(),
                 Subtitle = $"+{data.NewCustomersInPeriod} new registered",
-                Margin = new Padding(0, 6, 6, 0)
+                Margin = new Padding(4)
             };
             cardCustomers.SetBadge("CRM", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
             cardCustomers.CardClicked += (s, e) => Navigate("Customers");
@@ -319,7 +319,7 @@ namespace CC.Forms.Admin
                 Title = "Total Sales Orders",
                 Value = data.TotalOrders.ToString(),
                 Subtitle = "Placed within timeframe",
-                Margin = new Padding(6, 6, 6, 0)
+                Margin = new Padding(4)
             };
             cardOrders.SetBadge("Orders", UITheme.StatusBlueFg, UITheme.StatusBlueBg);
             cardOrders.CardClicked += (s, e) => Navigate("Orders");
@@ -330,7 +330,7 @@ namespace CC.Forms.Admin
                 Title = "Active In-Production",
                 Value = data.ActiveOrdersCount.ToString(),
                 Subtitle = "Orders currently in kitchen",
-                Margin = new Padding(6, 6, 6, 0)
+                Margin = new Padding(4)
             };
             cardActiveOrders.SetBadge("Kitchen", UITheme.StatusYellowFg, UITheme.StatusYellowBg);
             cardActiveOrders.CardClicked += (s, e) => Navigate("Orders", "Processing");
@@ -341,7 +341,7 @@ namespace CC.Forms.Admin
                 Title = "Plan Seats Used",
                 Value = $"{data.Subscription.UsedSeats} / {data.Subscription.MaxSeats}",
                 Subtitle = $"{data.Subscription.PlanName} tier",
-                Margin = new Padding(6, 6, 0, 0)
+                Margin = new Padding(4)
             };
             cardSeats.SetBadge("License", UITheme.PrimaryMauve, Color.FromArgb(245, 235, 240));
             cardSeats.CardClicked += (s, e) => Navigate("Subscription");
@@ -538,7 +538,7 @@ namespace CC.Forms.Admin
                 int rowIdx = grid.Rows.Add(
                     c.CustomerName,
                     c.OrderCount,
-                    $"P{c.TotalSpent:N2}",
+                    $"₱{c.TotalSpent:N2}",
                     c.LastOrderDate.ToString("MMM d, yyyy"),
                     "View \u2192");
                 grid.Rows[rowIdx].Tag = c;

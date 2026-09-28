@@ -158,7 +158,7 @@ namespace CC.Controls
                 g.DrawLine(gridPen, left, y, right, y);
 
                 decimal valAtStep = maxVal * i / steps;
-                string label = _isCurrency ? $"P{valAtStep:N0}" : $"{valAtStep:N0}";
+                string label = _isCurrency ? $"₱{valAtStep:N2}" : $"{valAtStep:N0}";
                 var lsz = g.MeasureString(label, axisFont);
                 g.DrawString(label, axisFont, axisBrush, left - lsz.Width - 6, y - lsz.Height / 2);
             }
@@ -227,7 +227,7 @@ namespace CC.Controls
                 var p = _points[_hoveredIndex];
                 var pt = screenPoints[_hoveredIndex];
 
-                string valStr = _isCurrency ? $"P{p.Value:N2}" : $"{p.Value:N0}";
+                string valStr = _isCurrency ? $"₱{p.Value:N2}" : $"{p.Value:N0}";
                 string tooltip = $"{p.Date:MMM d, yyyy}: {valStr}";
                 using var tipFont = new Font(UITheme.FontSans, 8F, FontStyle.Bold);
                 var tsz = g.MeasureString(tooltip, tipFont);

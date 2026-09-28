@@ -589,7 +589,7 @@ namespace CC.Forms.Staff.Customers
                     OrderId = $"#ORD-{o.OrderId}",
                     Design = !string.IsNullOrWhiteSpace(o.DesignTheme) ? o.DesignTheme : (!string.IsNullOrWhiteSpace(o.CakeSize) ? o.CakeSize : "Custom Cake"),
                     EventDate = o.DeliveryDate?.ToString("yyyy-MM-dd") ?? o.OrderDate.ToString("yyyy-MM-dd"),
-                    Total = $"₱{(o.TotalAmount > 0 ? o.TotalAmount : 0):N0}",
+                    Total = $"₱{(o.TotalAmount > 0 ? o.TotalAmount : 0):N2}",
                     Status = GetStatusName(o.StatusId)
                 }).ToList();
 

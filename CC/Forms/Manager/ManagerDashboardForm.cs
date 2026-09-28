@@ -235,7 +235,7 @@ namespace CC.Forms.Manager
                 Title = "Active Orders",
                 Value = data.ActiveOrdersCount.ToString(),
                 Subtitle = "Orders currently in production",
-                Margin = new Padding(0, 0, 6, 6)
+                Margin = new Padding(4)
             };
             cardActive.SetBadge("In Progress", UITheme.StatusBlueFg, UITheme.StatusBlueBg);
             cardActive.CardClicked += (s, e) => Navigate("Orders", "Active");
@@ -246,7 +246,7 @@ namespace CC.Forms.Manager
                 Title = "Ready Pickup",
                 Value = data.ReadyForPickupCount.ToString(),
                 Subtitle = "Finished orders awaiting release",
-                Margin = new Padding(6, 0, 6, 6)
+                Margin = new Padding(4)
             };
             cardReady.SetBadge("Ready", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
             cardReady.CardClicked += (s, e) => Navigate("Orders", "Ready");
@@ -257,7 +257,7 @@ namespace CC.Forms.Manager
                 Title = "Completed Orders",
                 Value = data.CompletedOrdersCount.ToString(),
                 Subtitle = "Fulfilled in selected period",
-                Margin = new Padding(6, 0, 6, 6)
+                Margin = new Padding(4)
             };
             cardCompleted.SetBadge("Fulfilled", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
             cardCompleted.CardClicked += (s, e) => Navigate("Orders", "Completed");
@@ -268,7 +268,7 @@ namespace CC.Forms.Manager
                 Title = "Orders Due Today",
                 Value = data.TodayDeliveriesCount.ToString(),
                 Subtitle = "Scheduled for dispatch today",
-                Margin = new Padding(6, 0, 0, 6)
+                Margin = new Padding(4)
             };
             cardTodayDeliveries.SetBadge("Today", UITheme.PrimaryMauve, Color.FromArgb(245, 235, 240));
             cardTodayDeliveries.CardClicked += (s, e) => Navigate("Orders", "Today");
@@ -278,9 +278,9 @@ namespace CC.Forms.Manager
             {
                 Dock = DockStyle.Fill,
                 Title = "Active Pipeline Value",
-                Value = $"P{data.ActivePipelineValue:N0}",
+                Value = $"₱{data.ActivePipelineValue:N2}",
                 Subtitle = "Monetary value in kitchen/prep",
-                Margin = new Padding(0, 6, 6, 0)
+                Margin = new Padding(4)
             };
             cardPipelineVal.SetBadge("Pipeline", UITheme.PrimaryMauve, Color.FromArgb(245, 235, 240));
             cardPipelineVal.CardClicked += (s, e) => Navigate("Orders", "Active");
@@ -291,7 +291,7 @@ namespace CC.Forms.Manager
                 Title = "Open Inquiries",
                 Value = data.OpenInquiriesCount.ToString(),
                 Subtitle = "Awaiting quote or response",
-                Margin = new Padding(6, 6, 6, 0)
+                Margin = new Padding(4)
             };
             cardInquiries.SetBadge("Quotations", UITheme.StatusYellowFg, UITheme.StatusYellowBg);
             cardInquiries.CardClicked += (s, e) => Navigate("Inquiries");
@@ -302,7 +302,7 @@ namespace CC.Forms.Manager
                 Title = "Overdue Tasks",
                 Value = data.ShopOverdueFollowupsCount.ToString(),
                 Subtitle = "Shop-wide overdue interactions",
-                Margin = new Padding(6, 6, 6, 0)
+                Margin = new Padding(4)
             };
             cardOverdue.SetBadge("Urgent", UITheme.StatusRedFg, UITheme.StatusRedBg);
             cardOverdue.CardClicked += (s, e) => Navigate("Follow-ups", "Overdue");
@@ -313,7 +313,7 @@ namespace CC.Forms.Manager
                 Title = "Customer Base",
                 Value = data.TotalCustomersCount.ToString(),
                 Subtitle = "Registered client accounts",
-                Margin = new Padding(6, 6, 0, 0)
+                Margin = new Padding(4)
             };
             cardCustomers.SetBadge("CRM", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
             cardCustomers.CardClicked += (s, e) => Navigate("Customers");
@@ -505,7 +505,7 @@ namespace CC.Forms.Manager
                     item.CustomerName,
                     item.CakeDetails,
                     item.DeliveryDate.ToString("MMM d, yyyy"),
-                    $"P{item.TotalAmount:N0}",
+                    $"₱{item.TotalAmount:N2}",
                     item.Status,
                     "View \u2192");
                 grid.Rows[rowIdx].Tag = item;
@@ -553,7 +553,7 @@ namespace CC.Forms.Manager
                 else if (e.ColumnIndex == 4) // TOTAL
                 {
                     using var font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold);
-                    g.DrawString($"\u20B1{item.TotalAmount:N0}", font, Brushes.Black, e.CellBounds.Left + px5, cellY);
+                    g.DrawString($"₱{item.TotalAmount:N2}", font, Brushes.Black, e.CellBounds.Left + px5, cellY);
                     e.Handled = true;
                 }
                 else if (e.ColumnIndex == 5) // STATUS

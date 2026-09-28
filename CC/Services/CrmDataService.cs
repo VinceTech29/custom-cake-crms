@@ -5044,7 +5044,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                     "Credit Card" => Color.FromArgb(140, 70, 90),
                     _ => Color.FromArgb(201, 151, 90)
                 },
-                ExtraLabel = $"P{m.Total:N0} ({m.Count})"
+                ExtraLabel = $"₱{m.Total:N2} ({m.Count})"
             }).ToList();
 
             var orderStatusCounts = await context.SalesOrders
