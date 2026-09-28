@@ -613,7 +613,7 @@ namespace CC.Forms.Admin.Users
 
                 e.Handled = true;
             }
-            // 2. ROLE COLUMN: Badge Pill
+            // 2. ROLE COLUMN: Badge Pill + Branch Pill (if assigned)
             else if (colIdxRole >= 0 && e.ColumnIndex == colIdxRole)
             {
                 string roleName = user.Role?.RoleName ?? (user.RoleId == 2 ? "Business Admin" : (user.RoleId == 3 ? "Manager" : "Staff"));
@@ -637,7 +637,18 @@ namespace CC.Forms.Admin.Users
                     pillText = Color.FromArgb(40, 125, 75);
                 }
 
-                DrawBadgePill(g, e.CellBounds, roleName, pillBg, pillText);
+                int nextX = DrawBadgePill(g, e.CellBounds, roleName, pillBg, pillText);
+
+                string? branchLabel = user.Branch != null
+                    ? user.Branch.BranchName
+                    : (user.BranchId.HasValue ? $"Branch #{user.BranchId}" : null);
+
+                if (!string.IsNullOrWhiteSpace(branchLabel))
+                {
+                    var branchBounds = new Rectangle(nextX + 6, e.CellBounds.Top, Math.Max(10, e.CellBounds.Right - (nextX + 6)), e.CellBounds.Height);
+                    DrawBadgePill(g, branchBounds, branchLabel, Color.FromArgb(245, 242, 238), Color.FromArgb(115, 98, 92), customLeft: nextX + 6);
+                }
+
                 e.Handled = true;
             }
             // 3. LAST LOGIN COLUMN
@@ -687,13 +698,13 @@ namespace CC.Forms.Admin.Users
             }
         }
 
-        private static void DrawBadgePill(Graphics g, Rectangle bounds, string text, Color bgColor, Color textColor)
+        private static int DrawBadgePill(Graphics g, Rectangle bounds, string text, Color bgColor, Color textColor, int? customLeft = null)
         {
             using var font = new Font(UITheme.FontSans, 8.5F, FontStyle.Bold);
             var size = TextRenderer.MeasureText(text, font);
             int pillWidth = size.Width + 16;
             int pillHeight = 24;
-            int pillX = bounds.Left + 16;
+            int pillX = customLeft ?? (bounds.Left + 16);
             int pillY = bounds.Top + (bounds.Height - pillHeight) / 2;
 
             var pillRect = new Rectangle(pillX, pillY, pillWidth, pillHeight);
@@ -704,6 +715,8 @@ namespace CC.Forms.Admin.Users
 
             TextRenderer.DrawText(g, text, font, pillRect, textColor,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+
+            return pillX + pillWidth;
         }
 
         private static string FormatLastLogin(DateTime dt)

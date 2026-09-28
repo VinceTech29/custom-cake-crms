@@ -2557,14 +2557,20 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
         public static async Task<List<SystemUser>> GetUsersAsync(
             string? searchQuery = null,
             string? roleFilter = null,
-            string? statusFilter = null)
+            string? statusFilter = null,
+            int? companyId = null)
         {
-            await using var context = CreateDbContext();
-            int companyId = CurrentCompanyId;
+            int targetCompanyId = companyId ?? CurrentCompanyId;
+            await using var context = CreateDbContext(targetCompanyId);
             IQueryable<SystemUser> query = context.AppUsers
                 .Include(u => u.Role)
-                .Where(u => u.CompanyId == companyId)
+                .Include(u => u.Branch)
                 .AsNoTracking();
+
+            if (targetCompanyId > 0)
+            {
+                query = query.Where(u => u.CompanyId == targetCompanyId || u.CompanyId == 0);
+            }
 
             if (!string.IsNullOrWhiteSpace(searchQuery))
             {
@@ -2574,7 +2580,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                     u.LastName.ToLower().Contains(q) ||
                     u.Username.ToLower().Contains(q) ||
                     u.Email.ToLower().Contains(q) ||
-                    (u.Role != null && u.Role.RoleName.ToLower().Contains(q)));
+                    (u.Role != null && u.Role.RoleName.ToLower().Contains(q)) ||
+                    (u.Branch != null && u.Branch.BranchName.ToLower().Contains(q)));
             }
 
             if (!string.IsNullOrWhiteSpace(roleFilter) && roleFilter != "All Roles")
@@ -2598,16 +2605,23 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             string? roleFilter = null,
             string? statusFilter = null,
             int page = 1,
-            int pageSize = 10)
+            int pageSize = 10,
+            int? companyId = null)
         {
             pageSize = Math.Max(1, pageSize);
             page = Math.Max(1, page);
 
-            await using var context = CreateDbContext();
+            int targetCompanyId = companyId ?? CurrentCompanyId;
+            await using var context = CreateDbContext(targetCompanyId);
             IQueryable<SystemUser> query = context.AppUsers
                 .Include(u => u.Role)
-                .Where(u => u.CompanyId == DefaultCompanyId)
+                .Include(u => u.Branch)
                 .AsNoTracking();
+
+            if (targetCompanyId > 0)
+            {
+                query = query.Where(u => u.CompanyId == targetCompanyId || u.CompanyId == 0);
+            }
 
             if (!string.IsNullOrWhiteSpace(searchQuery))
             {
@@ -2617,7 +2631,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                     u.LastName.ToLower().Contains(q) ||
                     u.Username.ToLower().Contains(q) ||
                     u.Email.ToLower().Contains(q) ||
-                    (u.Role != null && u.Role.RoleName.ToLower().Contains(q)));
+                    (u.Role != null && u.Role.RoleName.ToLower().Contains(q)) ||
+                    (u.Branch != null && u.Branch.BranchName.ToLower().Contains(q)));
             }
 
             if (!string.IsNullOrWhiteSpace(roleFilter) && roleFilter != "All Roles")
@@ -2644,15 +2659,20 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             return new PagedList<SystemUser>(items, totalCount, page, pageSize);
         }
 
-        public static async Task<UserSummaryMetrics> GetUserSummaryMetricsAsync()
+        public static async Task<UserSummaryMetrics> GetUserSummaryMetricsAsync(int? companyId = null)
         {
-            await using var context = CreateDbContext();
-            int companyId = CurrentCompanyId;
-            var users = await context.AppUsers
+            int targetCompanyId = companyId ?? CurrentCompanyId;
+            await using var context = CreateDbContext(targetCompanyId);
+            IQueryable<SystemUser> query = context.AppUsers
                 .Include(u => u.Role)
-                .Where(u => u.CompanyId == companyId)
-                .AsNoTracking()
-                .ToListAsync();
+                .AsNoTracking();
+
+            if (targetCompanyId > 0)
+            {
+                query = query.Where(u => u.CompanyId == targetCompanyId || u.CompanyId == 0);
+            }
+
+            var users = await query.ToListAsync();
 
             int totalActive = users.Count(u => u.IsActive);
             int adminCount = users.Count(u => u.IsActive && u.Role != null && (u.Role.RoleName == "Business Admin" || u.Role.RoleName == "Admin" || u.Role.RoleName == "SuperAdmin"));
