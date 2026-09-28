@@ -116,27 +116,37 @@ namespace CC.Forms.SuperAdmin
             rootLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
 
             // 1. TOP HEADER & PERIOD FILTER
-            var topPanel = new Panel
+            // 2-row stack: row 0 = title + subtitle, row 1 = period pills
+            var topTable = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
-                Height = 64,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 1,
+                RowCount = 2,
                 BackColor = Color.Transparent,
-                Margin = new Padding(0, 0, 0, 16)
+                Margin = new Padding(0, 0, 0, 16),
+                Padding = new Padding(0, 0, 0, 0)
             };
+            topTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            topTable.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // row 0: title
+            topTable.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // row 1: filters
 
+            // --- Row 0: Title + Subtitle ---
             var titleStack = new FlowLayoutPanel
             {
-                Dock = DockStyle.Left,
                 FlowDirection = FlowDirection.TopDown,
                 WrapContents = false,
                 AutoSize = true,
-                BackColor = Color.Transparent
+                Anchor = AnchorStyles.Left | AnchorStyles.Top,
+                BackColor = Color.Transparent,
+                Margin = new Padding(0, 0, 0, 6)
             };
 
             var lblTitle = new Label
             {
                 Text = "Platform Administration",
-                Font = new Font(UITheme.FontSerif, 22F, FontStyle.Bold),
+                Font = new Font(UITheme.FontSerif, 20F, FontStyle.Bold),
                 ForeColor = UITheme.TextDark,
                 AutoSize = true,
                 Margin = new Padding(0, 0, 0, 2)
@@ -145,7 +155,7 @@ namespace CC.Forms.SuperAdmin
             var lblSubtitle = new Label
             {
                 Text = "Supervise multi-tenant businesses, system users, database routing, and platform health",
-                Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Regular),
+                Font = new Font(UITheme.FontSans, 9F, FontStyle.Regular),
                 ForeColor = UITheme.TextMuted,
                 AutoSize = true,
                 Margin = Padding.Empty
@@ -154,10 +164,11 @@ namespace CC.Forms.SuperAdmin
             titleStack.Controls.Add(lblTitle);
             titleStack.Controls.Add(lblSubtitle);
 
+            // --- Row 1: Period selector ---
             var periodSelector = new PeriodSelectorControl(new[] { "7d", "30d", "90d", "all" })
             {
-                Dock = DockStyle.Right,
-                SelectedPeriod = _activePeriod
+                SelectedPeriod = _activePeriod,
+                Anchor = AnchorStyles.Left | AnchorStyles.Top
             };
             periodSelector.PeriodChanged += (s, newPeriod) =>
             {
@@ -165,9 +176,22 @@ namespace CC.Forms.SuperAdmin
                 _ = LoadDashboardDataAsync();
             };
 
-            topPanel.Controls.Add(periodSelector);
-            topPanel.Controls.Add(titleStack);
-            rootLayout.Controls.Add(topPanel, 0, 0);
+            var filtersRow = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Anchor = AnchorStyles.Left | AnchorStyles.Top,
+                BackColor = Color.Transparent,
+                Padding = Padding.Empty,
+                Margin = Padding.Empty
+            };
+            filtersRow.Controls.Add(periodSelector);
+
+            topTable.Controls.Add(titleStack, 0, 0);
+            topTable.Controls.Add(filtersRow, 0, 1);
+            rootLayout.Controls.Add(topTable, 0, 0);
 
             // 2. 8 KPI STAT CARDS (4x2 GRID)
             var kpiTable = new TableLayoutPanel
