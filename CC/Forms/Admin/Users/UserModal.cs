@@ -2,6 +2,7 @@ using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using CC.Controls;
 using CC.Domain.Entities;
@@ -62,7 +63,7 @@ namespace CC.Forms.Admin.Users
         private void InitializeModal()
         {
             Text = _isEditMode ? "Edit User" : "Add New User";
-            Size = new Size(580, 750);
+            Size = new Size(580, 680);
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterParent;
             BackColor = ColorModalBg;
@@ -85,12 +86,19 @@ namespace CC.Forms.Admin.Users
 
         private void BuildContent()
         {
+            // 1. FIXED HEADER
             var headerPanel = new Panel
             {
                 Dock = DockStyle.Top,
                 Height = 65,
-                Padding = new Padding(28, 20, 24, 0),
-                BackColor = Color.Transparent
+                Padding = new Padding(28, 18, 24, 0),
+                BackColor = ColorModalBg
+            };
+
+            headerPanel.Paint += (s, e) =>
+            {
+                using var pen = new Pen(Color.FromArgb(238, 233, 228), 1f);
+                e.Graphics.DrawLine(pen, 28, headerPanel.Height - 1, headerPanel.Width - 28, headerPanel.Height - 1);
             };
 
             var lblTitle = new Label
@@ -100,16 +108,17 @@ namespace CC.Forms.Admin.Users
                 Font = new Font(UITheme.FontSerif, 18F, FontStyle.Bold),
                 ForeColor = UITheme.TextDark,
                 AutoSize = true,
-                Location = new Point(28, 20)
+                Location = new Point(28, 18)
             };
 
             var btnClose = new Button
             {
                 Text = "\u2715",
-                Font = new Font(UITheme.FontSans, 11F, FontStyle.Regular),
+                Font = new Font(UITheme.FontSans, 11F),
                 ForeColor = Color.FromArgb(140, 120, 115),
                 Size = new Size(32, 32),
-                Location = new Point(Width - 56, 18),
+                Location = new Point(Width - 56, 16),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
                 FlatStyle = FlatStyle.Flat,
                 Cursor = Cursors.Hand,
                 BackColor = Color.FromArgb(246, 243, 239)
@@ -124,172 +133,54 @@ namespace CC.Forms.Admin.Users
 
             headerPanel.Controls.Add(lblTitle);
             headerPanel.Controls.Add(btnClose);
-            Controls.Add(headerPanel);
 
-            // Scrollable body panel
-            var bodyPanel = new Panel
-            {
-                Location = new Point(28, 75),
-                Size = new Size(Width - 56, Height - 160),
-                AutoScroll = true,
-                BackColor = Color.Transparent
-            };
-
-            int y = 5;
-
-            // Name Row: First Name & Last Name side by side
-            var lblName = CreateFieldLabel("FULL NAME", true);
-            lblName.Location = new Point(0, y);
-            bodyPanel.Controls.Add(lblName);
-            y += 24;
-
-            int colWidth = (bodyPanel.Width - 14) / 2;
-            txtFirstName = CreateStyledTextBox("First Name");
-            txtFirstName.Location = new Point(0, y);
-            txtFirstName.Width = colWidth;
-            bodyPanel.Controls.Add(txtFirstName);
-
-            txtLastName = CreateStyledTextBox("Last Name");
-            txtLastName.Location = new Point(colWidth + 14, y);
-            txtLastName.Width = colWidth;
-            bodyPanel.Controls.Add(txtLastName);
-            y += 50;
-
-            // Username
-            var lblUser = CreateFieldLabel("USERNAME", true);
-            lblUser.Location = new Point(0, y);
-            bodyPanel.Controls.Add(lblUser);
-            y += 24;
-
-            txtUsername = CreateStyledTextBox("e.g. lea.abad");
-            txtUsername.Location = new Point(0, y);
-            txtUsername.Width = bodyPanel.Width - 5;
-            bodyPanel.Controls.Add(txtUsername);
-            y += 50;
-
-            // Email
-            var lblEmail = CreateFieldLabel("EMAIL ADDRESS", true);
-            lblEmail.Location = new Point(0, y);
-            bodyPanel.Controls.Add(lblEmail);
-            y += 24;
-
-            txtEmail = CreateStyledTextBox("e.g. user@customcakes.ph");
-            txtEmail.Location = new Point(0, y);
-            txtEmail.Width = bodyPanel.Width - 5;
-            bodyPanel.Controls.Add(txtEmail);
-            y += 50;
-
-            // Phone
-            var lblPhone = CreateFieldLabel("PHONE NUMBER", false);
-            lblPhone.Location = new Point(0, y);
-            bodyPanel.Controls.Add(lblPhone);
-            y += 24;
-
-            txtPhone = CreateStyledTextBox("e.g. +63 917 123 4567");
-            txtPhone.Location = new Point(0, y);
-            txtPhone.Width = bodyPanel.Width - 5;
-            bodyPanel.Controls.Add(txtPhone);
-            y += 50;
-
-            // Role Dropdown
-            var lblRole = CreateFieldLabel("ROLE ASSIGNMENT", true);
-            lblRole.Location = new Point(0, y);
-            bodyPanel.Controls.Add(lblRole);
-            y += 24;
-
-            cmbRole = new ComboBox
-            {
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                Font = new Font(UITheme.FontSans, 10F),
-                Location = new Point(0, y),
-                Width = bodyPanel.Width - 5,
-                Height = 36,
-                BackColor = ColorFieldBg,
-                FlatStyle = FlatStyle.Flat
-            };
-            cmbRole.Items.AddRange(new object[] { "Staff", "Manager", "Business Admin" });
-            cmbRole.SelectedIndex = 0;
-            bodyPanel.Controls.Add(cmbRole);
-            y += 50;
-
-            // Branch Assignment
-            var lblBranch = CreateFieldLabel("BRANCH ASSIGNMENT", false);
-            lblBranch.Location = new Point(0, y);
-            bodyPanel.Controls.Add(lblBranch);
-            y += 24;
-
-            cmbBranch = new ComboBox
-            {
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                Font = new Font(UITheme.FontSans, 10F),
-                Location = new Point(0, y),
-                Width = bodyPanel.Width - 5,
-                Height = 36,
-                BackColor = ColorFieldBg,
-                FlatStyle = FlatStyle.Flat
-            };
-            bodyPanel.Controls.Add(cmbBranch);
-            y += 50;
-
-            // Password
-            var lblPass = CreateFieldLabel(_isEditMode ? "PASSWORD (LEAVE BLANK TO KEEP CURRENT)" : "INITIAL PASSWORD", !_isEditMode);
-            lblPass.Location = new Point(0, y);
-            bodyPanel.Controls.Add(lblPass);
-            y += 24;
-
-            txtPassword = CreateStyledTextBox(_isEditMode ? "Optional new password" : "Minimum 6 characters");
-            txtPassword.UseSystemPasswordChar = true;
-            txtPassword.Location = new Point(0, y);
-            txtPassword.Width = bodyPanel.Width - 5;
-            bodyPanel.Controls.Add(txtPassword);
-            y += 50;
-
-            // Status Checkbox
-            chkIsActive = new CheckBox
-            {
-                Text = "Active user (grants immediate access to sign in)",
-                Checked = true,
-                Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Regular),
-                ForeColor = UITheme.TextDark,
-                Location = new Point(0, y),
-                AutoSize = true
-            };
-            bodyPanel.Controls.Add(chkIsActive);
-            y += 35;
-
-            // Error Label
-            lblError = new Label
-            {
-                Text = string.Empty,
-                Font = new Font(UITheme.FontSans, 9F, FontStyle.Regular),
-                ForeColor = Color.FromArgb(197, 48, 48),
-                Location = new Point(0, y),
-                AutoSize = true
-            };
-            bodyPanel.Controls.Add(lblError);
-
-            Controls.Add(bodyPanel);
-
-            // Footer Panel (Buttons)
+            // 2. FIXED FOOTER
             var footerPanel = new Panel
             {
                 Dock = DockStyle.Bottom,
-                Height = 75,
-                Padding = new Padding(28, 12, 28, 20),
-                BackColor = Color.Transparent
+                Height = 72,
+                BackColor = ColorModalBg
             };
+
+            footerPanel.Paint += (s, e) =>
+            {
+                using var pen = new Pen(Color.FromArgb(238, 233, 228), 1f);
+                e.Graphics.DrawLine(pen, 28, 0, footerPanel.Width - 28, 0);
+            };
+
+            var footerFlow = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.RightToLeft,
+                BackColor = ColorModalBg,
+                Padding = new Padding(0, 15, 28, 15),
+                WrapContents = false
+            };
+
+            btnSave = new Button
+            {
+                Text = _isEditMode ? "Save Changes" : "Add User",
+                Size = new Size(135, 42),
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold),
+                BackColor = ColorPrimaryBtn,
+                ForeColor = Color.White,
+                Cursor = Cursors.Hand,
+                Margin = new Padding(0, 0, 0, 0)
+            };
+            UITheme.ApplyActionButton(btnSave, "\uE73E", 10);
+            btnSave.Click += async (s, e) => await SaveUserAsync();
 
             btnCancel = new Button
             {
                 Text = "Cancel",
                 Size = new Size(110, 42),
-                Location = new Point(footerPanel.Width - 250, 15),
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold),
                 BackColor = ColorCancelBtn,
                 ForeColor = UITheme.TextDark,
                 Cursor = Cursors.Hand,
-                Anchor = AnchorStyles.Bottom | AnchorStyles.Right
+                Margin = new Padding(0, 0, 12, 0)
             };
             btnCancel.FlatAppearance.BorderSize = 0;
             btnCancel.ApplyRoundedRegion(10);
@@ -299,48 +190,154 @@ namespace CC.Forms.Admin.Users
                 Close();
             };
 
-            btnSave = new Button
-            {
-                Text = _isEditMode ? "Save Changes" : "Add User",
-                Size = new Size(125, 42),
-                Location = new Point(footerPanel.Width - 130, 15),
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold),
-                BackColor = ColorPrimaryBtn,
-                ForeColor = Color.White,
-                Cursor = Cursors.Hand,
-                Anchor = AnchorStyles.Bottom | AnchorStyles.Right
-            };
-            UITheme.ApplyActionButton(btnSave, "\uE73E", 10);
-            btnSave.Click += async (s, e) => await SaveUserAsync();
+            footerFlow.Controls.Add(btnSave);
+            footerFlow.Controls.Add(btnCancel);
+            footerPanel.Controls.Add(footerFlow);
 
-            footerPanel.Controls.Add(btnCancel);
-            footerPanel.Controls.Add(btnSave);
+            // 3. SCROLLABLE CONTENT BODY
+            var bodyPanel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                AutoScroll = true,
+                BackColor = ColorModalBg,
+                Padding = new Padding(28, 16, 28, 16)
+            };
+
+            int y = 14;
+            int fullWidth = 504;
+            int halfWidth = (fullWidth - 14) / 2;
+
+            // 1. First Name & Last Name (Separate explicit labels!)
+            bodyPanel.Controls.Add(CreateFieldLabel("FIRST NAME", true, new Point(28, y)));
+            bodyPanel.Controls.Add(CreateFieldLabel("LAST NAME", true, new Point(28 + halfWidth + 14, y)));
+            y += 24;
+
+            txtFirstName = CreateStyledTextBox("e.g. Maria", new Point(28, y), halfWidth);
+            txtLastName = CreateStyledTextBox("e.g. Santos", new Point(28 + halfWidth + 14, y), halfWidth);
+            bodyPanel.Controls.Add(txtFirstName);
+            bodyPanel.Controls.Add(txtLastName);
+            y += 48;
+
+            // 2. Username (Full Width)
+            bodyPanel.Controls.Add(CreateFieldLabel("USERNAME", true, new Point(28, y)));
+            y += 24;
+
+            txtUsername = CreateStyledTextBox("e.g. maria.santos", new Point(28, y), fullWidth);
+            bodyPanel.Controls.Add(txtUsername);
+            y += 48;
+
+            // 3. Email Address & Phone Number (2 columns)
+            bodyPanel.Controls.Add(CreateFieldLabel("EMAIL ADDRESS", true, new Point(28, y)));
+            bodyPanel.Controls.Add(CreateFieldLabel("PHONE NUMBER", false, new Point(28 + halfWidth + 14, y)));
+            y += 24;
+
+            txtEmail = CreateStyledTextBox("e.g. maria@customcakes.ph", new Point(28, y), halfWidth);
+            txtPhone = CreateStyledTextBox("e.g. +63 917 123 4567", new Point(28 + halfWidth + 14, y), halfWidth);
+            bodyPanel.Controls.Add(txtEmail);
+            bodyPanel.Controls.Add(txtPhone);
+            y += 48;
+
+            // 4. Role Assignment & Branch Assignment (2 columns)
+            bodyPanel.Controls.Add(CreateFieldLabel("ROLE ASSIGNMENT", true, new Point(28, y)));
+            bodyPanel.Controls.Add(CreateFieldLabel("BRANCH ASSIGNMENT", false, new Point(28 + halfWidth + 14, y)));
+            y += 24;
+
+            cmbRole = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Font = new Font(UITheme.FontSans, 10F),
+                Location = new Point(28, y),
+                Width = halfWidth,
+                Height = 34,
+                BackColor = ColorFieldBg,
+                FlatStyle = FlatStyle.Flat
+            };
+            cmbRole.Items.AddRange(new object[] { "Staff", "Manager", "Business Admin" });
+            cmbRole.SelectedIndex = 0;
+            bodyPanel.Controls.Add(cmbRole);
+
+            cmbBranch = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Font = new Font(UITheme.FontSans, 10F),
+                Location = new Point(28 + halfWidth + 14, y),
+                Width = halfWidth,
+                Height = 34,
+                BackColor = ColorFieldBg,
+                FlatStyle = FlatStyle.Flat
+            };
+            bodyPanel.Controls.Add(cmbBranch);
+            y += 48;
+
+            // 5. Password (Full Width)
+            bodyPanel.Controls.Add(CreateFieldLabel(_isEditMode ? "PASSWORD (LEAVE BLANK TO KEEP CURRENT)" : "INITIAL PASSWORD", !_isEditMode, new Point(28, y)));
+            y += 24;
+
+            txtPassword = CreateStyledTextBox(_isEditMode ? "Optional new password" : "Minimum 6 characters", new Point(28, y), fullWidth);
+            txtPassword.UseSystemPasswordChar = true;
+            bodyPanel.Controls.Add(txtPassword);
+            y += 48;
+
+            // 6. Active Checkbox
+            chkIsActive = new CheckBox
+            {
+                Text = "Active user (grants immediate access to sign in)",
+                Checked = true,
+                Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Regular),
+                ForeColor = UITheme.TextDark,
+                Location = new Point(28, y),
+                AutoSize = true,
+                Cursor = Cursors.Hand
+            };
+            bodyPanel.Controls.Add(chkIsActive);
+            y += 36;
+
+            // 7. Error Label
+            lblError = new Label
+            {
+                Text = string.Empty,
+                Font = new Font(UITheme.FontSans, 9F, FontStyle.Regular),
+                ForeColor = Color.FromArgb(197, 48, 48),
+                Location = new Point(28, y),
+                AutoSize = true,
+                Visible = false
+            };
+            bodyPanel.Controls.Add(lblError);
+            y += 30;
+
+            bodyPanel.AutoScrollMinSize = new Size(0, y);
+
+            // Add docked panels in correct WinForms z-order
+            Controls.Add(bodyPanel);
+            Controls.Add(headerPanel);
             Controls.Add(footerPanel);
+            bodyPanel.BringToFront();
         }
 
-        private Label CreateFieldLabel(string text, bool isRequired)
+        private Label CreateFieldLabel(string text, bool isRequired, Point location)
         {
-            var lbl = new Label
+            return new Label
             {
                 Text = isRequired ? $"{text} *" : text,
                 Font = new Font(UITheme.FontSans, 8F, FontStyle.Bold),
                 ForeColor = isRequired ? ColorAsterisk : ColorLabel,
+                Location = location,
                 AutoSize = true
             };
-            return lbl;
         }
 
-        private TextBox CreateStyledTextBox(string placeholder)
+        private TextBox CreateStyledTextBox(string placeholder, Point location, int width)
         {
-            var tb = new TextBox
+            return new TextBox
             {
                 Font = new Font(UITheme.FontSans, 10F),
                 BackColor = ColorFieldBg,
                 BorderStyle = BorderStyle.FixedSingle,
-                Height = 34
+                Height = 34,
+                Location = location,
+                Width = width,
+                PlaceholderText = placeholder
             };
-            return tb;
         }
 
         private void PopulateExistingData(SystemUser user)
@@ -375,9 +372,10 @@ namespace CC.Forms.Admin.Users
             }
         }
 
-        private async System.Threading.Tasks.Task SaveUserAsync()
+        private async Task SaveUserAsync()
         {
             lblError.Text = string.Empty;
+            lblError.Visible = false;
 
             string first = txtFirstName.Text.Trim();
             string last = txtLastName.Text.Trim();
@@ -390,24 +388,28 @@ namespace CC.Forms.Admin.Users
             if (string.IsNullOrWhiteSpace(first) || string.IsNullOrWhiteSpace(last))
             {
                 lblError.Text = "First and last name are required.";
+                lblError.Visible = true;
                 return;
             }
 
             if (string.IsNullOrWhiteSpace(username))
             {
                 lblError.Text = "Username is required.";
+                lblError.Visible = true;
                 return;
             }
 
             if (string.IsNullOrWhiteSpace(email) || !email.Contains("@"))
             {
                 lblError.Text = "Please enter a valid email address.";
+                lblError.Visible = true;
                 return;
             }
 
             if (!_isEditMode && string.IsNullOrWhiteSpace(pass))
             {
                 lblError.Text = "Password is required for new users.";
+                lblError.Visible = true;
                 return;
             }
 
@@ -463,6 +465,7 @@ namespace CC.Forms.Admin.Users
             catch (Exception ex)
             {
                 lblError.Text = $"Failed to save user: {ex.Message}";
+                lblError.Visible = true;
                 btnSave.Enabled = true;
             }
         }
