@@ -134,20 +134,28 @@ namespace CC.Forms.Admin
             rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // Top Customers & Subscription
 
             // 1. TOP HEADER & PERIOD FILTER
-            var topPanel = new Panel
+            // Use a 2-column TableLayoutPanel: col0=title (fills remaining), col1=controls (auto-size)
+            // This prevents the right-side controls from overlapping the title label.
+            var topTable = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
                 Height = 72,
-                Padding = new Padding(0, 0, 0, 10),
-                BackColor = Color.Transparent
+                ColumnCount = 2,
+                RowCount = 1,
+                BackColor = Color.Transparent,
+                Margin = Padding.Empty,
+                Padding = new Padding(0, 0, 0, 10)
             };
+            topTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F)); // title column grows
+            topTable.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));       // controls shrink-to-fit
+            topTable.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
             var titleStack = new FlowLayoutPanel
             {
                 FlowDirection = FlowDirection.TopDown,
                 WrapContents = false,
                 AutoSize = true,
-                Dock = DockStyle.Left,
+                Anchor = AnchorStyles.Left | AnchorStyles.Top,
                 BackColor = Color.Transparent
             };
 
@@ -194,14 +202,14 @@ namespace CC.Forms.Admin
                 _ = LoadDashboardDataAsync();
             };
 
-            // Wrap period selector + branch selector in a single right-docked horizontal strip
+            // Right column: period pills + branch dropdown side by side
             var rightControlsPanel = new FlowLayoutPanel
             {
                 FlowDirection = FlowDirection.LeftToRight,
                 WrapContents = false,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                Dock = DockStyle.Right,
+                Anchor = AnchorStyles.Right | AnchorStyles.Top,
                 BackColor = Color.Transparent,
                 Padding = new Padding(0, 4, 0, 4),
                 Margin = Padding.Empty
@@ -209,9 +217,9 @@ namespace CC.Forms.Admin
             rightControlsPanel.Controls.Add(periodSelector);
             rightControlsPanel.Controls.Add(branchSelector);
 
-            topPanel.Controls.Add(rightControlsPanel);
-            topPanel.Controls.Add(titleStack);
-            rootLayout.Controls.Add(topPanel, 0, 0);
+            topTable.Controls.Add(titleStack, 0, 0);
+            topTable.Controls.Add(rightControlsPanel, 1, 0);
+            rootLayout.Controls.Add(topTable, 0, 0);
 
 
             // 2. 8 FINANCIAL & CRM KPI CARDS (4x2 GRID)
