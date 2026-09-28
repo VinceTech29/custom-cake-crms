@@ -101,7 +101,8 @@ namespace CC.Forms.Manager
             {
                 var data = await CrmDataService.GetManagerDashboardDataAsync(
                     companyId: SessionService.CurrentUser?.CompanyId,
-                    period: _activePeriod);
+                    period: _activePeriod,
+                    branchId: SessionService.ActiveBranchId);
 
                 if (IsDisposed) return;
 
@@ -122,36 +123,46 @@ namespace CC.Forms.Manager
             rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // Recent Orders
 
             // 1. TOP HEADER & PERIOD FILTER
-            var topPanel = new Panel
+            // 2-row stack: row 0 = title + subtitle, row 1 = period pills + branch selector
+            var topTable = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
-                Height = 84,
-                Padding = new Padding(0, 0, 0, 14),
-                BackColor = Color.Transparent
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 1,
+                RowCount = 2,
+                BackColor = Color.Transparent,
+                Margin = Padding.Empty,
+                Padding = new Padding(0, 0, 0, 14)
             };
+            topTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            topTable.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // row 0: title
+            topTable.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // row 1: filters
 
             var titleStack = new FlowLayoutPanel
             {
                 FlowDirection = FlowDirection.TopDown,
                 WrapContents = false,
                 AutoSize = true,
-                Dock = DockStyle.Left,
-                BackColor = Color.Transparent
+                Anchor = AnchorStyles.Left | AnchorStyles.Top,
+                BackColor = Color.Transparent,
+                Margin = new Padding(0, 0, 0, 6)
             };
 
             var lblTitle = new Label
             {
                 Text = "Manager Dashboard",
-                Font = new Font(UITheme.FontSerif, 22F, FontStyle.Bold),
+                Font = new Font(UITheme.FontSerif, 20F, FontStyle.Bold),
                 ForeColor = UITheme.TextDark,
                 AutoSize = true,
-                Margin = new Padding(0, 0, 0, 4)
+                Margin = new Padding(0, 0, 0, 2)
             };
 
+            string branchBadge = SessionService.GetActiveBranchDisplay();
             var lblSubtitle = new Label
             {
-                Text = $"Operational Oversight & Order Pipeline \u00B7 {DateTime.Now:MMM d, yyyy}",
-                Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Regular),
+                Text = $"{SessionService.GetActiveBrandName()} \u00B7 {DateTime.Now:MMM d, yyyy}",
+                Font = new Font(UITheme.FontSans, 9F, FontStyle.Regular),
                 ForeColor = UITheme.TextMuted,
                 AutoSize = true,
                 Margin = Padding.Empty
@@ -162,8 +173,8 @@ namespace CC.Forms.Manager
 
             var periodSelector = new PeriodSelectorControl(PeriodSelectorControl.ManagerPeriods)
             {
-                Dock = DockStyle.Right,
-                SelectedPeriod = _activePeriod
+                SelectedPeriod = _activePeriod,
+                Anchor = AnchorStyles.None
             };
             periodSelector.PeriodChanged += (s, newPeriod) =>
             {
@@ -171,9 +182,34 @@ namespace CC.Forms.Manager
                 _ = LoadDashboardDataAsync();
             };
 
-            topPanel.Controls.Add(periodSelector);
-            topPanel.Controls.Add(titleStack);
-            rootLayout.Controls.Add(topPanel, 0, 0);
+            var branchSelector = new BranchSelectorControl
+            {
+                Anchor = AnchorStyles.None,
+                Margin = new Padding(8, 0, 0, 0)
+            };
+            branchSelector.BranchChanged += (s, branchId) =>
+            {
+                _ = LoadDashboardDataAsync();
+            };
+
+            var filtersRow = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Anchor = AnchorStyles.Left | AnchorStyles.Top,
+                BackColor = Color.Transparent,
+                Padding = Padding.Empty,
+                Margin = Padding.Empty
+            };
+            filtersRow.Controls.Add(periodSelector);
+            filtersRow.Controls.Add(branchSelector);
+
+            topTable.Controls.Add(titleStack, 0, 0);
+            topTable.Controls.Add(filtersRow, 0, 1);
+            rootLayout.Controls.Add(topTable, 0, 0);
+
 
             // 2. 8 MANAGER KPI CARDS (4x2 GRID)
             var kpiTable = new TableLayoutPanel

@@ -174,6 +174,30 @@ namespace CC.Services
         int MaxBranches = 1
     );
 
+    public record BranchCapabilityInfo(
+        bool AllowBranching,
+        int MaxBranches,
+        string PlanName,
+        int ActiveBranchesCount
+    );
+
+    public record BranchListItem(
+        int BranchId,
+        int CompanyId,
+        string BranchName,
+        string BranchCode,
+        string Address,
+        string ContactPhone,
+        string ContactEmail,
+        string ManagerName,
+        bool IsActive,
+        DateTime CreatedDate,
+        int OrderCount,
+        decimal TotalSales,
+        int CustomerCount,
+        int StaffCount
+    );
+
     public record BillingHistoryItem(
         DateTime Date,
         string Description,
@@ -303,6 +327,48 @@ namespace CC.Services
             string fallback = $"Server=(localdb)\\MSSQLLocalDB;Database={DefaultTenantDatabase};Trusted_Connection=True;TrustServerCertificate=True;";
             _tenantConnectionCache[targetCompanyId] = fallback;
             return fallback;
+        }
+
+        public static void ClearTenantSession()
+        {
+            _tenantConnectionCache.Clear();
+        }
+
+        public static async Task<string?> GetCompanyNameAsync(int companyId)
+        {
+            try
+            {
+                await using var masterContext = CreateMasterDbContext();
+                var company = await masterContext.Companies
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(c => c.CompanyId == companyId);
+                if (company != null && !string.IsNullOrWhiteSpace(company.CompanyName))
+                {
+                    return company.CompanyName.Trim();
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[GetCompanyNameAsync master DB] {ex.Message}");
+            }
+
+            try
+            {
+                await using var tenantContext = CreateDbContext(companyId);
+                var company = await tenantContext.Companies
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(c => c.CompanyId == companyId);
+                if (company != null && !string.IsNullOrWhiteSpace(company.CompanyName))
+                {
+                    return company.CompanyName.Trim();
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[GetCompanyNameAsync tenant DB] {ex.Message}");
+            }
+
+            return null;
         }
 
         public static CrmDbContext CreateDbContext(int? companyId = null)
@@ -446,6 +512,43 @@ namespace CC.Services
                     SET IDENTITY_INSERT SubscriptionStatuses OFF;
                 ");
             }
+
+            // Branches schema migration
+            await context.Database.ExecuteSqlRawAsync(@"
+                IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Branches')
+                BEGIN
+                    CREATE TABLE Branches (
+                        BranchId INT IDENTITY(1,1) PRIMARY KEY,
+                        CompanyId INT NOT NULL,
+                        BranchName NVARCHAR(150) NOT NULL,
+                        BranchCode NVARCHAR(50) NOT NULL,
+                        Address NVARCHAR(255) NULL,
+                        ContactPhone NVARCHAR(50) NULL,
+                        ContactEmail NVARCHAR(100) NULL,
+                        ManagerName NVARCHAR(100) NULL,
+                        IsActive BIT NOT NULL DEFAULT 1,
+                        CreatedDate DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+                    );
+                END
+
+                IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'SalesOrders' AND COLUMN_NAME = 'BranchId')
+                    ALTER TABLE SalesOrders ADD BranchId INT NULL;
+
+                IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Customers' AND COLUMN_NAME = 'BranchId')
+                    ALTER TABLE Customers ADD BranchId INT NULL;
+
+                IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'AppUsers' AND COLUMN_NAME = 'BranchId')
+                    ALTER TABLE AppUsers ADD BranchId INT NULL;
+
+                IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'CustomerFollowUps' AND COLUMN_NAME = 'BranchId')
+                    ALTER TABLE CustomerFollowUps ADD BranchId INT NULL;
+
+                IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'CustomerInquiries' AND COLUMN_NAME = 'BranchId')
+                    ALTER TABLE CustomerInquiries ADD BranchId INT NULL;
+
+                IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Payments' AND COLUMN_NAME = 'BranchId')
+                    ALTER TABLE Payments ADD BranchId INT NULL;
+            ");
         }
 
         public static async Task EnsureDatabaseReadyAsync()
@@ -690,7 +793,7 @@ namespace CC.Services
                 await context.Database.ExecuteSqlRawAsync(@"
                     UPDATE AppUsers SET PasswordHash = 'admin123' WHERE PasswordHash = 'TEST_HASH' OR PasswordHash IS NULL OR PasswordHash = '';
                     UPDATE AppUsers SET Username = 'lea.abad' WHERE UserId = 5 AND Username = 'admin';
-                    UPDATE AppUsers SET IsActive = 1, PasswordHash = 'admin123' WHERE Username = 'superadmin';
+                    UPDATE AppUsers SET IsActive = 1, PasswordHash = 'admin123', FirstName = 'Super', LastName = 'Admin' WHERE Username = 'superadmin' OR RoleId = 1;
                 ");
 
                 // 3. Ensure Master DB Company and CompanyDatabases exist for Company 2
@@ -901,10 +1004,89 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 {
                     System.Diagnostics.Debug.WriteLine($"[EnsureDatabaseReadyAsync Terms warning] {termsEx.Message}");
                 }
+
+                // Seed default branch baseline if needed
+                await EnsureTenantBranchBaselineAsync(context, DefaultCompanyId);
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"[CrmDataService.EnsureDatabaseReadyAsync] {ex.Message}");
+            }
+        }
+
+        public static async Task EnsureTenantBranchBaselineAsync(CrmDbContext context, int companyId)
+        {
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"
+                    IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Branches')
+                    BEGIN
+                        CREATE TABLE Branches (
+                            BranchId INT IDENTITY(1,1) PRIMARY KEY,
+                            CompanyId INT NOT NULL,
+                            BranchName NVARCHAR(150) NOT NULL,
+                            BranchCode NVARCHAR(50) NOT NULL,
+                            Address NVARCHAR(255) NULL,
+                            ContactPhone NVARCHAR(50) NULL,
+                            ContactEmail NVARCHAR(100) NULL,
+                            ManagerName NVARCHAR(100) NULL,
+                            IsActive BIT NOT NULL DEFAULT 1,
+                            CreatedDate DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+                        );
+                    END
+
+                    IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'SalesOrders' AND COLUMN_NAME = 'BranchId')
+                        ALTER TABLE SalesOrders ADD BranchId INT NULL;
+
+                    IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Customers' AND COLUMN_NAME = 'BranchId')
+                        ALTER TABLE Customers ADD BranchId INT NULL;
+
+                    IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'AppUsers' AND COLUMN_NAME = 'BranchId')
+                        ALTER TABLE AppUsers ADD BranchId INT NULL;
+
+                    IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'CustomerFollowUps' AND COLUMN_NAME = 'BranchId')
+                        ALTER TABLE CustomerFollowUps ADD BranchId INT NULL;
+
+                    IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'CustomerInquiries' AND COLUMN_NAME = 'BranchId')
+                        ALTER TABLE CustomerInquiries ADD BranchId INT NULL;
+
+                    IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Payments' AND COLUMN_NAME = 'BranchId')
+                        ALTER TABLE Payments ADD BranchId INT NULL;
+                ");
+
+                // Check if any branch exists for this company
+                var branchCount = await context.Branches.CountAsync(b => b.CompanyId == companyId);
+                if (branchCount == 0)
+                {
+                    var mainBranch = new Branch
+                    {
+                        CompanyId = companyId,
+                        BranchName = "Main Branch",
+                        BranchCode = "MAIN",
+                        Address = "Headquarters / Main Store",
+                        ContactPhone = "+63 917 000 0001",
+                        ContactEmail = "main@branch.ph",
+                        ManagerName = "Branch Admin",
+                        IsActive = true,
+                        CreatedDate = DateTime.UtcNow
+                    };
+                    context.Branches.Add(mainBranch);
+                    await context.SaveChangesAsync();
+
+                    int mainBranchId = mainBranch.BranchId;
+                    await context.Database.ExecuteSqlRawAsync(@"
+                        UPDATE SalesOrders SET BranchId = {0} WHERE BranchId IS NULL;
+                        UPDATE Customers SET BranchId = {0} WHERE BranchId IS NULL;
+                        UPDATE AppUsers SET BranchId = {0} WHERE BranchId IS NULL;
+                        UPDATE CustomerFollowUps SET BranchId = {0} WHERE BranchId IS NULL;
+                        UPDATE CustomerInquiries SET BranchId = {0} WHERE BranchId IS NULL;
+                        UPDATE Payments SET BranchId = {0} WHERE BranchId IS NULL;
+                    ", mainBranchId);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[EnsureTenantBranchBaselineAsync warning] {ex.Message}");
             }
         }
 
@@ -948,13 +1130,26 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 try
                 {
                     await using var tenantContext = CreateDbContextForDatabase(tenantDb.ServerName, tenantDb.DatabaseName);
+                    await EnsureTenantBranchBaselineAsync(tenantContext, tenantDb.CompanyId);
+
                     var candidate = await tenantContext.AppUsers
                         .Include(u => u.Role)
                         .Include(u => u.Company)
+                        .Include(u => u.Branch)
                         .FirstOrDefaultAsync(u => u.Username.ToLower() == input || u.Email.ToLower() == input);
 
                     if (candidate != null && VerifyPassword(password, candidate.PasswordHash))
                     {
+                        if (candidate.BranchId == null)
+                        {
+                            var defBranch = await tenantContext.Branches.FirstOrDefaultAsync(b => b.CompanyId == candidate.CompanyId && b.IsActive);
+                            if (defBranch != null)
+                            {
+                                candidate.Branch = defBranch;
+                                candidate.BranchId = defBranch.BranchId;
+                            }
+                        }
+
                         matchedUser = candidate;
                         matchedTenantDb = tenantDb;
                         break;
@@ -984,6 +1179,34 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 if (company != null && !company.IsActive)
                 {
                     return new AuthResult(false, "Your company account has been deactivated. Please contact platform support.", null, null, null);
+                }
+
+                if (company != null && !string.IsNullOrWhiteSpace(company.CompanyName))
+                {
+                    if (matchedUser.Company == null)
+                    {
+                        matchedUser.Company = new Company { CompanyId = company.CompanyId, CompanyName = company.CompanyName.Trim() };
+                    }
+                    else
+                    {
+                        matchedUser.Company.CompanyName = company.CompanyName.Trim();
+                    }
+                }
+            }
+
+            if (!isSuperAdmin && string.IsNullOrWhiteSpace(matchedUser.Company?.CompanyName))
+            {
+                string? compName = await GetCompanyNameAsync(matchedUser.CompanyId);
+                if (!string.IsNullOrWhiteSpace(compName))
+                {
+                    if (matchedUser.Company == null)
+                    {
+                        matchedUser.Company = new Company { CompanyId = matchedUser.CompanyId, CompanyName = compName };
+                    }
+                    else
+                    {
+                        matchedUser.Company.CompanyName = compName;
+                    }
                 }
             }
 
@@ -1017,7 +1240,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
         // CUSTOMERS CRUD
         // =========================================================
 
-        public static async Task<List<Customer>> GetCustomersAsync(string? searchQuery = null, int? companyId = null)
+        public static async Task<List<Customer>> GetCustomersAsync(string? searchQuery = null, int? companyId = null, int? branchId = null)
         {
             int targetCompanyId = companyId ?? CurrentCompanyId;
             await using var context = CreateDbContext(targetCompanyId);
@@ -1025,6 +1248,12 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 .AsNoTracking()
                 .Where(c => c.CompanyId == targetCompanyId)
                 .Include(c => c.Orders);
+
+            int? effectiveBranchId = branchId ?? SessionService.ActiveBranchId;
+            if (effectiveBranchId.HasValue && effectiveBranchId.Value > 0)
+            {
+                query = query.Where(c => c.BranchId == effectiveBranchId.Value);
+            }
 
             if (!string.IsNullOrWhiteSpace(searchQuery))
             {
@@ -1041,7 +1270,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 .ToListAsync();
         }
 
-        public static async Task<PagedList<Customer>> GetCustomersPagedAsync(string? searchQuery = null, int page = 1, int pageSize = 10, int? companyId = null)
+        public static async Task<PagedList<Customer>> GetCustomersPagedAsync(string? searchQuery = null, int page = 1, int pageSize = 10, int? companyId = null, int? branchId = null)
         {
             pageSize = Math.Max(1, pageSize);
             page = Math.Max(1, page);
@@ -1052,6 +1281,12 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 .Where(c => c.CompanyId == targetCompanyId)
                 .AsNoTracking()
                 .Include(c => c.Orders);
+
+            int? effectiveBranchId = branchId ?? SessionService.ActiveBranchId;
+            if (effectiveBranchId.HasValue && effectiveBranchId.Value > 0)
+            {
+                query = query.Where(c => c.BranchId == effectiveBranchId.Value);
+            }
 
             if (!string.IsNullOrWhiteSpace(searchQuery))
             {
@@ -1102,6 +1337,11 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             }
             if (customer.RegisteredDate == default) customer.RegisteredDate = DateTime.UtcNow;
 
+            if (customer.BranchId == null)
+            {
+                customer.BranchId = SessionService.ActiveBranchId ?? SessionService.CurrentUser?.BranchId;
+            }
+
             context.Customers.Add(customer);
             await context.SaveChangesAsync();
             return customer;
@@ -1142,10 +1382,15 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
         // SALES ORDERS CRUD
         // =========================================================
 
-        public static async Task<List<SalesOrder>> GetOrdersAsync(string? statusFilter = null, string? searchQuery = null)
+        public static async Task<List<SalesOrder>> GetOrdersAsync(string? statusFilter = null, string? searchQuery = null, int? branchId = null)
         {
             await using var context = CreateDbContext();
             int companyId = CurrentCompanyId;
+
+            int? effectiveBranchId = branchId ?? SessionService.ActiveBranchId;
+            bool filterBranch = effectiveBranchId.HasValue && effectiveBranchId.Value > 0;
+            int branchFilterVal = filterBranch ? effectiveBranchId!.Value : 0;
+
             IQueryable<SalesOrder> query = context.SalesOrders
                 .AsNoTracking()
                 .Where(o => o.Customer != null && o.Customer.CompanyId == companyId)
@@ -1153,6 +1398,11 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 .Include(o => o.OrderDetails)
                 .Include(o => o.Payments)
                     .ThenInclude(p => p.Method);
+
+            if (filterBranch)
+            {
+                query = query.Where(o => o.BranchId == branchFilterVal);
+            }
 
             if (!string.IsNullOrWhiteSpace(statusFilter) && !statusFilter.Equals("All", StringComparison.OrdinalIgnoreCase))
             {
@@ -1189,7 +1439,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 .ToListAsync();
         }
 
-        public static async Task<PagedList<SalesOrder>> GetOrdersPagedAsync(string? statusFilter = null, string? searchQuery = null, int page = 1, int pageSize = 10)
+        public static async Task<PagedList<SalesOrder>> GetOrdersPagedAsync(string? statusFilter = null, string? searchQuery = null, int page = 1, int pageSize = 10, int? branchId = null)
         {
             pageSize = Math.Max(1, pageSize);
             page = Math.Max(1, page);
@@ -1201,6 +1451,12 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 .Include(o => o.OrderDetails)
                 .Include(o => o.Payments)
                     .ThenInclude(p => p.Method);
+
+            int? effectiveBranchId = branchId ?? SessionService.ActiveBranchId;
+            if (effectiveBranchId.HasValue && effectiveBranchId.Value > 0)
+            {
+                query = query.Where(o => o.BranchId == effectiveBranchId.Value);
+            }
 
             if (!string.IsNullOrWhiteSpace(statusFilter) && !statusFilter.Equals("All", StringComparison.OrdinalIgnoreCase))
             {
@@ -1305,6 +1561,11 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             }
             if (order.OrderDate == default) order.OrderDate = DateTime.UtcNow;
 
+            if (order.BranchId == null)
+            {
+                order.BranchId = SessionService.ActiveBranchId ?? SessionService.CurrentUser?.BranchId;
+            }
+
             if (order.OrderDetails.Count == 0 && order.TotalAmount > 0)
             {
                 order.OrderDetails.Add(new SalesOrderDetail
@@ -1386,12 +1647,18 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
         // INQUIRIES CRUD
         // =========================================================
 
-        public static async Task<List<CustomerInquiry>> GetInquiriesAsync(string? statusFilter = null, string? searchQuery = null)
+        public static async Task<List<CustomerInquiry>> GetInquiriesAsync(string? statusFilter = null, string? searchQuery = null, int? branchId = null)
         {
             await using var context = CreateDbContext();
             IQueryable<CustomerInquiry> query = context.CustomerInquiries
                 .AsNoTracking()
                 .Include(i => i.Customer);
+
+            int? effectiveBranchId = branchId ?? SessionService.ActiveBranchId;
+            if (effectiveBranchId.HasValue && effectiveBranchId.Value > 0)
+            {
+                query = query.Where(i => i.BranchId == effectiveBranchId.Value);
+            }
 
             if (!string.IsNullOrWhiteSpace(statusFilter) && !statusFilter.Equals("All", StringComparison.OrdinalIgnoreCase))
             {
@@ -1403,8 +1670,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 string s = searchQuery.Trim().ToLower();
                 query = query.Where(i =>
                     i.InquiryCode.ToLower().Contains(s) ||
-                    i.CakeType.ToLower().Contains(s) ||
-                    i.AssignedTo.ToLower().Contains(s) ||
+                    (i.CakeType != null && i.CakeType.ToLower().Contains(s)) ||
+                    (i.AssignedTo != null && i.AssignedTo.ToLower().Contains(s)) ||
                     (i.Customer != null && (i.Customer.FirstName.ToLower().Contains(s) || i.Customer.LastName.ToLower().Contains(s))));
             }
 
@@ -1413,7 +1680,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 .ToListAsync();
         }
 
-        public static async Task<PagedList<CustomerInquiry>> GetInquiriesPagedAsync(string? statusFilter = null, string? searchQuery = null, int page = 1, int pageSize = 10)
+        public static async Task<PagedList<CustomerInquiry>> GetInquiriesPagedAsync(string? statusFilter = null, string? searchQuery = null, int page = 1, int pageSize = 10, int? branchId = null)
         {
             pageSize = Math.Max(1, pageSize);
             page = Math.Max(1, page);
@@ -1423,6 +1690,12 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 .AsNoTracking()
                 .Include(i => i.Customer);
 
+            int? effectiveBranchId = branchId ?? SessionService.ActiveBranchId;
+            if (effectiveBranchId.HasValue && effectiveBranchId.Value > 0)
+            {
+                query = query.Where(i => i.BranchId == effectiveBranchId.Value);
+            }
+
             if (!string.IsNullOrWhiteSpace(statusFilter) && !statusFilter.Equals("All", StringComparison.OrdinalIgnoreCase))
             {
                 query = query.Where(i => i.Status == statusFilter);
@@ -1433,8 +1706,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 string s = searchQuery.Trim().ToLower();
                 query = query.Where(i =>
                     i.InquiryCode.ToLower().Contains(s) ||
-                    i.CakeType.ToLower().Contains(s) ||
-                    i.AssignedTo.ToLower().Contains(s) ||
+                    (i.CakeType != null && i.CakeType.ToLower().Contains(s)) ||
+                    (i.AssignedTo != null && i.AssignedTo.ToLower().Contains(s)) ||
                     (i.Customer != null && (i.Customer.FirstName.ToLower().Contains(s) || i.Customer.LastName.ToLower().Contains(s))));
             }
 
@@ -1469,6 +1742,11 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 inquiry.InquiryCode = $"INQ-2026-{count:D4}";
             }
             if (inquiry.CreatedAt == default) inquiry.CreatedAt = DateTime.UtcNow;
+
+            if (inquiry.BranchId == null)
+            {
+                inquiry.BranchId = SessionService.ActiveBranchId ?? SessionService.CurrentUser?.BranchId;
+            }
 
             context.CustomerInquiries.Add(inquiry);
             await context.SaveChangesAsync();
@@ -1574,12 +1852,18 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
         // FOLLOW-UPS CRUD
         // =========================================================
 
-        public static async Task<List<CustomerFollowUp>> GetFollowUpsAsync(string? statusFilter = null, string? searchQuery = null)
+        public static async Task<List<CustomerFollowUp>> GetFollowUpsAsync(string? statusFilter = null, string? searchQuery = null, int? branchId = null)
         {
             await using var context = CreateDbContext();
             IQueryable<CustomerFollowUp> query = context.CustomerFollowUps
                 .AsNoTracking()
                 .Include(f => f.Customer);
+
+            int? effectiveBranchId = branchId ?? SessionService.ActiveBranchId;
+            if (effectiveBranchId.HasValue && effectiveBranchId.Value > 0)
+            {
+                query = query.Where(f => f.BranchId == effectiveBranchId.Value);
+            }
 
             if (!string.IsNullOrWhiteSpace(statusFilter) && !statusFilter.Equals("All", StringComparison.OrdinalIgnoreCase))
             {
@@ -1612,7 +1896,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 .ToListAsync();
         }
 
-        public static async Task<PagedList<CustomerFollowUp>> GetFollowUpsPagedAsync(string? statusFilter = null, string? searchQuery = null, int page = 1, int pageSize = 10)
+        public static async Task<PagedList<CustomerFollowUp>> GetFollowUpsPagedAsync(string? statusFilter = null, string? searchQuery = null, int page = 1, int pageSize = 10, int? branchId = null)
         {
             pageSize = Math.Max(1, pageSize);
             page = Math.Max(1, page);
@@ -1621,6 +1905,12 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             IQueryable<CustomerFollowUp> query = context.CustomerFollowUps
                 .AsNoTracking()
                 .Include(f => f.Customer);
+
+            int? effectiveBranchId = branchId ?? SessionService.ActiveBranchId;
+            if (effectiveBranchId.HasValue && effectiveBranchId.Value > 0)
+            {
+                query = query.Where(f => f.BranchId == effectiveBranchId.Value);
+            }
 
             if (!string.IsNullOrWhiteSpace(statusFilter) && !statusFilter.Equals("All", StringComparison.OrdinalIgnoreCase))
             {
@@ -1681,6 +1971,11 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                     ? SessionService.CurrentUser.UserId
                     : (await context.AppUsers.Select(u => u.UserId).FirstOrDefaultAsync());
                 followUp.StaffUserId = actingUserId > 0 ? actingUserId : DefaultUserId;
+            }
+
+            if (followUp.BranchId == null)
+            {
+                followUp.BranchId = SessionService.ActiveBranchId ?? SessionService.CurrentUser?.BranchId;
             }
 
             context.CustomerFollowUps.Add(followUp);
@@ -1777,7 +2072,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 .ToListAsync();
         }
 
-        public static async Task<PagedList<Payment>> GetPaymentsPagedAsync(string? statusFilter = null, string? searchQuery = null, int page = 1, int pageSize = 10)
+        public static async Task<PagedList<Payment>> GetPaymentsPagedAsync(string? statusFilter = null, string? searchQuery = null, int page = 1, int pageSize = 10, int? branchId = null)
         {
             pageSize = Math.Max(1, pageSize);
             page = Math.Max(1, page);
@@ -1788,6 +2083,12 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 .Include(p => p.Method)
                 .Include(p => p.Order)
                     .ThenInclude(o => o!.Customer);
+
+            int? effectiveBranchId = branchId ?? SessionService.ActiveBranchId;
+            if (effectiveBranchId.HasValue && effectiveBranchId.Value > 0)
+            {
+                query = query.Where(p => p.BranchId == effectiveBranchId.Value || (p.Order != null && p.Order.BranchId == effectiveBranchId.Value));
+            }
 
             if (!string.IsNullOrWhiteSpace(statusFilter) && !statusFilter.Equals("All", StringComparison.OrdinalIgnoreCase))
             {
@@ -1840,6 +2141,21 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 payment.ProcessedByUserId = actingUserId > 0 ? actingUserId : DefaultUserId;
             }
             if (payment.PaymentDate == default) payment.PaymentDate = DateTime.UtcNow;
+
+            if (payment.BranchId == null)
+            {
+                if (payment.OrderId > 0)
+                {
+                    payment.BranchId = await context.SalesOrders
+                        .Where(o => o.OrderId == payment.OrderId)
+                        .Select(o => o.BranchId)
+                        .FirstOrDefaultAsync();
+                }
+                if (payment.BranchId == null)
+                {
+                    payment.BranchId = SessionService.ActiveBranchId ?? SessionService.CurrentUser?.BranchId;
+                }
+            }
 
             context.Payments.Add(payment);
             await context.SaveChangesAsync();
@@ -1962,11 +2278,29 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             string? typeFilter = null, // "All", "Orders", "Payments", "Retention"
             string? searchQuery = null,
             DateTime? fromDate = null,
-            DateTime? toDate = null)
+            DateTime? toDate = null,
+            int? branchId = null)
         {
             await using var context = CreateDbContext();
             var target = filterDate ?? DateTime.Today;
             var list = new List<TransactionRecord>();
+
+            bool filterBranch = false;
+            int branchFilterVal = 0;
+            if (branchId.HasValue)
+            {
+                if (branchId.Value > 0)
+                {
+                    filterBranch = true;
+                    branchFilterVal = branchId.Value;
+                }
+                // branchId <= 0 explicitly means "All Branches" -> filterBranch = false
+            }
+            else if (SessionService.ActiveBranchId.HasValue && SessionService.ActiveBranchId.Value > 0)
+            {
+                filterBranch = true;
+                branchFilterVal = SessionService.ActiveBranchId.Value;
+            }
 
             // 1. Fetch Orders
             if (string.IsNullOrEmpty(typeFilter) || typeFilter == "All" || typeFilter == "Orders")
@@ -1975,6 +2309,11 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                     .Include(o => o.Customer)
                     .Include(o => o.Status)
                     .AsNoTracking();
+
+                if (filterBranch)
+                {
+                    orderQuery = orderQuery.Where(o => o.BranchId == branchFilterVal);
+                }
 
                 var orders = await orderQuery.ToListAsync();
 
@@ -2011,6 +2350,11 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                     .Include(p => p.Method)
                     .Include(p => p.Status)
                     .AsNoTracking();
+
+                if (filterBranch)
+                {
+                    paymentQuery = paymentQuery.Where(p => p.BranchId == branchFilterVal || (p.Order != null && p.Order.BranchId == branchFilterVal));
+                }
 
                 var payments = await paymentQuery.ToListAsync();
 
@@ -2114,12 +2458,13 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             int page = 1,
             int pageSize = 10,
             DateTime? fromDate = null,
-            DateTime? toDate = null)
+            DateTime? toDate = null,
+            int? branchId = null)
         {
             pageSize = Math.Max(1, pageSize);
             page = Math.Max(1, page);
 
-            var all = await GetOverallTransactionsAsync(period, filterDate, typeFilter, searchQuery, fromDate, toDate);
+            var all = await GetOverallTransactionsAsync(period, filterDate, typeFilter, searchQuery, fromDate, toDate, branchId);
             int totalCount = all.Count;
             int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
             if (page > totalPages) page = totalPages;
@@ -2208,6 +2553,55 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 AnnualCount: annualPayments + annualOrders
             );
         }
+        
+        public static async Task<ReportLog?> LogReportGenerationAsync(
+            string reportType,
+            Dictionary<string, string>? parameters = null,
+            int? userId = null,
+            int? companyId = null)
+        {
+            try
+            {
+                int targetCompanyId = companyId ?? CurrentCompanyId;
+                await using var context = CreateDbContext(targetCompanyId);
+
+                int resolvedUserId = userId ?? SessionService.CurrentUser?.UserId ?? 1;
+                bool userExists = await context.AppUsers.AnyAsync(u => u.UserId == resolvedUserId);
+                if (!userExists)
+                {
+                    var firstUser = await context.AppUsers.OrderBy(u => u.UserId).Select(u => u.UserId).FirstOrDefaultAsync();
+                    if (firstUser > 0) resolvedUserId = firstUser;
+                }
+
+                var log = new ReportLog
+                {
+                    GeneratedByUserId = resolvedUserId,
+                    ReportType = reportType,
+                    GeneratedDate = DateTime.UtcNow
+                };
+
+                if (parameters != null)
+                {
+                    foreach (var kvp in parameters)
+                    {
+                        log.Parameters.Add(new ReportParameter
+                        {
+                            ParamName = kvp.Key,
+                            ParamValue = kvp.Value ?? string.Empty
+                        });
+                    }
+                }
+
+                context.ReportLogs.Add(log);
+                await context.SaveChangesAsync();
+                return log;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[LogReportGenerationAsync] {ex.Message}");
+                return null;
+            }
+        }
 
         // =========================================================
         // ADMIN USER MANAGEMENT CRUD
@@ -2225,14 +2619,20 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
         public static async Task<List<SystemUser>> GetUsersAsync(
             string? searchQuery = null,
             string? roleFilter = null,
-            string? statusFilter = null)
+            string? statusFilter = null,
+            int? companyId = null)
         {
-            await using var context = CreateDbContext();
-            int companyId = CurrentCompanyId;
+            int targetCompanyId = companyId ?? CurrentCompanyId;
+            await using var context = CreateDbContext(targetCompanyId);
             IQueryable<SystemUser> query = context.AppUsers
                 .Include(u => u.Role)
-                .Where(u => u.CompanyId == companyId)
+                .Include(u => u.Branch)
                 .AsNoTracking();
+
+            if (targetCompanyId > 0)
+            {
+                query = query.Where(u => u.CompanyId == targetCompanyId || u.CompanyId == 0);
+            }
 
             if (!string.IsNullOrWhiteSpace(searchQuery))
             {
@@ -2242,7 +2642,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                     u.LastName.ToLower().Contains(q) ||
                     u.Username.ToLower().Contains(q) ||
                     u.Email.ToLower().Contains(q) ||
-                    (u.Role != null && u.Role.RoleName.ToLower().Contains(q)));
+                    (u.Role != null && u.Role.RoleName.ToLower().Contains(q)) ||
+                    (u.Branch != null && u.Branch.BranchName.ToLower().Contains(q)));
             }
 
             if (!string.IsNullOrWhiteSpace(roleFilter) && roleFilter != "All Roles")
@@ -2266,16 +2667,23 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             string? roleFilter = null,
             string? statusFilter = null,
             int page = 1,
-            int pageSize = 10)
+            int pageSize = 10,
+            int? companyId = null)
         {
             pageSize = Math.Max(1, pageSize);
             page = Math.Max(1, page);
 
-            await using var context = CreateDbContext();
+            int targetCompanyId = companyId ?? CurrentCompanyId;
+            await using var context = CreateDbContext(targetCompanyId);
             IQueryable<SystemUser> query = context.AppUsers
                 .Include(u => u.Role)
-                .Where(u => u.CompanyId == DefaultCompanyId)
+                .Include(u => u.Branch)
                 .AsNoTracking();
+
+            if (targetCompanyId > 0)
+            {
+                query = query.Where(u => u.CompanyId == targetCompanyId || u.CompanyId == 0);
+            }
 
             if (!string.IsNullOrWhiteSpace(searchQuery))
             {
@@ -2285,7 +2693,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                     u.LastName.ToLower().Contains(q) ||
                     u.Username.ToLower().Contains(q) ||
                     u.Email.ToLower().Contains(q) ||
-                    (u.Role != null && u.Role.RoleName.ToLower().Contains(q)));
+                    (u.Role != null && u.Role.RoleName.ToLower().Contains(q)) ||
+                    (u.Branch != null && u.Branch.BranchName.ToLower().Contains(q)));
             }
 
             if (!string.IsNullOrWhiteSpace(roleFilter) && roleFilter != "All Roles")
@@ -2312,15 +2721,20 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             return new PagedList<SystemUser>(items, totalCount, page, pageSize);
         }
 
-        public static async Task<UserSummaryMetrics> GetUserSummaryMetricsAsync()
+        public static async Task<UserSummaryMetrics> GetUserSummaryMetricsAsync(int? companyId = null)
         {
-            await using var context = CreateDbContext();
-            int companyId = CurrentCompanyId;
-            var users = await context.AppUsers
+            int targetCompanyId = companyId ?? CurrentCompanyId;
+            await using var context = CreateDbContext(targetCompanyId);
+            IQueryable<SystemUser> query = context.AppUsers
                 .Include(u => u.Role)
-                .Where(u => u.CompanyId == companyId)
-                .AsNoTracking()
-                .ToListAsync();
+                .AsNoTracking();
+
+            if (targetCompanyId > 0)
+            {
+                query = query.Where(u => u.CompanyId == targetCompanyId || u.CompanyId == 0);
+            }
+
+            var users = await query.ToListAsync();
 
             int totalActive = users.Count(u => u.IsActive);
             int adminCount = users.Count(u => u.IsActive && u.Role != null && (u.Role.RoleName == "Business Admin" || u.Role.RoleName == "Admin" || u.Role.RoleName == "SuperAdmin"));
@@ -2383,15 +2797,156 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             return existing;
         }
 
-        public static async Task ToggleUserStatusAsync(int userId, bool isActive)
+        public static async Task<PagedList<SystemUser>> GetAllUsersAcrossTenantsPagedAsync(
+            string? searchQuery = null,
+            string? roleFilter = null,
+            string? statusFilter = null,
+            int? companyIdFilter = null,
+            int page = 1,
+            int pageSize = 10)
         {
-            await using var context = CreateDbContext();
+            pageSize = Math.Max(1, pageSize);
+            page = Math.Max(1, page);
+
+            var allUsers = await GetAllUsersAcrossTenantsAsync(searchQuery, roleFilter, statusFilter, companyIdFilter);
+            int totalCount = allUsers.Count;
+            int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
+            if (page > totalPages) page = totalPages;
+
+            var items = allUsers
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToList();
+
+            return new PagedList<SystemUser>(items, totalCount, page, pageSize);
+        }
+
+        public static async Task<List<SystemUser>> GetAllUsersAcrossTenantsAsync(
+            string? searchQuery = null,
+            string? roleFilter = null,
+            string? statusFilter = null,
+            int? companyIdFilter = null)
+        {
+            var result = new List<SystemUser>();
+            var seenUserKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                await using var masterContext = CreateMasterDbContext();
+                var masterCompanies = await masterContext.Companies.AsNoTracking().ToListAsync();
+                var masterCompanyMap = masterCompanies.ToDictionary(c => c.CompanyId, c => c.CompanyName);
+
+                var dbs = await masterContext.CompanyDatabases.AsNoTracking().Where(d => d.IsActive).ToListAsync();
+
+                // If specific company filtered, restrict DB list
+                if (companyIdFilter.HasValue && companyIdFilter.Value > 0)
+                {
+                    dbs = dbs.Where(d => d.CompanyId == companyIdFilter.Value).ToList();
+                }
+
+                foreach (var db in dbs)
+                {
+                    try
+                    {
+                        await using var tenantContext = CreateDbContextForDatabase(db.ServerName, db.DatabaseName);
+                        var query = tenantContext.AppUsers
+                            .Include(u => u.Role)
+                            .Include(u => u.Branch)
+                            .AsNoTracking();
+
+                        if (companyIdFilter.HasValue && companyIdFilter.Value > 0)
+                        {
+                            query = query.Where(u => u.CompanyId == companyIdFilter.Value || u.CompanyId == 0);
+                        }
+
+                        var tenantUsers = await query.ToListAsync();
+
+                        foreach (var u in tenantUsers)
+                        {
+                            // Ensure Company is attached or populated
+                            if (u.Company == null)
+                            {
+                                int cId = u.CompanyId > 0 ? u.CompanyId : db.CompanyId;
+                                string cName = masterCompanyMap.TryGetValue(cId, out var name) ? name : $"Company #{cId}";
+                                u.Company = new Company { CompanyId = cId, CompanyName = cName };
+                                if (u.CompanyId <= 0) u.CompanyId = cId;
+                            }
+                            else if (string.IsNullOrWhiteSpace(u.Company.CompanyName) && masterCompanyMap.TryGetValue(u.CompanyId, out var name))
+                            {
+                                u.Company.CompanyName = name;
+                            }
+
+                            // Avoid duplicate display if superadmin or user exists in multiple DBs
+                            string userKey = $"{u.CompanyId}_{u.UserId}_{u.Username.ToLowerInvariant()}";
+                            if (seenUserKeys.Add(userKey))
+                            {
+                                result.Add(u);
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[GetAllUsersAcrossTenantsAsync tenant DB '{db.DatabaseName}'] {ex.Message}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[GetAllUsersAcrossTenantsAsync Master DB] {ex.Message}");
+            }
+
+            // Apply in-memory filtering for query, role, status
+            IEnumerable<SystemUser> filtered = result;
+
+            if (!string.IsNullOrWhiteSpace(searchQuery))
+            {
+                var q = searchQuery.Trim().ToLowerInvariant();
+                filtered = filtered.Where(u =>
+                    (u.FirstName != null && u.FirstName.ToLower().Contains(q)) ||
+                    (u.LastName != null && u.LastName.ToLower().Contains(q)) ||
+                    (u.Username != null && u.Username.ToLower().Contains(q)) ||
+                    (u.Email != null && u.Email.ToLower().Contains(q)) ||
+                    (u.Role != null && u.Role.RoleName != null && u.Role.RoleName.ToLower().Contains(q)) ||
+                    (u.Company != null && u.Company.CompanyName != null && u.Company.CompanyName.ToLower().Contains(q)) ||
+                    (u.Branch != null && u.Branch.BranchName != null && u.Branch.BranchName.ToLower().Contains(q)));
+            }
+
+            if (!string.IsNullOrWhiteSpace(roleFilter) && roleFilter != "All Roles")
+            {
+                filtered = filtered.Where(u => u.Role != null && (u.Role.RoleName == roleFilter || (roleFilter == "Business Admin" && (u.Role.RoleName == "Admin" || u.Role.RoleName == "Business Admin"))));
+            }
+
+            if (!string.IsNullOrWhiteSpace(statusFilter) && statusFilter != "All Status")
+            {
+                bool activeOnly = statusFilter.Equals("Active", StringComparison.OrdinalIgnoreCase);
+                filtered = filtered.Where(u => u.IsActive == activeOnly);
+            }
+
+            return filtered.OrderByDescending(u => u.UserId).ToList();
+        }
+
+        public static async Task<UserSummaryMetrics> GetAllUsersAcrossTenantsMetricsAsync(int? companyIdFilter = null)
+        {
+            var allUsers = await GetAllUsersAcrossTenantsAsync(companyIdFilter: companyIdFilter);
+
+            int totalActive = allUsers.Count(u => u.IsActive);
+            int adminCount = allUsers.Count(u => u.IsActive && u.Role != null && (u.Role.RoleName == "Business Admin" || u.Role.RoleName == "Admin" || u.Role.RoleName == "SuperAdmin" || u.RoleId == 1 || u.RoleId == 2));
+            int managerCount = allUsers.Count(u => u.IsActive && u.Role != null && (u.Role.RoleName == "Manager" || u.RoleId == 3));
+            int staffCount = allUsers.Count(u => u.IsActive && u.Role != null && (u.Role.RoleName == "Staff" || u.RoleId == 4));
+
+            return new UserSummaryMetrics(totalActive, adminCount, managerCount, staffCount);
+        }
+
+        public static async Task ToggleUserStatusAsync(int userId, bool isActive, int? companyId = null)
+        {
+            int targetCompanyId = companyId ?? CurrentCompanyId;
+            await using var context = CreateDbContext(targetCompanyId);
             var existing = await context.AppUsers.FirstOrDefaultAsync(u => u.UserId == userId);
             if (existing != null)
             {
                 if (isActive && !existing.IsActive)
                 {
-                    await CheckUserSeatLimitAsync(existing.CompanyId);
+                    await CheckUserSeatLimitAsync(existing.CompanyId > 0 ? existing.CompanyId : targetCompanyId);
                 }
 
                 existing.IsActive = isActive;
@@ -2459,32 +3014,63 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
 
             if (sub != null && sub.Plan != null)
             {
+                bool isSubActive = (sub.StatusId == 1 || string.Equals(sub.Status?.StatusName, "Active", StringComparison.OrdinalIgnoreCase)) && sub.EndDate >= DateTime.UtcNow;
                 return new SubscriptionInfo(
                     PlanName: sub.Plan.PlanName,
-                    Status: sub.Status?.StatusName ?? (sub.EndDate >= DateTime.UtcNow ? "Active" : "Expired"),
+                    Status: sub.Status?.StatusName ?? (isSubActive ? "Active" : "Expired"),
                     Price: sub.Plan.Price,
                     BillingCycle: sub.Plan.DurationDays >= 365 ? "year" : $"{sub.Plan.DurationDays} days",
                     RenewalDate: sub.EndDate,
                     PaymentMethod: "Visa ending in 4242",
                     UsedSeats: usedSeats,
                     MaxSeats: sub.Plan.MaxUsers,
-                    AllowBranching: sub.Plan.AllowBranching,
+                    AllowBranching: isSubActive && sub.Plan.AllowBranching,
                     MaxBranches: sub.Plan.MaxBranches
                 );
             }
 
-            // Fallback default
+            // 2. Fallback check inside Tenant DB
+            try
+            {
+                await using var tenantContext = CreateDbContext(targetCompanyId);
+                var tenantSub = await tenantContext.Subscriptions
+                    .Include(s => s.Plan)
+                    .Include(s => s.Status)
+                    .Where(s => s.CompanyId == targetCompanyId)
+                    .OrderByDescending(s => s.SubscriptionId)
+                    .FirstOrDefaultAsync();
+
+                if (tenantSub != null && tenantSub.Plan != null)
+                {
+                    bool isTenantActive = (tenantSub.StatusId == 1 || string.Equals(tenantSub.Status?.StatusName, "Active", StringComparison.OrdinalIgnoreCase)) && tenantSub.EndDate >= DateTime.UtcNow;
+                    return new SubscriptionInfo(
+                        PlanName: tenantSub.Plan.PlanName,
+                        Status: tenantSub.Status?.StatusName ?? (isTenantActive ? "Active" : "Expired"),
+                        Price: tenantSub.Plan.Price,
+                        BillingCycle: tenantSub.Plan.DurationDays >= 365 ? "year" : $"{tenantSub.Plan.DurationDays} days",
+                        RenewalDate: tenantSub.EndDate,
+                        PaymentMethod: "Credit / Debit Card",
+                        UsedSeats: usedSeats,
+                        MaxSeats: tenantSub.Plan.MaxUsers,
+                        AllowBranching: isTenantActive && tenantSub.Plan.AllowBranching,
+                        MaxBranches: tenantSub.Plan.MaxBranches
+                    );
+                }
+            }
+            catch { }
+
+            // 3. Fallback default for unassigned tenants: single branch mode only
             return new SubscriptionInfo(
-                PlanName: "Pro Plan",
+                PlanName: "Standard",
                 Status: "Active",
-                Price: 9599m,
+                Price: 0m,
                 BillingCycle: "year",
-                RenewalDate: DateTime.Today.AddMonths(11),
-                PaymentMethod: "Visa ending in 4242",
+                RenewalDate: DateTime.Today.AddYears(1),
+                PaymentMethod: "Credit / Debit Card",
                 UsedSeats: usedSeats > 0 ? usedSeats : 1,
-                MaxSeats: 10,
-                AllowBranching: true,
-                MaxBranches: 3
+                MaxSeats: 5,
+                AllowBranching: false,
+                MaxBranches: 1
             );
         }
 
@@ -2632,6 +3218,245 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             {
                 await UpgradeDowngradePlanAsync(plan.PlanId);
             }
+        }
+
+        // =========================================================
+        // MULTI-BRANCH MANAGEMENT MODULE & CAPABILITY ENFORCEMENT
+        // =========================================================
+
+        public static async Task<BranchCapabilityInfo> GetBranchCapabilityAsync(int? companyId = null)
+        {
+            int targetCompanyId = companyId ?? CurrentCompanyId;
+            var subInfo = await GetSubscriptionInfoAsync(targetCompanyId);
+
+            int activeCount = 0;
+            try
+            {
+                await using var tenantContext = CreateDbContext(targetCompanyId);
+                await EnsureTenantBranchBaselineAsync(tenantContext, targetCompanyId);
+                activeCount = await tenantContext.Branches
+                    .CountAsync(b => b.CompanyId == targetCompanyId && b.IsActive);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[GetBranchCapabilityAsync warning] {ex.Message}");
+            }
+
+            return new BranchCapabilityInfo(
+                AllowBranching: subInfo.AllowBranching,
+                MaxBranches: subInfo.MaxBranches,
+                PlanName: subInfo.PlanName,
+                ActiveBranchesCount: activeCount
+            );
+        }
+
+        public static async Task<List<BranchListItem>> GetBranchesAsync(int? companyId = null, bool includeArchived = true)
+        {
+            int targetCompanyId = companyId ?? CurrentCompanyId;
+            await using var tenantContext = CreateDbContext(targetCompanyId);
+            await EnsureTenantBranchBaselineAsync(tenantContext, targetCompanyId);
+
+            var query = tenantContext.Branches.Where(b => b.CompanyId == targetCompanyId);
+            if (!includeArchived)
+            {
+                query = query.Where(b => b.IsActive);
+            }
+
+            var branches = await query.OrderBy(b => b.BranchId).ToListAsync();
+            var result = new List<BranchListItem>();
+
+            foreach (var b in branches)
+            {
+                int orderCount = await tenantContext.SalesOrders.CountAsync(o => o.BranchId == b.BranchId);
+                decimal totalSales = await tenantContext.Payments
+                    .Where(p => p.BranchId == b.BranchId || (p.Order != null && p.Order.BranchId == b.BranchId))
+                    .Where(p => p.StatusId == 1)
+                    .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+                int custCount = await tenantContext.Customers.CountAsync(c => c.BranchId == b.BranchId);
+                int staffCount = await tenantContext.AppUsers.CountAsync(u => u.BranchId == b.BranchId && u.IsActive);
+
+                result.Add(new BranchListItem(
+                    b.BranchId,
+                    b.CompanyId,
+                    b.BranchName,
+                    b.BranchCode,
+                    b.Address ?? string.Empty,
+                    b.ContactPhone ?? string.Empty,
+                    b.ContactEmail ?? string.Empty,
+                    b.ManagerName ?? string.Empty,
+                    b.IsActive,
+                    b.CreatedDate,
+                    orderCount,
+                    totalSales,
+                    custCount,
+                    staffCount
+                ));
+            }
+
+            return result;
+        }
+
+        public static async Task<List<Branch>> GetActiveBranchesAsync(int? companyId = null)
+        {
+            int targetCompanyId = companyId ?? CurrentCompanyId;
+            await using var tenantContext = CreateDbContext(targetCompanyId);
+            await EnsureTenantBranchBaselineAsync(tenantContext, targetCompanyId);
+
+            return await tenantContext.Branches
+                .Where(b => b.CompanyId == targetCompanyId && b.IsActive)
+                .OrderBy(b => b.BranchId)
+                .ToListAsync();
+        }
+
+        public static async Task<Branch?> GetBranchByIdAsync(int branchId, int? companyId = null)
+        {
+            int targetCompanyId = companyId ?? CurrentCompanyId;
+            await using var tenantContext = CreateDbContext(targetCompanyId);
+            return await tenantContext.Branches
+                .FirstOrDefaultAsync(b => b.BranchId == branchId && b.CompanyId == targetCompanyId);
+        }
+
+        public static async Task<Branch> CreateBranchAsync(Branch branch, int? companyId = null)
+        {
+            int targetCompanyId = companyId ?? (branch.CompanyId > 0 ? branch.CompanyId : CurrentCompanyId);
+
+            // 1. Plan-based restriction enforcement
+            var capability = await GetBranchCapabilityAsync(targetCompanyId);
+            if (!capability.AllowBranching)
+            {
+                throw new InvalidOperationException($"Your current subscription plan ({capability.PlanName}) does not include Multi-Branching. Please upgrade to a plan that supports multiple branches to use this feature.");
+            }
+
+            if (capability.ActiveBranchesCount >= capability.MaxBranches)
+            {
+                throw new InvalidOperationException($"Branch limit reached ({capability.ActiveBranchesCount} of {capability.MaxBranches}). Your subscription plan allows up to {capability.MaxBranches} active branch(es). Please upgrade your plan to add more branches.");
+            }
+
+            // 2. Validate input
+            if (string.IsNullOrWhiteSpace(branch.BranchName))
+            {
+                throw new ArgumentException("Branch name is required.", nameof(branch.BranchName));
+            }
+            if (string.IsNullOrWhiteSpace(branch.BranchCode))
+            {
+                throw new ArgumentException("Branch code is required.", nameof(branch.BranchCode));
+            }
+
+            string cleanCode = branch.BranchCode.Trim().ToUpperInvariant();
+            string cleanName = branch.BranchName.Trim();
+
+            await using var tenantContext = CreateDbContext(targetCompanyId);
+            await EnsureTenantBranchBaselineAsync(tenantContext, targetCompanyId);
+
+            bool codeExists = await tenantContext.Branches
+                .AnyAsync(b => b.CompanyId == targetCompanyId && b.BranchCode.ToUpper() == cleanCode);
+            if (codeExists)
+            {
+                throw new InvalidOperationException($"A branch with code '{cleanCode}' already exists for this business.");
+            }
+
+            branch.CompanyId = targetCompanyId;
+            branch.BranchName = cleanName;
+            branch.BranchCode = cleanCode;
+            branch.Address = branch.Address?.Trim();
+            branch.ContactPhone = branch.ContactPhone?.Trim();
+            branch.ContactEmail = branch.ContactEmail?.Trim();
+            branch.ManagerName = branch.ManagerName?.Trim();
+            branch.IsActive = true;
+            branch.CreatedDate = DateTime.UtcNow;
+
+            tenantContext.Branches.Add(branch);
+            await tenantContext.SaveChangesAsync();
+
+            await LogAuditAsync("BRANCH_CREATED", $"Branch '{branch.BranchName}' ({branch.BranchCode}) was created under company ID {targetCompanyId}.");
+
+            return branch;
+        }
+
+        public static async Task<Branch> UpdateBranchAsync(Branch branch, int? companyId = null)
+        {
+            int targetCompanyId = companyId ?? (branch.CompanyId > 0 ? branch.CompanyId : CurrentCompanyId);
+
+            if (string.IsNullOrWhiteSpace(branch.BranchName))
+            {
+                throw new ArgumentException("Branch name is required.", nameof(branch.BranchName));
+            }
+            if (string.IsNullOrWhiteSpace(branch.BranchCode))
+            {
+                throw new ArgumentException("Branch code is required.", nameof(branch.BranchCode));
+            }
+
+            string cleanCode = branch.BranchCode.Trim().ToUpperInvariant();
+            string cleanName = branch.BranchName.Trim();
+
+            await using var tenantContext = CreateDbContext(targetCompanyId);
+            var existing = await tenantContext.Branches
+                .FirstOrDefaultAsync(b => b.BranchId == branch.BranchId && b.CompanyId == targetCompanyId);
+            if (existing == null)
+            {
+                throw new InvalidOperationException($"Branch #{branch.BranchId} was not found.");
+            }
+
+            bool codeExists = await tenantContext.Branches
+                .AnyAsync(b => b.CompanyId == targetCompanyId && b.BranchId != branch.BranchId && b.BranchCode.ToUpper() == cleanCode);
+            if (codeExists)
+            {
+                throw new InvalidOperationException($"Another branch with code '{cleanCode}' already exists for this business.");
+            }
+
+            existing.BranchName = cleanName;
+            existing.BranchCode = cleanCode;
+            existing.Address = branch.Address?.Trim();
+            existing.ContactPhone = branch.ContactPhone?.Trim();
+            existing.ContactEmail = branch.ContactEmail?.Trim();
+            existing.ManagerName = branch.ManagerName?.Trim();
+
+            await tenantContext.SaveChangesAsync();
+            await LogAuditAsync("BRANCH_UPDATED", $"Branch '{existing.BranchName}' ({existing.BranchCode}) was updated.");
+
+            return existing;
+        }
+
+        public static async Task<bool> ArchiveBranchAsync(int branchId, int? companyId = null)
+        {
+            int targetCompanyId = companyId ?? CurrentCompanyId;
+            await using var tenantContext = CreateDbContext(targetCompanyId);
+            var existing = await tenantContext.Branches
+                .FirstOrDefaultAsync(b => b.BranchId == branchId && b.CompanyId == targetCompanyId);
+            if (existing == null) return false;
+
+            int activeCount = await tenantContext.Branches
+                .CountAsync(b => b.CompanyId == targetCompanyId && b.IsActive);
+            if (activeCount <= 1 && existing.IsActive)
+            {
+                throw new InvalidOperationException("You cannot archive the only active branch of the company. A business must maintain at least one operational branch.");
+            }
+
+            existing.IsActive = false;
+            await tenantContext.SaveChangesAsync();
+            await LogAuditAsync("BRANCH_ARCHIVED", $"Branch '{existing.BranchName}' ({existing.BranchCode}) was archived.");
+            return true;
+        }
+
+        public static async Task<bool> RestoreBranchAsync(int branchId, int? companyId = null)
+        {
+            int targetCompanyId = companyId ?? CurrentCompanyId;
+            var capability = await GetBranchCapabilityAsync(targetCompanyId);
+
+            if (capability.ActiveBranchesCount >= capability.MaxBranches)
+            {
+                throw new InvalidOperationException($"Cannot restore branch. You have reached your plan limit of {capability.MaxBranches} active branch(es). Please upgrade your subscription to add more branches.");
+            }
+
+            await using var tenantContext = CreateDbContext(targetCompanyId);
+            var existing = await tenantContext.Branches
+                .FirstOrDefaultAsync(b => b.BranchId == branchId && b.CompanyId == targetCompanyId);
+            if (existing == null) return false;
+
+            existing.IsActive = true;
+            await tenantContext.SaveChangesAsync();
+            await LogAuditAsync("BRANCH_RESTORED", $"Branch '{existing.BranchName}' ({existing.BranchCode}) was restored to active status.");
+            return true;
         }
 
         // =========================================================
@@ -3737,12 +4562,16 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
 
         private static DateTime? GetPeriodStartDate(string period) => GetPeriodDateRange(period).StartDate;
 
-        public static async Task<StaffDashboardData> GetStaffDashboardDataAsync(int? userId = null, int? companyId = null, string period = "1d")
+        public static async Task<StaffDashboardData> GetStaffDashboardDataAsync(int? userId = null, int? companyId = null, string period = "1d", int? branchId = null)
         {
             var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
             var targetUserId = userId ?? SessionService.CurrentUser?.UserId ?? DefaultUserId;
             var startDate = GetPeriodStartDate(period);
             var today = DateTime.Today;
+
+            int? effectiveBranchId = branchId ?? SessionService.ActiveBranchId;
+            bool filterBranch = effectiveBranchId.HasValue && effectiveBranchId.Value > 0;
+            int branchFilterVal = filterBranch ? effectiveBranchId!.Value : 0;
 
             await using var context = CreateDbContext(targetCompanyId);
 
@@ -3750,41 +4579,42 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             string userFullName = user != null ? $"{user.FirstName} {user.LastName}".Trim() : "";
 
             int totalCustomers = await context.Customers
-                .CountAsync(c => c.CompanyId == targetCompanyId);
+                .CountAsync(c => c.CompanyId == targetCompanyId && (!filterBranch || c.BranchId == branchFilterVal));
 
             int myDueFollowups = await context.CustomerFollowUps
                 .Include(f => f.Customer)
-                .CountAsync(f => f.StaffUserId == targetUserId && f.Customer != null && f.Customer.CompanyId == targetCompanyId && f.StatusId == 0);
+                .CountAsync(f => f.StaffUserId == targetUserId && f.Customer != null && f.Customer.CompanyId == targetCompanyId && f.StatusId == 0 && (!filterBranch || f.BranchId == branchFilterVal));
 
             int myOverdueFollowups = await context.CustomerFollowUps
                 .Include(f => f.Customer)
-                .CountAsync(f => f.StaffUserId == targetUserId && f.Customer != null && f.Customer.CompanyId == targetCompanyId && f.StatusId == 0 && f.FollowUpDate < today);
+                .CountAsync(f => f.StaffUserId == targetUserId && f.Customer != null && f.Customer.CompanyId == targetCompanyId && f.StatusId == 0 && f.FollowUpDate < today && (!filterBranch || f.BranchId == branchFilterVal));
 
             int myHandledInquiries = await context.CustomerInquiries
                 .Include(i => i.Customer)
                 .CountAsync(i => i.Customer != null && i.Customer.CompanyId == targetCompanyId &&
                                  (i.AssignedTo == userFullName || string.IsNullOrEmpty(userFullName)) &&
-                                 (i.Status == "New" || i.Status == "In Progress" || i.Status == "Quoted"));
+                                 (i.Status == "New" || i.Status == "In Progress" || i.Status == "Quoted") &&
+                                 (!filterBranch || i.BranchId == branchFilterVal));
 
             int processingOrders = await context.SalesOrders
                 .Include(o => o.Customer)
-                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId == 2);
+                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId == 2 && (!filterBranch || o.BranchId == branchFilterVal));
 
             int readyOrders = await context.SalesOrders
                 .Include(o => o.Customer)
-                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId == 4);
+                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId == 4 && (!filterBranch || o.BranchId == branchFilterVal));
 
             int completedOrders = await context.SalesOrders
                 .Include(o => o.Customer)
-                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId == 3 && (startDate == null || o.OrderDate >= startDate));
+                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId == 3 && (startDate == null || o.OrderDate >= startDate) && (!filterBranch || o.BranchId == branchFilterVal));
 
             int todayDueOrders = await context.SalesOrders
                 .Include(o => o.Customer)
-                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (o.StatusId == 1 || o.StatusId == 2 || o.StatusId == 4) && o.DeliveryDate != null && o.DeliveryDate.Value.Date == today);
+                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (o.StatusId == 1 || o.StatusId == 2 || o.StatusId == 4) && o.DeliveryDate != null && o.DeliveryDate.Value.Date == today && (!filterBranch || o.BranchId == branchFilterVal));
 
             var orderStatusCounts = await context.SalesOrders
                 .Include(o => o.Customer)
-                .Where(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (startDate == null || o.OrderDate >= startDate))
+                .Where(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (startDate == null || o.OrderDate >= startDate) && (!filterBranch || o.BranchId == branchFilterVal))
                 .GroupBy(o => o.StatusId)
                 .Select(g => new { StatusId = g.Key, Count = g.Count() })
                 .ToListAsync();
@@ -3925,61 +4755,65 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             );
         }
 
-        public static async Task<ManagerDashboardData> GetManagerDashboardDataAsync(int? companyId = null, string period = "30d")
+        public static async Task<ManagerDashboardData> GetManagerDashboardDataAsync(int? companyId = null, string period = "30d", int? branchId = null)
         {
             var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
             var startDate = GetPeriodStartDate(period);
             var today = DateTime.Today;
 
+            int? effectiveBranchId = branchId ?? SessionService.ActiveBranchId;
+            bool filterBranch = effectiveBranchId.HasValue && effectiveBranchId.Value > 0;
+            int branchFilterVal = filterBranch ? effectiveBranchId!.Value : 0;
+
             await using var context = CreateDbContext(targetCompanyId);
 
             int totalCustomers = await context.Customers
-                .CountAsync(c => c.CompanyId == targetCompanyId);
+                .CountAsync(c => c.CompanyId == targetCompanyId && (!filterBranch || c.BranchId == branchFilterVal));
 
             int activeOrders = await context.SalesOrders
                 .Include(o => o.Customer)
-                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (o.StatusId == 1 || o.StatusId == 2));
+                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (o.StatusId == 1 || o.StatusId == 2) && (!filterBranch || o.BranchId == branchFilterVal));
 
             int readyOrders = await context.SalesOrders
                 .Include(o => o.Customer)
-                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId == 4);
+                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId == 4 && (!filterBranch || o.BranchId == branchFilterVal));
 
             int completedOrders = await context.SalesOrders
                 .Include(o => o.Customer)
-                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId == 3 && (startDate == null || o.OrderDate >= startDate));
+                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId == 3 && (startDate == null || o.OrderDate >= startDate) && (!filterBranch || o.BranchId == branchFilterVal));
 
             int todayDeliveries = await context.SalesOrders
                 .Include(o => o.Customer)
-                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (o.StatusId == 1 || o.StatusId == 2 || o.StatusId == 4) && o.DeliveryDate != null && o.DeliveryDate.Value.Date == today);
+                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (o.StatusId == 1 || o.StatusId == 2 || o.StatusId == 4) && o.DeliveryDate != null && o.DeliveryDate.Value.Date == today && (!filterBranch || o.BranchId == branchFilterVal));
 
             decimal activePipelineValue = await context.SalesOrders
                 .Include(o => o.Customer)
-                .Where(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (o.StatusId == 1 || o.StatusId == 2 || o.StatusId == 4))
+                .Where(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (o.StatusId == 1 || o.StatusId == 2 || o.StatusId == 4) && (!filterBranch || o.BranchId == branchFilterVal))
                 .SumAsync(o => (decimal?)o.TotalAmount) ?? 0m;
 
             int openInquiries = await context.CustomerInquiries
                 .Include(i => i.Customer)
-                .CountAsync(i => i.Customer != null && i.Customer.CompanyId == targetCompanyId && (i.Status == "New" || i.Status == "In Progress" || i.Status == "Quoted"));
+                .CountAsync(i => i.Customer != null && i.Customer.CompanyId == targetCompanyId && (i.Status == "New" || i.Status == "In Progress" || i.Status == "Quoted") && (!filterBranch || i.BranchId == branchFilterVal));
 
             int shopOverdueFollowups = await context.CustomerFollowUps
                 .Include(f => f.Customer)
-                .CountAsync(f => f.Customer != null && f.Customer.CompanyId == targetCompanyId && f.StatusId == 0 && f.FollowUpDate < today);
+                .CountAsync(f => f.Customer != null && f.Customer.CompanyId == targetCompanyId && f.StatusId == 0 && f.FollowUpDate < today && (!filterBranch || f.BranchId == branchFilterVal));
 
             int pipelineInquiries = await context.CustomerInquiries
                 .Include(i => i.Customer)
-                .CountAsync(i => i.Customer != null && i.Customer.CompanyId == targetCompanyId && (startDate == null || i.CreatedAt >= startDate));
+                .CountAsync(i => i.Customer != null && i.Customer.CompanyId == targetCompanyId && (startDate == null || i.CreatedAt >= startDate) && (!filterBranch || i.BranchId == branchFilterVal));
             int pipelineConfirmed = await context.SalesOrders
                 .Include(o => o.Customer)
-                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId == 1 && (startDate == null || o.OrderDate >= startDate));
+                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId == 1 && (startDate == null || o.OrderDate >= startDate) && (!filterBranch || o.BranchId == branchFilterVal));
             int pipelineProcessing = await context.SalesOrders
                 .Include(o => o.Customer)
-                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId == 2 && (startDate == null || o.OrderDate >= startDate));
+                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId == 2 && (startDate == null || o.OrderDate >= startDate) && (!filterBranch || o.BranchId == branchFilterVal));
             int pipelineReady = await context.SalesOrders
                 .Include(o => o.Customer)
-                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId == 4 && (startDate == null || o.OrderDate >= startDate));
+                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId == 4 && (startDate == null || o.OrderDate >= startDate) && (!filterBranch || o.BranchId == branchFilterVal));
             int pipelineCompleted = await context.SalesOrders
                 .Include(o => o.Customer)
-                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId == 3 && (startDate == null || o.OrderDate >= startDate));
+                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId == 3 && (startDate == null || o.OrderDate >= startDate) && (!filterBranch || o.BranchId == branchFilterVal));
 
             var stages = new List<PipelineStage>
             {
@@ -3992,7 +4826,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
 
             var orderStatusCounts = await context.SalesOrders
                 .Include(o => o.Customer)
-                .Where(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (startDate == null || o.OrderDate >= startDate))
+                .Where(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (startDate == null || o.OrderDate >= startDate) && (!filterBranch || o.BranchId == branchFilterVal))
                 .GroupBy(o => o.StatusId)
                 .Select(g => new { StatusId = g.Key, Count = g.Count() })
                 .ToListAsync();
@@ -4016,7 +4850,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
 
             var orderTrendRaw = await context.SalesOrders
                 .Include(o => o.Customer)
-                .Where(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (startDate == null || o.OrderDate >= startDate))
+                .Where(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (startDate == null || o.OrderDate >= startDate) && (!filterBranch || o.BranchId == branchFilterVal))
                 .GroupBy(o => o.OrderDate.Date)
                 .Select(g => new { Date = g.Key, Count = g.Count() })
                 .ToListAsync();
@@ -4056,7 +4890,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             var recentOrders = await context.SalesOrders
                 .Include(o => o.Customer)
                 .Include(o => o.Status)
-                .Where(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId != 5)
+                .Where(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId != 5 && (!filterBranch || o.BranchId == branchFilterVal))
                 .OrderByDescending(o => o.OrderId)
                 .Take(6)
                 .Select(o => new ManagerPriorityOrderItem(
@@ -4094,57 +4928,61 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             );
         }
 
-        public static async Task<AdminDashboardData> GetAdminDashboardDataAsync(int? companyId = null, string period = "30d")
+        public static async Task<AdminDashboardData> GetAdminDashboardDataAsync(int? companyId = null, string period = "30d", int? branchId = null)
         {
             var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
             var startDate = GetPeriodStartDate(period);
             var today = DateTime.Today;
+
+            int? effectiveBranchId = branchId ?? SessionService.ActiveBranchId;
+            bool filterBranch = effectiveBranchId.HasValue && effectiveBranchId.Value > 0;
+            int branchFilterVal = filterBranch ? effectiveBranchId!.Value : 0;
 
             await using var context = CreateDbContext(targetCompanyId);
 
             decimal periodRevenue = await context.Payments
                 .Include(p => p.Order)
                 .ThenInclude(o => o!.Customer)
-                .Where(p => p.Order != null && p.Order.Customer != null && p.Order.Customer.CompanyId == targetCompanyId && p.StatusId == 1 && (startDate == null || p.PaymentDate >= startDate))
+                .Where(p => p.Order != null && p.Order.Customer != null && p.Order.Customer.CompanyId == targetCompanyId && p.StatusId == 1 && (startDate == null || p.PaymentDate >= startDate) && (!filterBranch || p.BranchId == branchFilterVal || p.Order.BranchId == branchFilterVal))
                 .SumAsync(p => (decimal?)p.Amount) ?? 0m;
 
             decimal lifetimeRevenue = await context.Payments
                 .Include(p => p.Order)
                 .ThenInclude(o => o!.Customer)
-                .Where(p => p.Order != null && p.Order.Customer != null && p.Order.Customer.CompanyId == targetCompanyId && p.StatusId == 1)
+                .Where(p => p.Order != null && p.Order.Customer != null && p.Order.Customer.CompanyId == targetCompanyId && p.StatusId == 1 && (!filterBranch || p.BranchId == branchFilterVal || p.Order.BranchId == branchFilterVal))
                 .SumAsync(p => (decimal?)p.Amount) ?? 0m;
 
             int totalOrders = await context.SalesOrders
                 .Include(o => o.Customer)
-                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (startDate == null || o.OrderDate >= startDate));
+                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (startDate == null || o.OrderDate >= startDate) && (!filterBranch || o.BranchId == branchFilterVal));
 
             int activeOrders = await context.SalesOrders
                 .Include(o => o.Customer)
-                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (o.StatusId == 1 || o.StatusId == 2 || o.StatusId == 4));
+                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (o.StatusId == 1 || o.StatusId == 2 || o.StatusId == 4) && (!filterBranch || o.BranchId == branchFilterVal));
 
             decimal averageOrderValue = totalOrders > 0 ? periodRevenue / totalOrders : 0m;
 
             decimal totalBilledPeriod = await context.SalesOrders
                 .Include(o => o.Customer)
-                .Where(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (startDate == null || o.OrderDate >= startDate))
+                .Where(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (startDate == null || o.OrderDate >= startDate) && (!filterBranch || o.BranchId == branchFilterVal))
                 .SumAsync(o => (decimal?)o.TotalAmount) ?? 0m;
             double collectionRate = totalBilledPeriod > 0 ? Math.Min(100.0, (double)(periodRevenue / totalBilledPeriod) * 100.0) : 100.0;
 
             int totalCustomers = await context.Customers
-                .CountAsync(c => c.CompanyId == targetCompanyId);
+                .CountAsync(c => c.CompanyId == targetCompanyId && (!filterBranch || c.BranchId == branchFilterVal));
 
             int newCustomers = await context.Customers
-                .CountAsync(c => c.CompanyId == targetCompanyId && (startDate == null || c.RegisteredDate >= startDate));
+                .CountAsync(c => c.CompanyId == targetCompanyId && (startDate == null || c.RegisteredDate >= startDate) && (!filterBranch || c.BranchId == branchFilterVal));
 
             decimal outstanding = await context.SalesOrders
                 .Include(o => o.Customer)
-                .Where(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId != 3 && o.StatusId != 5)
+                .Where(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId != 3 && o.StatusId != 5 && (!filterBranch || o.BranchId == branchFilterVal))
                 .SumAsync(o => (decimal?)o.TotalAmount) ?? 0m;
 
             var revTrendRaw = await context.Payments
                 .Include(p => p.Order)
                 .ThenInclude(o => o!.Customer)
-                .Where(p => p.Order != null && p.Order.Customer != null && p.Order.Customer.CompanyId == targetCompanyId && p.StatusId == 1 && (startDate == null || p.PaymentDate >= startDate))
+                .Where(p => p.Order != null && p.Order.Customer != null && p.Order.Customer.CompanyId == targetCompanyId && p.StatusId == 1 && (startDate == null || p.PaymentDate >= startDate) && (!filterBranch || p.BranchId == branchFilterVal || p.Order.BranchId == branchFilterVal))
                 .GroupBy(p => p.PaymentDate.Date)
                 .Select(g => new { Date = g.Key, Total = g.Sum(p => p.Amount) })
                 .ToListAsync();
@@ -4155,7 +4993,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 var todayPayments = await context.Payments
                     .Include(p => p.Order)
                     .ThenInclude(o => o!.Customer)
-                    .Where(p => p.Order != null && p.Order.Customer != null && p.Order.Customer.CompanyId == targetCompanyId && p.StatusId == 1 && p.PaymentDate >= today)
+                    .Where(p => p.Order != null && p.Order.Customer != null && p.Order.Customer.CompanyId == targetCompanyId && p.StatusId == 1 && p.PaymentDate >= today && (!filterBranch || p.BranchId == branchFilterVal || p.Order.BranchId == branchFilterVal))
                     .Select(p => new { p.PaymentDate, p.Amount })
                     .ToListAsync();
 
@@ -4190,7 +5028,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 .Include(p => p.Order)
                 .ThenInclude(o => o!.Customer)
                 .Include(p => p.Method)
-                .Where(p => p.Order != null && p.Order.Customer != null && p.Order.Customer.CompanyId == targetCompanyId && p.StatusId == 1 && (startDate == null || p.PaymentDate >= startDate))
+                .Where(p => p.Order != null && p.Order.Customer != null && p.Order.Customer.CompanyId == targetCompanyId && p.StatusId == 1 && (startDate == null || p.PaymentDate >= startDate) && (!filterBranch || p.BranchId == branchFilterVal || p.Order.BranchId == branchFilterVal))
                 .GroupBy(p => p.Method != null ? p.Method.MethodName : "Cash")
                 .Select(g => new { Method = g.Key, Count = g.Count(), Total = g.Sum(p => p.Amount) })
                 .ToListAsync();
@@ -4211,7 +5049,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
 
             var orderStatusCounts = await context.SalesOrders
                 .Include(o => o.Customer)
-                .Where(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (startDate == null || o.OrderDate >= startDate))
+                .Where(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (startDate == null || o.OrderDate >= startDate) && (!filterBranch || o.BranchId == branchFilterVal))
                 .GroupBy(o => o.StatusId)
                 .Select(g => new { StatusId = g.Key, Count = g.Count() })
                 .ToListAsync();
@@ -4234,16 +5072,16 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             }
 
             var topCustsRaw = await context.Customers
-                .Where(c => c.CompanyId == targetCompanyId && c.Orders.Any())
+                .Where(c => c.CompanyId == targetCompanyId && (!filterBranch || c.BranchId == branchFilterVal) && c.Orders.Any())
                 .Select(c => new
                 {
                     c.CustomerId,
                     CustomerName = (c.FirstName + " " + c.LastName).Trim(),
                     c.Email,
                     c.Phone,
-                    OrderCount = c.Orders.Count,
-                    TotalSpent = c.Orders.SelectMany(o => o.Payments).Where(p => p.StatusId == 1).Sum(p => (decimal?)p.Amount) ?? 0m,
-                    LastOrderDate = c.Orders.Max(o => o.OrderDate)
+                    OrderCount = c.Orders.Count(o => !filterBranch || o.BranchId == branchFilterVal),
+                    TotalSpent = c.Orders.Where(o => !filterBranch || o.BranchId == branchFilterVal).SelectMany(o => o.Payments).Where(p => p.StatusId == 1).Sum(p => (decimal?)p.Amount) ?? 0m,
+                    LastOrderDate = c.Orders.Where(o => !filterBranch || o.BranchId == branchFilterVal).Max(o => (DateTime?)o.OrderDate)
                 })
                 .OrderByDescending(c => c.TotalSpent)
                 .Take(5)
@@ -4256,11 +5094,11 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 c.Phone,
                 c.OrderCount,
                 c.TotalSpent,
-                c.LastOrderDate
+                c.LastOrderDate ?? DateTime.MinValue
             )).ToList();
 
             var subInfo = await GetSubscriptionInfoAsync();
-            var pagedTx = await GetOverallTransactionsPagedAsync(page: 1, pageSize: 6);
+            var pagedTx = await GetOverallTransactionsPagedAsync(page: 1, pageSize: 6, branchId: effectiveBranchId);
             var recentRetention = await context.RetentionRequests
                 .Where(r => r.CompanyId == targetCompanyId)
                 .OrderByDescending(r => r.RequestedDate)
@@ -4493,8 +5331,13 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             }
         }
 
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _retentionTablesInitialized = new();
+
         public static async Task EnsureRetentionTablesAndSeedsAsync(CrmDbContext context)
         {
+            string connKey = context.Database.GetDbConnection().ConnectionString;
+            if (_retentionTablesInitialized.ContainsKey(connKey)) return;
+
             try
             {
                 await context.Database.ExecuteSqlRawAsync(@"
@@ -4603,6 +5446,20 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                         ALTER TABLE RetentionSettings ADD SmtpFromName NVARCHAR(150) NULL;
                         ALTER TABLE RetentionSettings ADD SmtpEnableSsl BIT NOT NULL DEFAULT 1;
                         ALTER TABLE RetentionSettings ADD SmtpMockMode BIT NOT NULL DEFAULT 1;
+                    END;
+
+                    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('RetentionRequests') AND name = 'AddedToCampaign')
+                    BEGIN
+                        ALTER TABLE RetentionRequests ADD AddedToCampaign BIT NOT NULL DEFAULT 0;
+                        ALTER TABLE RetentionRequests ADD AddedToCampaignDate DATETIME2 NULL;
+                        ALTER TABLE RetentionRequests ADD GeneratedCampaignLogId INT NULL;
+                        ALTER TABLE RetentionRequests ADD GeneratedCampaignSubject NVARCHAR(255) NULL;
+                        ALTER TABLE RetentionRequests ADD GeneratedCampaignBody NVARCHAR(MAX) NULL;
+                    END;
+
+                    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('RetentionEmailLogs') AND name = 'RetentionRequestId')
+                    BEGIN
+                        ALTER TABLE RetentionEmailLogs ADD RetentionRequestId INT NULL;
                     END;
                 ");
 
@@ -4857,6 +5714,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                         await context.SaveChangesAsync();
                     }
                 }
+
+                _retentionTablesInitialized[connKey] = true;
             }
             catch (Exception ex)
             {
@@ -5076,6 +5935,12 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 .Take(25)
                 .ToListAsync();
 
+            var approvedCampaigns = await context.RetentionRequests
+                .AsNoTracking()
+                .Where(r => r.CompanyId == targetCompanyId && r.Status == "Approved")
+                .OrderByDescending(r => r.ReviewedDate ?? r.RequestedDate)
+                .ToListAsync();
+
             return new RetentionDashboardData(
                 validBase.Count,
                 summaryMap,
@@ -5084,7 +5949,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 settings,
                 metrics,
                 emailLogs.Take(50).ToList(),
-                auditLogs
+                auditLogs,
+                approvedCampaigns
             );
         }
 
@@ -5393,7 +6259,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             var template = await context.RetentionEmailTemplates
                 .FirstOrDefaultAsync(t => t.SegmentName == segmentName && t.IsActive);
 
-            string subject = overrideSubject ?? template?.Subject ?? $"Exclusive Offer from Sweet Story for {customer.FirstName}";
+            string brandName = SessionService.GetActiveBrandName();
+            string subject = overrideSubject ?? template?.Subject ?? $"Exclusive Offer from {brandName} for {customer.FirstName}";
             string body = overrideBody ?? template?.BodyText ?? $"Hi {customer.FirstName},\n\nWe appreciate you being our customer!";
 
             subject = subject.Replace("{{customer_name}}", customer.FirstName.Trim());
@@ -5503,7 +6370,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             var template = await context.RetentionEmailTemplates
                 .FirstOrDefaultAsync(t => t.SegmentName == segmentName && t.IsActive);
 
-            string subject = overrideSubject ?? template?.Subject ?? $"Exclusive Offer from Sweet Story for {customer.FirstName}";
+            string brandName = SessionService.GetActiveBrandName();
+            string subject = overrideSubject ?? template?.Subject ?? $"Exclusive Offer from {brandName} for {customer.FirstName}";
             string body = overrideBody ?? template?.BodyText ?? $"Hi {customer.FirstName},\n\nWe appreciate you being our customer!";
 
             subject = subject.Replace("{{customer_name}}", customer.FirstName.Trim());
@@ -5580,7 +6448,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 .FirstOrDefaultAsync(t => t.SegmentName == segmentName && t.IsActive);
 
             string cleanName = string.IsNullOrWhiteSpace(recipientName) ? "Valued Customer" : recipientName.Trim();
-            string subject = (template?.Subject ?? "Exclusive Offer from Sweet Story").Replace("{{customer_name}}", cleanName);
+            string brandName = SessionService.GetActiveBrandName();
+            string subject = (template?.Subject ?? $"Exclusive Offer from {brandName}").Replace("{{customer_name}}", cleanName);
             string body = (template?.BodyText ?? "We appreciate you being our customer!").Replace("{{customer_name}}", cleanName);
 
             string status = "Delivered";
@@ -5823,15 +6692,140 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             req.ReviewAction = "Approved";
             req.AdminRemarks = adminRemarks?.Trim();
 
+            // Automatic & Idempotent Email Campaign Generation (Requirements 4, 5, 6)
+            if (!req.AddedToCampaign)
+            {
+                var (emailSubject, emailBody) = GenerateFormattedRetentionEmail(req);
+
+                var campaignLog = new RetentionEmailLog
+                {
+                    CompanyId = targetCompanyId,
+                    CustomerId = req.CustomerId,
+                    CustomerName = req.CustomerName,
+                    CustomerEmail = req.CustomerEmail,
+                    SegmentName = req.TargetSegment,
+                    Subject = emailSubject,
+                    BodySent = emailBody,
+                    SentDate = DateTime.UtcNow,
+                    SentBy = $"Approved Request #{req.RequestId} ({currentUserName})",
+                    Status = "Ready to Send",
+                    RetentionRequestId = req.RequestId
+                };
+
+                context.RetentionEmailLogs.Add(campaignLog);
+                await context.SaveChangesAsync();
+
+                req.AddedToCampaign = true;
+                req.AddedToCampaignDate = DateTime.UtcNow;
+                req.GeneratedCampaignLogId = campaignLog.LogId;
+                req.GeneratedCampaignSubject = emailSubject;
+                req.GeneratedCampaignBody = emailBody;
+            }
+
             await context.SaveChangesAsync();
 
             await RecordAuditLogAsync(
                 userId: currentUserId,
                 actionType: "RETENTION_REQUEST_APPROVED",
-                actionDesc: $"Retention request #{req.RequestId} for '{req.CustomerName}' approved by {currentUserName}"
+                actionDesc: $"Retention request #{req.RequestId} for '{req.CustomerName}' approved by {currentUserName} and automatically added to Email Campaigns."
             );
 
             return req;
+        }
+
+        public static (string Subject, string Body) GenerateFormattedRetentionEmail(RetentionRequest req)
+        {
+            string customerName = req.CustomerName?.Trim() ?? "Valued Customer";
+            string firstName = customerName.Split(' ')[0];
+            decimal discount = req.DiscountPercent;
+            string discountText = discount > 0 ? $"{discount:0.#}%" : "Exclusive";
+
+            string brandName = SessionService.GetActiveBrandName();
+
+            // Subject generation based on retention reason and purpose (Requirement 5)
+            string subject;
+            string reason = req.ReasonCategory?.Trim() ?? "";
+
+            switch (reason)
+            {
+                case "Prevent Customer Churn":
+                    subject = discount > 0
+                        ? $"We Miss You at {brandName}! Enjoy a Special {discountText} Welcome-Back Gift"
+                        : $"We Miss You at {brandName}! Here is a Special Treat for You";
+                    break;
+                case "Maximize Profit Margins":
+                case "VIP Loyalty Reward":
+                    subject = discount > 0
+                        ? $"An Exclusive {brandName} VIP Reward: {discountText} Off Just for You, {firstName}!"
+                        : $"Exclusive VIP Reward: A Special Invitation from {brandName} for {firstName}";
+                    break;
+                case "Improve Customer Retention":
+                    subject = discount > 0
+                        ? $"A Heartfelt Thank You & Special {discountText} Discount for {firstName}"
+                        : $"A Special Appreciation Gift for {firstName} from {brandName}";
+                    break;
+                case "Monthly Sales Target Not Met":
+                    subject = discount > 0
+                        ? $"Special Celebration Offer: Enjoy {discountText} Off Your Next Order!"
+                        : $"Special Celebration Offer Just for You from {brandName}!";
+                    break;
+                case "Promotional or Strategic Decision":
+                    subject = discount > 0
+                        ? $"Exclusive Promotion: Enjoy {discountText} Off Your Next {brandName} Order"
+                        : $"Exclusive Celebration Promotion from {brandName}";
+                    break;
+                default:
+                    subject = discount > 0
+                        ? $"Special Appreciation Offer: {discountText} Off for {firstName} from {brandName}"
+                        : $"A Special Personalized Offer for {firstName} from {brandName}";
+                    break;
+            }
+
+            // Body generation - warm, professional, authentic customer appreciation email
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"Dear {customerName},");
+            sb.AppendLine();
+            sb.AppendLine($"Thank you for being a valued part of the {brandName} family! Your trust and support mean the world to us, and we are grateful for every celebration and sweet moment we have had the privilege to be part of.");
+            sb.AppendLine();
+
+            if (discount > 0)
+            {
+                sb.AppendLine($"As a token of our heartfelt appreciation, our management has approved an exclusive {discountText} discount tailored specifically for your next custom cake or pastry order with us.");
+            }
+            else
+            {
+                sb.AppendLine("As a token of our heartfelt appreciation, our management has approved an exclusive customer appreciation offer tailored specifically for your next celebration order with us.");
+            }
+            sb.AppendLine();
+
+            sb.AppendLine("Offer Details:");
+            if (discount > 0)
+            {
+                sb.AppendLine($"• Special Discount: {discountText} off on your next customized cake or bakery order");
+            }
+            if (!string.IsNullOrWhiteSpace(req.RetentionDetails) && req.RetentionDetails.Trim().Length > 10)
+            {
+                sb.AppendLine($"• Special Note: {req.RetentionDetails.Trim()}");
+            }
+            else if (!string.IsNullOrWhiteSpace(req.ActionType) && req.ActionType != "Special Discount")
+            {
+                sb.AppendLine($"• Offer Type: {req.ActionType}");
+            }
+            sb.AppendLine("• Validity: Valid for 30 days from today");
+            sb.AppendLine();
+
+            sb.AppendLine("How to Redeem:");
+            sb.AppendLine("Simply reply directly to this email or present this message at our shop when placing your next order. Our master cake decorators will be delighted to handcraft something extraordinary for your celebration!");
+            sb.AppendLine();
+            sb.AppendLine("We look forward to welcoming you back soon. Feel free to contact our team anytime to discuss your next custom design.");
+            sb.AppendLine();
+            sb.AppendLine("Warmest regards,");
+            sb.AppendLine();
+            sb.AppendLine($"The {brandName} Management Team");
+            sb.AppendLine(brandName);
+            sb.AppendLine("Crafting Sweet Moments for Every Celebration");
+
+            return (subject, sb.ToString());
         }
 
         public static async Task<RetentionRequest> RejectRetentionRequestAsync(
@@ -5897,6 +6891,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             await EnsureRetentionTablesAndSeedsAsync(context);
 
             var query = context.RetentionRequests
+                .AsNoTracking()
                 .Where(r => r.CompanyId == targetCompanyId)
                 .AsQueryable();
 
@@ -5930,16 +6925,70 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 );
             }
 
-            return await query
+            var results = await query
                 .OrderByDescending(r => r.RequestedDate)
                 .ToListAsync();
+
+            foreach (var req in results)
+            {
+                if (req.Status == "Approved" && string.IsNullOrEmpty(req.GeneratedCampaignBody))
+                {
+                    var (genSubject, genBody) = GenerateFormattedRetentionEmail(req);
+                    req.GeneratedCampaignSubject = genSubject;
+                    req.GeneratedCampaignBody = genBody;
+                    req.AddedToCampaign = true;
+                    req.AddedToCampaignDate ??= req.ReviewedDate ?? DateTime.UtcNow;
+                }
+            }
+
+            return results;
         }
 
         public static async Task<RetentionRequest?> GetRetentionRequestByIdAsync(int requestId, int? companyId = null)
         {
             var targetCompanyId = companyId ?? SessionService.CurrentUser?.CompanyId ?? DefaultCompanyId;
             await using var context = CreateDbContext(targetCompanyId);
-            return await context.RetentionRequests.FirstOrDefaultAsync(r => r.RequestId == requestId && r.CompanyId == targetCompanyId);
+            var req = await context.RetentionRequests
+                .FirstOrDefaultAsync(r => r.RequestId == requestId && r.CompanyId == targetCompanyId);
+
+            if (req != null && req.Status == "Approved" && (!req.AddedToCampaign || string.IsNullOrEmpty(req.GeneratedCampaignBody)))
+            {
+                var (genSubject, genBody) = GenerateFormattedRetentionEmail(req);
+                req.GeneratedCampaignSubject = genSubject;
+                req.GeneratedCampaignBody = genBody;
+                req.AddedToCampaign = true;
+                req.AddedToCampaignDate ??= req.ReviewedDate ?? DateTime.UtcNow;
+
+                var existingLog = await context.RetentionEmailLogs
+                    .FirstOrDefaultAsync(l => l.RetentionRequestId == req.RequestId);
+                if (existingLog == null)
+                {
+                    var campaignLog = new RetentionEmailLog
+                    {
+                        CompanyId = req.CompanyId,
+                        CustomerId = req.CustomerId,
+                        CustomerName = req.CustomerName,
+                        CustomerEmail = req.CustomerEmail,
+                        SegmentName = req.TargetSegment,
+                        Subject = genSubject,
+                        BodySent = genBody,
+                        SentDate = req.AddedToCampaignDate ?? DateTime.UtcNow,
+                        SentBy = $"Approved Request #{req.RequestId} ({req.ReviewedByUserName ?? "Admin"})",
+                        Status = "Ready to Send",
+                        RetentionRequestId = req.RequestId
+                    };
+                    context.RetentionEmailLogs.Add(campaignLog);
+                    await context.SaveChangesAsync();
+                    req.GeneratedCampaignLogId = campaignLog.LogId;
+                }
+                else
+                {
+                    req.GeneratedCampaignLogId = existingLog.LogId;
+                }
+                await context.SaveChangesAsync();
+            }
+
+            return req;
         }
     }
 
@@ -5983,7 +7032,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
         RetentionSetting Settings,
         RetentionMetrics Metrics,
         List<RetentionEmailLog> RecentEmailLogs,
-        List<SystemAuditLog> AuditLogs
+        List<SystemAuditLog> AuditLogs,
+        List<RetentionRequest>? ApprovedCampaigns = null
     );
 
     public record SubscriptionPlanListItem(

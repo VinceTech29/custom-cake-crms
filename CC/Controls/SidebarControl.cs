@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 using CC.Forms.Authentication;
+using CC.Services;
 
 namespace CC.Controls
 {
@@ -27,13 +28,14 @@ namespace CC.Controls
         private string _activeKey = "Dashboard";
 
         // Session Information
-        private string _companyName = "Custom Cake CRMS";
+        private string _companyName = SessionService.GetActiveBrandName();
         private string _userDisplayName = "Jerome Santos";
         private string _userRole = "Staff";
 
         private Panel _headerPanel = null!;
         private Panel _logoBadge = null!;
         private Label _companyNameLabel = null!;
+        private ToolTip? _headerTooltip;
         private Label _userNameLabel = null!;
         private Label _shopNameFooterLabel = null!;
         private Panel _avatarPanel = null!;
@@ -50,10 +52,14 @@ namespace CC.Controls
             BuildLayout();
         }
 
-        public void SetCompanyName(string name)
+        public void SetCompanyName(string? name)
         {
-            _companyName = name ?? _companyName;
-            if (_companyNameLabel != null) _companyNameLabel.Text = _companyName;
+            _companyName = !string.IsNullOrWhiteSpace(name) ? name.Trim() : SessionService.GetActiveBrandName();
+            if (_companyNameLabel != null)
+            {
+                _companyNameLabel.Text = _companyName;
+                _headerTooltip?.SetToolTip(_companyNameLabel, _companyName);
+            }
         }
 
         public void SetUserDisplayName(string name)
@@ -162,9 +168,15 @@ namespace CC.Controls
                 Text = _companyName,
                 Font = new Font(UITheme.FontSerif, 11F, FontStyle.Bold),
                 ForeColor = UITheme.TextDark,
-                AutoSize = true,
-                Margin = new Padding(0, 8, 0, 0)
+                AutoSize = false,
+                Size = new Size(184, 38),
+                AutoEllipsis = true,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Margin = new Padding(0, 0, 0, 0)
             };
+
+            _headerTooltip = new ToolTip();
+            _headerTooltip.SetToolTip(_companyNameLabel, _companyName);
 
             flow.Controls.Add(_logoBadge);
             flow.Controls.Add(_companyNameLabel);
@@ -247,6 +259,24 @@ namespace CC.Controls
 
         public bool HasNavItem(string key) => _navButtons.ContainsKey(key);
         public IReadOnlyCollection<string> NavItemKeys => _navButtons.Keys.ToList().AsReadOnly();
+
+        public void SetNavItemVisible(string key, bool visible)
+        {
+            if (_navButtons.TryGetValue(key, out var btn))
+            {
+                btn.Visible = visible;
+            }
+        }
+
+        public void RemoveNavItem(string key)
+        {
+            if (_navButtons.TryGetValue(key, out var btn))
+            {
+                _navFlow?.Controls.Remove(btn);
+                _navButtons.Remove(key);
+                btn.Dispose();
+            }
+        }
 
         private void AddNavItemInternal(FlowLayoutPanel flow, string key, string iconGlyph)
         {

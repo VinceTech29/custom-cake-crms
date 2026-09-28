@@ -20,8 +20,12 @@ namespace CC.Domain.Entities
 
         public DateTime? NextFollowUpDate { get; set; }
 
+        public int? BranchId { get; set; }
+
         // Navigation
         public Customer? Customer { get; set; }
+
+        public Branch? Branch { get; set; }
 
         public SystemUser? StaffUser { get; set; }
 

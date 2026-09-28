@@ -806,6 +806,12 @@ namespace CC.Forms.Authentication
                     _ => "Staff"
                 });
 
+                string resolvedCompanyName = user.Company?.CompanyName ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(resolvedCompanyName) && user.CompanyId > 0 && !string.Equals(roleName, "SuperAdmin", StringComparison.OrdinalIgnoreCase))
+                {
+                    resolvedCompanyName = (await CrmDataService.GetCompanyNameAsync(user.CompanyId)) ?? string.Empty;
+                }
+
                 SessionService.CurrentUser = new CurrentUser
                 {
                     UserId = user.UserId,
@@ -815,10 +821,16 @@ namespace CC.Forms.Authentication
                     Email = user.Email,
                     Role = roleName,
                     CompanyId = user.CompanyId,
-                    CompanyName = user.Company?.CompanyName ?? string.Empty,
+                    CompanyName = resolvedCompanyName,
                     TenantServer = result.TenantServer,
-                    TenantDatabase = result.TenantDatabase
+                    TenantDatabase = result.TenantDatabase,
+                    BranchId = user.BranchId,
+                    BranchName = user.Branch?.BranchName
                 };
+
+                // Initialize Active Branch:
+                // If user has an explicit branch assigned, scope to that branch; otherwise default to "All Branches" (null).
+                SessionService.SetActiveBranch(user.BranchId, user.Branch?.BranchName);
 
                 try
                 {
@@ -884,6 +896,7 @@ namespace CC.Forms.Authentication
 
         private void Dashboard_FormClosed(object? sender, FormClosedEventArgs e)
         {
+            SessionService.ClearSession();
             Show();
             txtPassword.Clear();
         }

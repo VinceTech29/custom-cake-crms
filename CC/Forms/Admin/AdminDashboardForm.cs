@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using CC.Controls;
+using CC.Forms.Admin.Branches;
 using CC.Forms.Admin.Subscription;
 using CC.Forms.Admin.Users;
 using CC.Forms.Authentication;
@@ -32,9 +33,10 @@ namespace CC.Forms.Admin
         public AdminDashboardForm() : base("Business Admin")
         {
             PageTitle = "Business Admin Dashboard";
+            SidebarCtrl.AddNavItem("Branches", "\uE716");
             SidebarCtrl.AddNavItem("Reports", "\uE9F9");
             SidebarCtrl.AddNavItem("Retention & Campaigns", "\uE715");
-            SidebarCtrl.AddNavItem("User Management", "\uE716");
+            SidebarCtrl.AddNavItem("User Management", "\uE77B");
             SidebarCtrl.AddNavItem("Subscription", "\uE8C7");
             SidebarCtrl.SetActiveItem("Dashboard");
             BuildDashboardShell();
@@ -53,6 +55,21 @@ namespace CC.Forms.Admin
                     BuildDashboardShell();
                     _ = LoadDashboardDataAsync();
                     break;
+                case "Branches":
+                    {
+                        var cap = CrmDataService.GetBranchCapabilityAsync(SessionService.CurrentUser?.CompanyId).GetAwaiter().GetResult();
+                        if (!cap.AllowBranching)
+                        {
+                            MessageBox.Show(
+                                $"Multi-Branching is not enabled on your current subscription plan ({cap.PlanName}).\n\nTo create multiple branch locations, assign branch managers, and track branch-isolated sales, please upgrade to a subscription plan that supports multi-branch operations.",
+                                "Multi-Branching Required",
+                                MessageBoxButtons.OK,
+                                MessageBoxIcon.Information);
+                            return;
+                        }
+                        ViewHost.ShowFormInPanel(MainPanel, new BranchListForm());
+                        break;
+                    }
                 case "Customers":
                     ViewHost.ShowFormInPanel(MainPanel, new CustomerListForm());
                     break;
@@ -108,9 +125,13 @@ namespace CC.Forms.Admin
             if (IsDisposed) return;
             try
             {
+                var branchCap = await CrmDataService.GetBranchCapabilityAsync(SessionService.CurrentUser?.CompanyId);
+                SidebarCtrl.SetNavItemVisible("Branches", branchCap.AllowBranching);
+
                 var data = await CrmDataService.GetAdminDashboardDataAsync(
                     companyId: SessionService.CurrentUser?.CompanyId,
-                    period: _activePeriod);
+                    period: _activePeriod,
+                    branchId: SessionService.ActiveBranchId);
 
             var rootLayout = new TableLayoutPanel
             {
@@ -128,36 +149,47 @@ namespace CC.Forms.Admin
             rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // Top Customers & Subscription
 
             // 1. TOP HEADER & PERIOD FILTER
-            var topPanel = new Panel
+            // 2-row stack: row 0 = title + subtitle, row 1 = period pills + branch selector
+            var topTable = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
-                Height = 84,
-                Padding = new Padding(0, 0, 0, 14),
-                BackColor = Color.Transparent
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 1,
+                RowCount = 2,
+                BackColor = Color.Transparent,
+                Margin = Padding.Empty,
+                Padding = new Padding(0, 0, 0, 14)
             };
+            topTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            topTable.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // row 0: title
+            topTable.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // row 1: filters
 
+            // --- Row 0: Title + Subtitle ---
             var titleStack = new FlowLayoutPanel
             {
                 FlowDirection = FlowDirection.TopDown,
                 WrapContents = false,
                 AutoSize = true,
-                Dock = DockStyle.Left,
-                BackColor = Color.Transparent
+                Anchor = AnchorStyles.Left | AnchorStyles.Top,
+                BackColor = Color.Transparent,
+                Margin = new Padding(0, 0, 0, 6)
             };
 
             var lblTitle = new Label
             {
                 Text = "Business Admin Dashboard",
-                Font = new Font(UITheme.FontSerif, 22F, FontStyle.Bold),
+                Font = new Font(UITheme.FontSerif, 20F, FontStyle.Bold),
                 ForeColor = UITheme.TextDark,
                 AutoSize = true,
-                Margin = new Padding(0, 0, 0, 4)
+                Margin = new Padding(0, 0, 0, 2)
             };
 
+            string branchBadge = SessionService.GetActiveBranchDisplay();
             var lblSubtitle = new Label
             {
-                Text = $"Executive Financial & CRM Intelligence \u00B7 {DateTime.Now:MMM d, yyyy}",
-                Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Regular),
+                Text = $"{SessionService.GetActiveBrandName()} \u00B7 {DateTime.Now:MMM d, yyyy}",
+                Font = new Font(UITheme.FontSans, 9F, FontStyle.Regular),
                 ForeColor = UITheme.TextMuted,
                 AutoSize = true,
                 Margin = Padding.Empty
@@ -166,10 +198,11 @@ namespace CC.Forms.Admin
             titleStack.Controls.Add(lblTitle);
             titleStack.Controls.Add(lblSubtitle);
 
+            // --- Row 1: Period pills + Branch selector ---
             var periodSelector = new PeriodSelectorControl(PeriodSelectorControl.AdminPeriods)
             {
-                Dock = DockStyle.Right,
-                SelectedPeriod = _activePeriod
+                SelectedPeriod = _activePeriod,
+                Anchor = AnchorStyles.None
             };
             periodSelector.PeriodChanged += (s, newPeriod) =>
             {
@@ -177,9 +210,34 @@ namespace CC.Forms.Admin
                 _ = LoadDashboardDataAsync();
             };
 
-            topPanel.Controls.Add(periodSelector);
-            topPanel.Controls.Add(titleStack);
-            rootLayout.Controls.Add(topPanel, 0, 0);
+            var branchSelector = new BranchSelectorControl
+            {
+                Anchor = AnchorStyles.None,
+                Margin = new Padding(8, 0, 0, 0)
+            };
+            branchSelector.BranchChanged += (s, branchId) =>
+            {
+                _ = LoadDashboardDataAsync();
+            };
+
+            var filtersRow = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Anchor = AnchorStyles.Left | AnchorStyles.Top,
+                BackColor = Color.Transparent,
+                Padding = Padding.Empty,
+                Margin = Padding.Empty
+            };
+            filtersRow.Controls.Add(periodSelector);
+            filtersRow.Controls.Add(branchSelector);
+
+            topTable.Controls.Add(titleStack, 0, 0);
+            topTable.Controls.Add(filtersRow, 0, 1);
+            rootLayout.Controls.Add(topTable, 0, 0);
+
 
             // 2. 8 FINANCIAL & CRM KPI CARDS (4x2 GRID)
             var kpiTable = new TableLayoutPanel

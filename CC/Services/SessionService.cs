@@ -7,6 +7,58 @@ namespace CC.Services
     {
         public static CurrentUser? CurrentUser { get; set; }
 
+        public static int? ActiveBranchId { get; set; }
+        public static string? ActiveBranchName { get; set; }
+        public static event System.Action? ActiveBranchChanged;
+
+        public static void SetActiveBranch(int? branchId, string? branchName)
+        {
+            ActiveBranchId = branchId;
+            ActiveBranchName = string.IsNullOrWhiteSpace(branchName)
+                ? (branchId == null ? "All Branches" : null)
+                : branchName.Trim();
+            ActiveBranchChanged?.Invoke();
+        }
+
+        public static void NotifyActiveBranchChanged() => ActiveBranchChanged?.Invoke();
+
+        public static string GetActiveBranchDisplay() =>
+            !string.IsNullOrWhiteSpace(ActiveBranchName) ? ActiveBranchName : "All Branches";
+
+        public const string PlatformBrandName = "Custom Cake CRMS";
+
+        public static bool IsSuperAdmin =>
+            CurrentUser != null && (
+                string.Equals(CurrentUser.Role, "SuperAdmin", System.StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(CurrentUser.Role, "Super Admin", System.StringComparison.OrdinalIgnoreCase) ||
+                CurrentUser.Role?.Replace(" ", "").Equals("SuperAdmin", System.StringComparison.OrdinalIgnoreCase) == true
+            );
+
+        public static string GetActiveBrandName()
+        {
+            if (CurrentUser == null) return PlatformBrandName;
+
+            if (IsSuperAdmin)
+            {
+                return PlatformBrandName;
+            }
+
+            if (!string.IsNullOrWhiteSpace(CurrentUser.CompanyName))
+            {
+                return CurrentUser.CompanyName.Trim();
+            }
+
+            return PlatformBrandName;
+        }
+
+        public static void ClearSession()
+        {
+            CurrentUser = null;
+            ActiveBranchId = null;
+            ActiveBranchName = null;
+            CrmDataService.ClearTenantSession();
+        }
+
         // In-memory stores for UI testing
         public static List<Customer> Customers { get; } = new List<Customer>();
         public static List<SalesOrder> Orders { get; } = new List<SalesOrder>();
@@ -254,6 +306,8 @@ namespace CC.Services
         public string CompanyName { get; set; } = string.Empty;
         public string? TenantServer { get; set; }
         public string? TenantDatabase { get; set; }
+        public int? BranchId { get; set; }
+        public string? BranchName { get; set; }
 
         public string FullName => $"{FirstName} {LastName}".Trim();
     }

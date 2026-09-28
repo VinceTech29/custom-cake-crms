@@ -42,6 +42,14 @@ namespace CC.Forms.SuperAdmin.Monitoring
         private DataGridView gridBackups = null!;
         private FlowLayoutPanel pnlTenantBadges = null!;
 
+        // MonsterASP Cloud Backup Controls
+        private Button btnCloudBackup = null!;
+        private Button btnTestCloud = null!;
+        private Button btnCloudRestore = null!;
+        private Label lblCloudBadge = null!;
+        private Label lblCloudLastBackup = null!;
+        private Label lblCloudActionStatus = null!;
+
         private List<AuditLogItem> _logsList = new();
         private List<BackupRecord> _backupList = new();
         private List<string> _availableDbs = new();
@@ -559,8 +567,11 @@ namespace CC.Forms.SuperAdmin.Monitoring
                 }
             };
 
+            var cloudCard = BuildCloudBackupCard();
+
             backupsContainer.Controls.Add(gridBackups);
             backupsContainer.Controls.Add(actionPanel);
+            backupsContainer.Controls.Add(cloudCard);
             backupsContainer.Controls.Add(banner);
         }
 
@@ -692,10 +703,311 @@ namespace CC.Forms.SuperAdmin.Monitoring
                     gridBackups.Rows[row].Cells[3].Value = b.Timestamp.ToString("yyyy-MM-dd HH:mm:ss");
                     gridBackups.Rows[row].Cells[4].Value = "Success";
                 }
+
+                UpdateCloudLastBackupLabel();
+                _ = CheckCloudStatusAsync();
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"[RefreshBackupsAsync] {ex.Message}");
+            }
+        }
+
+        private Panel BuildCloudBackupCard()
+        {
+            var cloudCard = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 126,
+                BackColor = Color.FromArgb(248, 250, 253),
+                Padding = new Padding(16, 10, 16, 10),
+                Margin = new Padding(0, 0, 0, 12)
+            };
+
+            cloudCard.Paint += (s, e) =>
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                using var pen = new Pen(Color.FromArgb(210, 222, 238), 1f);
+                e.Graphics.DrawRoundedRectangle(pen, new Rectangle(0, 0, cloudCard.Width - 1, cloudCard.Height - 1), 10);
+            };
+            cloudCard.ApplyRoundedRegion(10);
+
+            var topRow = new Panel { Dock = DockStyle.Top, Height = 26, BackColor = Color.Transparent };
+
+            var lblCardTitle = new Label
+            {
+                Text = "☁ MONSTERASP CLOUD BACKUP & RECOVERY",
+                Font = new Font(UITheme.FontSans, 8.5F, FontStyle.Bold),
+                ForeColor = Color.FromArgb(40, 80, 140),
+                AutoSize = true,
+                Location = new Point(0, 3)
+            };
+
+            lblCloudBadge = new Label
+            {
+                Text = "● Checking...",
+                Font = new Font(UITheme.FontSans, 8F, FontStyle.Bold),
+                ForeColor = UITheme.TextMuted,
+                BackColor = Color.FromArgb(235, 238, 245),
+                Padding = new Padding(6, 2, 6, 2),
+                Location = new Point(310, 1),
+                AutoSize = true
+            };
+
+            lblCloudLastBackup = new Label
+            {
+                Text = "Last Cloud Backup: None yet",
+                Font = new Font(UITheme.FontSans, 8.5F, FontStyle.Regular),
+                ForeColor = UITheme.TextMuted,
+                Location = new Point(480, 3),
+                AutoSize = true
+            };
+
+            topRow.Controls.Add(lblCardTitle);
+            topRow.Controls.Add(lblCloudBadge);
+            topRow.Controls.Add(lblCloudLastBackup);
+
+            var lblDesc = new Label
+            {
+                Text = "Primary operational database remains local ((localdb)\\MSSQLLocalDB) for lightning-fast, zero-latency daily CRM use. MonsterASP cloud (db67053) serves as your offsite disaster recovery replica.",
+                Font = new Font(UITheme.FontSans, 8.5F, FontStyle.Regular),
+                ForeColor = UITheme.TextDark,
+                Dock = DockStyle.Top,
+                Height = 32
+            };
+
+            var actionsRow = new Panel { Dock = DockStyle.Bottom, Height = 40, BackColor = Color.Transparent };
+
+            btnCloudBackup = new Button
+            {
+                Text = "☁ Backup to MonsterASP Cloud",
+                Location = new Point(0, 2),
+                Size = new Size(240, 36),
+                BackColor = Color.FromArgb(41, 98, 255),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            btnCloudBackup.FlatAppearance.BorderSize = 0;
+            btnCloudBackup.ApplyRoundedRegion(8);
+            btnCloudBackup.Click += async (s, e) => await PerformCloudBackupAsync();
+
+            btnTestCloud = new Button
+            {
+                Text = "⚡ Test Connection",
+                Location = new Point(248, 2),
+                Size = new Size(150, 36),
+                BackColor = Color.FromArgb(235, 240, 250),
+                ForeColor = Color.FromArgb(40, 80, 140),
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            btnTestCloud.FlatAppearance.BorderSize = 0;
+            btnTestCloud.ApplyRoundedRegion(8);
+            btnTestCloud.Click += async (s, e) => await CheckCloudStatusAsync();
+
+            btnCloudRestore = new Button
+            {
+                Text = "📥 Restore from Cloud",
+                Location = new Point(406, 2),
+                Size = new Size(170, 36),
+                BackColor = Color.FromArgb(254, 242, 242),
+                ForeColor = Color.FromArgb(190, 40, 40),
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            btnCloudRestore.FlatAppearance.BorderSize = 0;
+            btnCloudRestore.ApplyRoundedRegion(8);
+            btnCloudRestore.Click += async (s, e) => await PerformCloudRestoreAsync();
+
+            lblCloudActionStatus = new Label
+            {
+                Location = new Point(586, 10),
+                AutoSize = true,
+                Font = new Font(UITheme.FontSans, 8.5F, FontStyle.Bold),
+                ForeColor = Color.FromArgb(40, 80, 140)
+            };
+
+            actionsRow.Controls.Add(btnCloudBackup);
+            actionsRow.Controls.Add(btnTestCloud);
+            actionsRow.Controls.Add(btnCloudRestore);
+            actionsRow.Controls.Add(lblCloudActionStatus);
+
+            cloudCard.Controls.Add(actionsRow);
+            cloudCard.Controls.Add(lblDesc);
+            cloudCard.Controls.Add(topRow);
+
+            return cloudCard;
+        }
+
+        private async Task CheckCloudStatusAsync()
+        {
+            if (lblCloudBadge == null) return;
+
+            lblCloudBadge.Text = "● Checking...";
+            lblCloudBadge.ForeColor = UITheme.TextMuted;
+            lblCloudBadge.BackColor = Color.FromArgb(235, 238, 245);
+            if (btnTestCloud != null) btnTestCloud.Enabled = false;
+
+            try
+            {
+                var status = await BackupService.TestCloudConnectionAsync();
+                if (status.IsConnected)
+                {
+                    lblCloudBadge.Text = $"● Online ({BackupService.CloudDatabase})";
+                    lblCloudBadge.ForeColor = Color.FromArgb(46, 133, 90);
+                    lblCloudBadge.BackColor = Color.FromArgb(235, 247, 238);
+                    lblCloudActionStatus.Text = $"Connected to {status.Server}";
+                    lblCloudActionStatus.ForeColor = Color.FromArgb(46, 133, 90);
+                }
+                else
+                {
+                    lblCloudBadge.Text = "○ Offline";
+                    lblCloudBadge.ForeColor = Color.FromArgb(190, 60, 60);
+                    lblCloudBadge.BackColor = Color.FromArgb(253, 237, 237);
+                    lblCloudActionStatus.Text = $"Error: {status.Message}";
+                    lblCloudActionStatus.ForeColor = Color.FromArgb(190, 60, 60);
+                }
+            }
+            catch (Exception ex)
+            {
+                lblCloudBadge.Text = "○ Offline";
+                lblCloudBadge.ForeColor = Color.FromArgb(190, 60, 60);
+                lblCloudActionStatus.Text = ex.Message;
+            }
+            finally
+            {
+                if (btnTestCloud != null) btnTestCloud.Enabled = true;
+            }
+        }
+
+        private async Task PerformCloudBackupAsync()
+        {
+            var confirm = MessageBox.Show(
+                $"This will back up your local database tables to your remote MonsterASP Cloud replica ({BackupService.CloudServer} / {BackupService.CloudDatabase}).\n\nYour local database remains your primary database.\n\nDo you want to proceed?",
+                "Confirm MonsterASP Cloud Backup",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question
+            );
+
+            if (confirm != DialogResult.Yes) return;
+
+            btnCloudBackup.Enabled = false;
+            btnCloudRestore.Enabled = false;
+            btnTestCloud.Enabled = false;
+
+            var progress = new Progress<string>(msg =>
+            {
+                lblCloudActionStatus.Text = msg;
+                lblCloudActionStatus.ForeColor = Color.FromArgb(40, 80, 140);
+            });
+
+            try
+            {
+                var result = await BackupService.BackupToCloudAsync(progress);
+                if (result.Success)
+                {
+                    lblCloudActionStatus.Text = $"✓ {result.Message}";
+                    lblCloudActionStatus.ForeColor = Color.FromArgb(46, 133, 90);
+                    MessageBox.Show(
+                        $"Cloud Backup Completed Successfully!\n\nTarget: {BackupService.CloudServer}\nDatabase: {BackupService.CloudDatabase}\nTables Synced: {result.TablesSynced}\nTotal Records Synced: {result.TotalRecordsSynced}\n\nYour local database continues to be your fast primary operational database.",
+                        "Cloud Backup Succeeded",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information
+                    );
+                }
+                else
+                {
+                    lblCloudActionStatus.Text = $"✗ Cloud backup failed: {result.Error}";
+                    lblCloudActionStatus.ForeColor = Color.FromArgb(190, 60, 60);
+                    MessageBox.Show(
+                        $"Cloud backup failed:\n\n{result.Error}",
+                        "Cloud Backup Failed",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error
+                    );
+                }
+                UpdateCloudLastBackupLabel();
+                await RefreshLogsAsync();
+            }
+            finally
+            {
+                btnCloudBackup.Enabled = true;
+                btnCloudRestore.Enabled = true;
+                btnTestCloud.Enabled = true;
+            }
+        }
+
+        private async Task PerformCloudRestoreAsync()
+        {
+            var confirm = MessageBox.Show(
+                $"WARNING: Restoring from MonsterASP Cloud will overwrite your local database data with the cloud replica from {BackupService.CloudServer}!\n\nThis should ONLY be used for disaster recovery or database synchronization.\n\nAre you sure you want to proceed?",
+                "Confirm Disaster Recovery Cloud Restore",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning
+            );
+
+            if (confirm != DialogResult.Yes) return;
+
+            btnCloudBackup.Enabled = false;
+            btnCloudRestore.Enabled = false;
+            btnTestCloud.Enabled = false;
+
+            var progress = new Progress<string>(msg =>
+            {
+                lblCloudActionStatus.Text = msg;
+                lblCloudActionStatus.ForeColor = Color.FromArgb(190, 60, 60);
+            });
+
+            try
+            {
+                var result = await BackupService.RestoreFromCloudAsync(progress);
+                if (result.Success)
+                {
+                    lblCloudActionStatus.Text = $"✓ {result.Message}";
+                    lblCloudActionStatus.ForeColor = Color.FromArgb(46, 133, 90);
+                    MessageBox.Show(
+                        $"Disaster Recovery Restore Completed!\n\nTables Restored: {result.TablesSynced}\nTotal Records: {result.TotalRecordsSynced}\n\nYour local database is now synchronized with the cloud replica.",
+                        "Cloud Restore Succeeded",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information
+                    );
+                }
+                else
+                {
+                    lblCloudActionStatus.Text = $"✗ Restore failed: {result.Error}";
+                    lblCloudActionStatus.ForeColor = Color.FromArgb(190, 60, 60);
+                    MessageBox.Show(
+                        $"Cloud restore failed:\n\n{result.Error}",
+                        "Cloud Restore Failed",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error
+                    );
+                }
+                await RefreshLogsAsync();
+            }
+            finally
+            {
+                btnCloudBackup.Enabled = true;
+                btnCloudRestore.Enabled = true;
+                btnTestCloud.Enabled = true;
+            }
+        }
+
+        private void UpdateCloudLastBackupLabel()
+        {
+            if (lblCloudLastBackup == null) return;
+            var info = BackupService.GetLastCloudBackupInfo();
+            if (info.Timestamp.HasValue)
+            {
+                lblCloudLastBackup.Text = $"Last Cloud Backup: {info.Timestamp.Value.ToLocalTime():yyyy-MM-dd HH:mm} ({info.TablesCount} tables, {info.TotalRows} records)";
+            }
+            else
+            {
+                lblCloudLastBackup.Text = "Last Cloud Backup: None yet";
             }
         }
     }

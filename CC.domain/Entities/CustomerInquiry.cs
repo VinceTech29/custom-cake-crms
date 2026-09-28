@@ -24,7 +24,11 @@ namespace CC.Domain.Entities
 
         public DateTime CreatedAt { get; set; } = DateTime.Now;
 
+        public int? BranchId { get; set; }
+
         // Navigation
         public Customer? Customer { get; set; }
+
+        public Branch? Branch { get; set; }
     }
 }

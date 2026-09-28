@@ -21,6 +21,7 @@ namespace CC.infrastructure.Data
         public DbSet<TermsAndConditions> TermsAndConditions => Set<TermsAndConditions>();
         public DbSet<TermsAcceptance> TermsAcceptances => Set<TermsAcceptance>();
         public DbSet<SystemAuditLog> SystemAuditLogs => Set<SystemAuditLog>();
+        public DbSet<Branch> Branches => Set<Branch>();
 
         public DbSet<Customer> Customers => Set<Customer>();
         public DbSet<CustomerInquiry> CustomerInquiries => Set<CustomerInquiry>();
@@ -425,6 +426,66 @@ namespace CC.infrastructure.Data
             modelBuilder.Entity<RetentionRequest>()
                 .Property(x => x.DiscountPercent)
                 .HasPrecision(5, 2);
+
+            // Branch
+            modelBuilder.Entity<Branch>(entity =>
+            {
+                entity.HasKey(x => x.BranchId);
+                entity.Property(x => x.BranchName).HasMaxLength(150).IsRequired();
+                entity.Property(x => x.BranchCode).HasMaxLength(50).IsRequired();
+                entity.Property(x => x.Address).HasMaxLength(255);
+                entity.Property(x => x.ContactPhone).HasMaxLength(50);
+                entity.Property(x => x.ContactEmail).HasMaxLength(100);
+                entity.Property(x => x.ManagerName).HasMaxLength(100);
+                entity.Property(x => x.IsActive).HasDefaultValue(true);
+                entity.HasOne(x => x.Company)
+                    .WithMany()
+                    .HasForeignKey(x => x.CompanyId)
+                    .OnDelete(DeleteBehavior.Restrict);
+            });
+
+            // Branch scoping relationships
+            modelBuilder.Entity<SalesOrder>()
+                .HasOne(x => x.Branch)
+                .WithMany()
+                .HasForeignKey(x => x.BranchId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            modelBuilder.Entity<Customer>()
+                .HasOne(x => x.Branch)
+                .WithMany()
+                .HasForeignKey(x => x.BranchId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            modelBuilder.Entity<SystemUser>()
+                .HasOne(x => x.Branch)
+                .WithMany()
+                .HasForeignKey(x => x.BranchId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            modelBuilder.Entity<CustomerFollowUp>()
+                .HasOne(x => x.Branch)
+                .WithMany()
+                .HasForeignKey(x => x.BranchId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            modelBuilder.Entity<CustomerInquiry>()
+                .HasOne(x => x.Branch)
+                .WithMany()
+                .HasForeignKey(x => x.BranchId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            modelBuilder.Entity<Payment>()
+                .HasOne(x => x.Branch)
+                .WithMany()
+                .HasForeignKey(x => x.BranchId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.SetNull);
         }
     }
 }

@@ -22,8 +22,12 @@ namespace CC.Domain.Entities
 
         public string TransactionReference { get; set; } = string.Empty;
 
+        public int? BranchId { get; set; }
+
         // Navigation
         public SalesOrder? Order { get; set; }
+
+        public Branch? Branch { get; set; }
 
         public PaymentMethod? Method { get; set; }
 

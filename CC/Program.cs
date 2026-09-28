@@ -43,6 +43,15 @@ namespace CC
                 return;
             }
 
+            if (args.Length > 0 && args[0] == "--test-cloud-backup")
+            {
+                Console.WriteLine("Testing MonsterASP Cloud Backup...");
+                var progress = new Progress<string>(msg => Console.WriteLine($"[PROGRESS] {msg}"));
+                var result = BackupService.BackupToCloudAsync(progress).GetAwaiter().GetResult();
+                Console.WriteLine($"[RESULT] Success={result.Success}, TablesSynced={result.TablesSynced}, TotalRecordsSynced={result.TotalRecordsSynced}, Message={result.Message}, Error={result.Error}");
+                return;
+            }
+
             if (args.Length > 0 && args[0] == "--test-nav")
             {
                 Console.WriteLine("Running navigation diagnostic test...");

@@ -58,6 +58,9 @@ namespace CC.Domain.Entities
         public int? ConvertedOrderId { get; set; }
 
         public decimal? ConvertedOrderAmount { get; set; }
+
+        // Source Retention Request Link (Requirements 4 & 6)
+        public int? RetentionRequestId { get; set; }
     }
 
     public class RetentionSetting
@@ -90,7 +93,7 @@ namespace CC.Domain.Entities
         public string? SmtpUsername { get; set; }
         public string? SmtpPassword { get; set; }
         public string? SmtpFromEmail { get; set; }
-        public string? SmtpFromName { get; set; } = "Sweet Story Cake Shop";
+        public string? SmtpFromName { get; set; }
         public bool SmtpEnableSsl { get; set; } = true;
         public bool SmtpMockMode { get; set; } = true;
     }
@@ -155,5 +158,16 @@ namespace CC.Domain.Entities
         public string? RejectionReason { get; set; }
 
         public string? AdminRemarks { get; set; }
+
+        // Campaign Automation Link (Requirements 4, 5, 6)
+        public bool AddedToCampaign { get; set; } = false;
+
+        public DateTime? AddedToCampaignDate { get; set; }
+
+        public int? GeneratedCampaignLogId { get; set; }
+
+        public string? GeneratedCampaignSubject { get; set; }
+
+        public string? GeneratedCampaignBody { get; set; }
     }
 }
