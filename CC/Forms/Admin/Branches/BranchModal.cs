@@ -30,7 +30,7 @@ namespace CC.Forms.Admin.Branches
         private TextBox txtPhone = null!;
         private TextBox txtEmail = null!;
         private TextBox txtManagerName = null!;
-        private CheckBox chkIsActive = null!;
+        private CheckBox? chkIsActive;
 
         private Label lblError = null!;
         private Button btnSave = null!;
@@ -58,7 +58,7 @@ namespace CC.Forms.Admin.Branches
         private void InitializeModal()
         {
             Text = _isEditMode ? "Edit Branch" : "Add New Branch";
-            Size = new Size(560, 680);
+            Size = new Size(580, 600);
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterParent;
             BackColor = ColorModalBg;
@@ -81,12 +81,19 @@ namespace CC.Forms.Admin.Branches
 
         private void BuildContent()
         {
+            // 1. FIXED HEADER
             var headerPanel = new Panel
             {
                 Dock = DockStyle.Top,
                 Height = 65,
-                Padding = new Padding(28, 20, 24, 0),
-                BackColor = Color.Transparent
+                Padding = new Padding(28, 18, 24, 0),
+                BackColor = ColorModalBg
+            };
+
+            headerPanel.Paint += (s, e) =>
+            {
+                using var pen = new Pen(Color.FromArgb(238, 233, 228), 1f);
+                e.Graphics.DrawLine(pen, 28, headerPanel.Height - 1, headerPanel.Width - 28, headerPanel.Height - 1);
             };
 
             var lblTitle = new Label
@@ -96,167 +103,196 @@ namespace CC.Forms.Admin.Branches
                 Font = new Font(UITheme.FontSerif, 18F, FontStyle.Bold),
                 ForeColor = UITheme.TextDark,
                 AutoSize = true,
-                Location = new Point(28, 20)
+                Location = new Point(28, 18)
             };
 
-            var btnClose = new Label
+            var btnClose = new Button
             {
                 Text = "\u2715",
-                Font = new Font(UITheme.FontSans, 12F, FontStyle.Regular),
-                ForeColor = UITheme.TextMuted,
-                AutoSize = true,
+                Font = new Font(UITheme.FontSans, 11F),
+                ForeColor = Color.FromArgb(140, 120, 115),
+                Size = new Size(32, 32),
+                Location = new Point(Width - 56, 16),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                FlatStyle = FlatStyle.Flat,
                 Cursor = Cursors.Hand,
-                Location = new Point(Width - 45, 20)
+                BackColor = Color.FromArgb(246, 243, 239)
             };
+            btnClose.FlatAppearance.BorderSize = 0;
+            btnClose.ApplyRoundedRegion(16);
             btnClose.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
 
             headerPanel.Controls.Add(lblTitle);
             headerPanel.Controls.Add(btnClose);
 
-            var bodyPanel = new Panel
-            {
-                Dock = DockStyle.Fill,
-                Padding = new Padding(28, 10, 28, 10),
-                BackColor = Color.Transparent,
-                AutoScroll = true
-            };
-
-            int y = 6;
-
-            // 1. Branch Name
-            bodyPanel.Controls.Add(CreateFieldLabel("BRANCH NAME", true, ref y));
-            txtBranchName = CreateFieldTextBox(ref y);
-            bodyPanel.Controls.Add(txtBranchName);
-
-            // 2. Branch Code
-            bodyPanel.Controls.Add(CreateFieldLabel("BRANCH CODE (e.g., MAIN, CLN, MTN)", true, ref y));
-            txtBranchCode = CreateFieldTextBox(ref y);
-            txtBranchCode.CharacterCasing = CharacterCasing.Upper;
-            bodyPanel.Controls.Add(txtBranchCode);
-
-            // 3. Address
-            bodyPanel.Controls.Add(CreateFieldLabel("LOCATION / PHYSICAL ADDRESS", false, ref y));
-            txtAddress = CreateFieldTextBox(ref y);
-            bodyPanel.Controls.Add(txtAddress);
-
-            // 4. Branch Manager
-            bodyPanel.Controls.Add(CreateFieldLabel("BRANCH MANAGER / SUPERVISOR", false, ref y));
-            txtManagerName = CreateFieldTextBox(ref y);
-            bodyPanel.Controls.Add(txtManagerName);
-
-            // 5. Contact Phone & Email
-            bodyPanel.Controls.Add(CreateFieldLabel("CONTACT PHONE", false, ref y));
-            txtPhone = CreateFieldTextBox(ref y);
-            bodyPanel.Controls.Add(txtPhone);
-
-            bodyPanel.Controls.Add(CreateFieldLabel("CONTACT EMAIL", false, ref y));
-            txtEmail = CreateFieldTextBox(ref y);
-            bodyPanel.Controls.Add(txtEmail);
-
-            // 6. Active Checkbox (Edit mode)
-            if (_isEditMode)
-            {
-                chkIsActive = new CheckBox
-                {
-                    Text = "Active Branch (Available for operational transactions)",
-                    Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold),
-                    ForeColor = UITheme.TextDark,
-                    AutoSize = true,
-                    Location = new Point(0, y),
-                    Checked = true,
-                    Cursor = Cursors.Hand
-                };
-                bodyPanel.Controls.Add(chkIsActive);
-                y += 32;
-            }
-
-            // Error Label
-            lblError = new Label
-            {
-                Text = "",
-                Font = new Font(UITheme.FontSans, 9F, FontStyle.Regular),
-                ForeColor = Color.FromArgb(197, 48, 48),
-                AutoSize = true,
-                Location = new Point(0, y),
-                Visible = false
-            };
-            bodyPanel.Controls.Add(lblError);
-
-            // Footer Panel (Buttons)
+            // 2. FIXED FOOTER
             var footerPanel = new Panel
             {
                 Dock = DockStyle.Bottom,
-                Height = 75,
-                Padding = new Padding(28, 14, 28, 18),
-                BackColor = Color.Transparent
+                Height = 72,
+                BackColor = ColorModalBg
             };
+
+            footerPanel.Paint += (s, e) =>
+            {
+                using var pen = new Pen(Color.FromArgb(238, 233, 228), 1f);
+                e.Graphics.DrawLine(pen, 28, 0, footerPanel.Width - 28, 0);
+            };
+
+            var footerFlow = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.RightToLeft,
+                BackColor = ColorModalBg,
+                Padding = new Padding(0, 15, 28, 15),
+                WrapContents = false
+            };
+
+            btnSave = new Button
+            {
+                Text = _isEditMode ? "Save Changes" : "Create Branch",
+                Size = new Size(140, 42),
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold),
+                BackColor = ColorPrimaryBtn,
+                ForeColor = Color.White,
+                Cursor = Cursors.Hand,
+                Margin = new Padding(0, 0, 0, 0)
+            };
+            UITheme.ApplyActionButton(btnSave, "\uE73E", 10);
+            btnSave.Click += async (s, e) => await HandleSaveAsync();
 
             btnCancel = new Button
             {
                 Text = "Cancel",
                 Size = new Size(110, 42),
                 FlatStyle = FlatStyle.Flat,
+                Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold),
                 BackColor = ColorCancelBtn,
                 ForeColor = UITheme.TextDark,
-                Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold),
                 Cursor = Cursors.Hand,
-                Location = new Point(Width - 250, 16)
+                Margin = new Padding(0, 0, 12, 0)
             };
             btnCancel.FlatAppearance.BorderSize = 0;
+            btnCancel.ApplyRoundedRegion(10);
             btnCancel.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
 
-            btnSave = new Button
+            footerFlow.Controls.Add(btnSave);
+            footerFlow.Controls.Add(btnCancel);
+            footerPanel.Controls.Add(footerFlow);
+
+            // 3. SCROLLABLE CONTENT BODY
+            var bodyPanel = new Panel
             {
-                Text = _isEditMode ? "Save Changes" : "Create Branch",
-                Size = new Size(125, 42),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = ColorPrimaryBtn,
-                ForeColor = Color.White,
-                Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold),
-                Cursor = Cursors.Hand,
-                Location = new Point(Width - 130, 16)
+                Dock = DockStyle.Fill,
+                AutoScroll = true,
+                BackColor = ColorModalBg,
+                Padding = new Padding(28, 16, 28, 16)
             };
-            btnSave.FlatAppearance.BorderSize = 0;
-            btnSave.Click += async (s, e) => await HandleSaveAsync();
 
-            footerPanel.Controls.Add(btnCancel);
-            footerPanel.Controls.Add(btnSave);
+            int y = 14;
+            int fullWidth = 504;
+            int halfWidth = (fullWidth - 14) / 2;
 
-            Controls.Add(bodyPanel);
-            Controls.Add(footerPanel);
-            Controls.Add(headerPanel);
-        }
+            // 1. Branch Name (Full Width)
+            bodyPanel.Controls.Add(CreateLabel("BRANCH NAME", true, new Point(28, y)));
+            y += 24;
+            txtBranchName = CreateTextBox("e.g., Calinan Branch", new Point(28, y), fullWidth);
+            bodyPanel.Controls.Add(txtBranchName);
+            y += 48;
 
-        private Label CreateFieldLabel(string text, bool required, ref int currentY)
-        {
-            var lbl = new Label
+            // 2. Branch Code & Manager / Supervisor (2 columns)
+            bodyPanel.Controls.Add(CreateLabel("BRANCH CODE (e.g., CLN, MTN)", true, new Point(28, y)));
+            bodyPanel.Controls.Add(CreateLabel("BRANCH MANAGER / SUPERVISOR", false, new Point(28 + halfWidth + 14, y)));
+            y += 24;
+            txtBranchCode = CreateTextBox("e.g., CLN", new Point(28, y), halfWidth);
+            txtBranchCode.CharacterCasing = CharacterCasing.Upper;
+            txtManagerName = CreateTextBox("e.g., Jane Doe", new Point(28 + halfWidth + 14, y), halfWidth);
+            bodyPanel.Controls.Add(txtBranchCode);
+            bodyPanel.Controls.Add(txtManagerName);
+            y += 48;
+
+            // 3. Location / Address (Full Width)
+            bodyPanel.Controls.Add(CreateLabel("LOCATION / PHYSICAL ADDRESS", false, new Point(28, y)));
+            y += 24;
+            txtAddress = CreateTextBox("e.g., McArthur Highway, Calinan, Davao City", new Point(28, y), fullWidth);
+            bodyPanel.Controls.Add(txtAddress);
+            y += 48;
+
+            // 4. Contact Phone & Email (2 columns)
+            bodyPanel.Controls.Add(CreateLabel("CONTACT PHONE", false, new Point(28, y)));
+            bodyPanel.Controls.Add(CreateLabel("CONTACT EMAIL", false, new Point(28 + halfWidth + 14, y)));
+            y += 24;
+            txtPhone = CreateTextBox("e.g., +63 917 123 4567", new Point(28, y), halfWidth);
+            txtEmail = CreateTextBox("e.g., calinan@dreamcakes.com", new Point(28 + halfWidth + 14, y), halfWidth);
+            bodyPanel.Controls.Add(txtPhone);
+            bodyPanel.Controls.Add(txtEmail);
+            y += 48;
+
+            // 5. Active Branch Checkbox (in edit mode)
+            if (_isEditMode)
             {
-                Text = required ? text + " *" : text,
-                Font = new Font(UITheme.FontSans, 7.5F, FontStyle.Bold),
-                ForeColor = required ? ColorAsterisk : ColorLabel,
+                chkIsActive = new CheckBox
+                {
+                    Text = "Active Branch (Available for operational orders & transactions)",
+                    Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold),
+                    ForeColor = UITheme.TextDark,
+                    AutoSize = true,
+                    Location = new Point(28, y),
+                    Checked = true,
+                    Cursor = Cursors.Hand
+                };
+                bodyPanel.Controls.Add(chkIsActive);
+                y += 36;
+            }
+
+            // 6. Error Label
+            lblError = new Label
+            {
+                Text = "",
+                Font = new Font(UITheme.FontSans, 9F, FontStyle.Regular),
+                ForeColor = Color.FromArgb(197, 48, 48),
                 AutoSize = true,
-                Location = new Point(0, currentY)
+                Location = new Point(28, y),
+                Visible = false
             };
-            currentY += 18;
-            return lbl;
+            bodyPanel.Controls.Add(lblError);
+            y += 30;
+
+            bodyPanel.AutoScrollMinSize = new Size(0, y);
+
+            // Add docked panels in correct WinForms z-order
+            Controls.Add(bodyPanel);
+            Controls.Add(headerPanel);
+            Controls.Add(footerPanel);
+            bodyPanel.BringToFront();
         }
 
-        private TextBox CreateFieldTextBox(ref int currentY)
+        private Label CreateLabel(string text, bool isRequired, Point location)
         {
-            var txt = new TextBox
+            return new Label
+            {
+                Text = isRequired ? $"{text} *" : text,
+                Font = new Font(UITheme.FontSans, 8F, FontStyle.Bold),
+                ForeColor = isRequired ? ColorAsterisk : ColorLabel,
+                Location = location,
+                AutoSize = true
+            };
+        }
+
+        private TextBox CreateTextBox(string placeholder, Point location, int width)
+        {
+            return new TextBox
             {
                 Font = new Font(UITheme.FontSans, 10F),
                 BackColor = ColorFieldBg,
-                ForeColor = UITheme.TextDark,
                 BorderStyle = BorderStyle.FixedSingle,
-                Size = new Size(BodyWidth, 34),
-                Location = new Point(0, currentY)
+                Height = 34,
+                Location = location,
+                Width = width,
+                PlaceholderText = placeholder
             };
-            currentY += 44;
-            return txt;
         }
-
-        private int BodyWidth => Width - 56;
 
         private void PopulateExistingData(Branch branch)
         {
