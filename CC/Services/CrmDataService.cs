@@ -2285,9 +2285,22 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             var target = filterDate ?? DateTime.Today;
             var list = new List<TransactionRecord>();
 
-            int? effectiveBranchId = branchId ?? SessionService.ActiveBranchId;
-            bool filterBranch = effectiveBranchId.HasValue && effectiveBranchId.Value > 0;
-            int branchFilterVal = filterBranch ? effectiveBranchId!.Value : 0;
+            bool filterBranch = false;
+            int branchFilterVal = 0;
+            if (branchId.HasValue)
+            {
+                if (branchId.Value > 0)
+                {
+                    filterBranch = true;
+                    branchFilterVal = branchId.Value;
+                }
+                // branchId <= 0 explicitly means "All Branches" -> filterBranch = false
+            }
+            else if (SessionService.ActiveBranchId.HasValue && SessionService.ActiveBranchId.Value > 0)
+            {
+                filterBranch = true;
+                branchFilterVal = SessionService.ActiveBranchId.Value;
+            }
 
             // 1. Fetch Orders
             if (string.IsNullOrEmpty(typeFilter) || typeFilter == "All" || typeFilter == "Orders")
@@ -2539,6 +2552,55 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 AnnualRevenue: annualRevenue,
                 AnnualCount: annualPayments + annualOrders
             );
+        }
+        
+        public static async Task<ReportLog?> LogReportGenerationAsync(
+            string reportType,
+            Dictionary<string, string>? parameters = null,
+            int? userId = null,
+            int? companyId = null)
+        {
+            try
+            {
+                int targetCompanyId = companyId ?? CurrentCompanyId;
+                await using var context = CreateDbContext(targetCompanyId);
+
+                int resolvedUserId = userId ?? SessionService.CurrentUser?.UserId ?? 1;
+                bool userExists = await context.AppUsers.AnyAsync(u => u.UserId == resolvedUserId);
+                if (!userExists)
+                {
+                    var firstUser = await context.AppUsers.OrderBy(u => u.UserId).Select(u => u.UserId).FirstOrDefaultAsync();
+                    if (firstUser > 0) resolvedUserId = firstUser;
+                }
+
+                var log = new ReportLog
+                {
+                    GeneratedByUserId = resolvedUserId,
+                    ReportType = reportType,
+                    GeneratedDate = DateTime.UtcNow
+                };
+
+                if (parameters != null)
+                {
+                    foreach (var kvp in parameters)
+                    {
+                        log.Parameters.Add(new ReportParameter
+                        {
+                            ParamName = kvp.Key,
+                            ParamValue = kvp.Value ?? string.Empty
+                        });
+                    }
+                }
+
+                context.ReportLogs.Add(log);
+                await context.SaveChangesAsync();
+                return log;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[LogReportGenerationAsync] {ex.Message}");
+                return null;
+            }
         }
 
         // =========================================================
@@ -2952,32 +3014,63 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
 
             if (sub != null && sub.Plan != null)
             {
+                bool isSubActive = (sub.StatusId == 1 || string.Equals(sub.Status?.StatusName, "Active", StringComparison.OrdinalIgnoreCase)) && sub.EndDate >= DateTime.UtcNow;
                 return new SubscriptionInfo(
                     PlanName: sub.Plan.PlanName,
-                    Status: sub.Status?.StatusName ?? (sub.EndDate >= DateTime.UtcNow ? "Active" : "Expired"),
+                    Status: sub.Status?.StatusName ?? (isSubActive ? "Active" : "Expired"),
                     Price: sub.Plan.Price,
                     BillingCycle: sub.Plan.DurationDays >= 365 ? "year" : $"{sub.Plan.DurationDays} days",
                     RenewalDate: sub.EndDate,
                     PaymentMethod: "Visa ending in 4242",
                     UsedSeats: usedSeats,
                     MaxSeats: sub.Plan.MaxUsers,
-                    AllowBranching: sub.Plan.AllowBranching,
+                    AllowBranching: isSubActive && sub.Plan.AllowBranching,
                     MaxBranches: sub.Plan.MaxBranches
                 );
             }
 
-            // Fallback default
+            // 2. Fallback check inside Tenant DB
+            try
+            {
+                await using var tenantContext = CreateDbContext(targetCompanyId);
+                var tenantSub = await tenantContext.Subscriptions
+                    .Include(s => s.Plan)
+                    .Include(s => s.Status)
+                    .Where(s => s.CompanyId == targetCompanyId)
+                    .OrderByDescending(s => s.SubscriptionId)
+                    .FirstOrDefaultAsync();
+
+                if (tenantSub != null && tenantSub.Plan != null)
+                {
+                    bool isTenantActive = (tenantSub.StatusId == 1 || string.Equals(tenantSub.Status?.StatusName, "Active", StringComparison.OrdinalIgnoreCase)) && tenantSub.EndDate >= DateTime.UtcNow;
+                    return new SubscriptionInfo(
+                        PlanName: tenantSub.Plan.PlanName,
+                        Status: tenantSub.Status?.StatusName ?? (isTenantActive ? "Active" : "Expired"),
+                        Price: tenantSub.Plan.Price,
+                        BillingCycle: tenantSub.Plan.DurationDays >= 365 ? "year" : $"{tenantSub.Plan.DurationDays} days",
+                        RenewalDate: tenantSub.EndDate,
+                        PaymentMethod: "Credit / Debit Card",
+                        UsedSeats: usedSeats,
+                        MaxSeats: tenantSub.Plan.MaxUsers,
+                        AllowBranching: isTenantActive && tenantSub.Plan.AllowBranching,
+                        MaxBranches: tenantSub.Plan.MaxBranches
+                    );
+                }
+            }
+            catch { }
+
+            // 3. Fallback default for unassigned tenants: single branch mode only
             return new SubscriptionInfo(
-                PlanName: "Pro Plan",
+                PlanName: "Standard",
                 Status: "Active",
-                Price: 9599m,
+                Price: 0m,
                 BillingCycle: "year",
-                RenewalDate: DateTime.Today.AddMonths(11),
-                PaymentMethod: "Visa ending in 4242",
+                RenewalDate: DateTime.Today.AddYears(1),
+                PaymentMethod: "Credit / Debit Card",
                 UsedSeats: usedSeats > 0 ? usedSeats : 1,
-                MaxSeats: 10,
-                AllowBranching: true,
-                MaxBranches: 3
+                MaxSeats: 5,
+                AllowBranching: false,
+                MaxBranches: 1
             );
         }
 

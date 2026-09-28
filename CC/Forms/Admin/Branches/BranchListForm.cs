@@ -508,13 +508,13 @@ namespace CC.Forms.Admin.Branches
 
             if (!branchCapability.AllowBranching)
             {
-                lblSubtitle.Text = $"Single-Branch Mode \u00B7 {branchCapability.PlanName} (Multi-Branching upgrade required to add additional branches)";
-                btnAddBranch.Text = "★ Upgrade Plan";
-                btnAddBranch.BackColor = UITheme.UpgradeGold;
+                lblSubtitle.Text = $"Multi-Branching is disabled for your subscription ({branchCapability.PlanName}). Upgrade your subscription to manage multiple branches.";
+                btnAddBranch.Visible = false;
             }
             else
             {
                 lblSubtitle.Text = $"{branchCapability.ActiveBranchesCount} of {branchCapability.MaxBranches} active branches used \u00B7 {branchCapability.PlanName}";
+                btnAddBranch.Visible = true;
                 btnAddBranch.Text = "+ Add Branch";
                 btnAddBranch.BackColor = UITheme.PrimaryMauve;
             }
@@ -534,7 +534,7 @@ namespace CC.Forms.Admin.Branches
             {
                 if (!branchCapability.AllowBranching)
                 {
-                    lblBranchLimit.Text = "1 Branch Max";
+                    lblBranchLimit.Text = "Disabled";
                 }
                 else
                 {
@@ -796,9 +796,9 @@ namespace CC.Forms.Admin.Branches
             if (!branchCapability.AllowBranching)
             {
                 MessageBox.Show(
-                    $"Multi-Branching is not included in your active plan ({branchCapability.PlanName}).\n\n" +
+                    $"Multi-Branching is not included in your active subscription plan ({branchCapability.PlanName}).\n\n" +
                     "Your current plan is configured for Single-Branch operations only.\n\n" +
-                    "To create multiple branch locations, assign branch managers, and track branch-isolated sales, please upgrade to the Multi-Branch Pro subscription plan.",
+                    "To create multiple branch locations, assign branch managers, and track branch-isolated sales, please upgrade to a subscription plan that supports multi-branch operations.",
                     "Subscription Upgrade Required",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information

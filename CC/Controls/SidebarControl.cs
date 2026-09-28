@@ -260,6 +260,24 @@ namespace CC.Controls
         public bool HasNavItem(string key) => _navButtons.ContainsKey(key);
         public IReadOnlyCollection<string> NavItemKeys => _navButtons.Keys.ToList().AsReadOnly();
 
+        public void SetNavItemVisible(string key, bool visible)
+        {
+            if (_navButtons.TryGetValue(key, out var btn))
+            {
+                btn.Visible = visible;
+            }
+        }
+
+        public void RemoveNavItem(string key)
+        {
+            if (_navButtons.TryGetValue(key, out var btn))
+            {
+                _navFlow?.Controls.Remove(btn);
+                _navButtons.Remove(key);
+                btn.Dispose();
+            }
+        }
+
         private void AddNavItemInternal(FlowLayoutPanel flow, string key, string iconGlyph)
         {
             var btn = new Button

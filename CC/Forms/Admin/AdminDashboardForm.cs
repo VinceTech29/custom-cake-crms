@@ -56,8 +56,20 @@ namespace CC.Forms.Admin
                     _ = LoadDashboardDataAsync();
                     break;
                 case "Branches":
-                    ViewHost.ShowFormInPanel(MainPanel, new BranchListForm());
-                    break;
+                    {
+                        var cap = CrmDataService.GetBranchCapabilityAsync(SessionService.CurrentUser?.CompanyId).GetAwaiter().GetResult();
+                        if (!cap.AllowBranching)
+                        {
+                            MessageBox.Show(
+                                $"Multi-Branching is not enabled on your current subscription plan ({cap.PlanName}).\n\nTo create multiple branch locations, assign branch managers, and track branch-isolated sales, please upgrade to a subscription plan that supports multi-branch operations.",
+                                "Multi-Branching Required",
+                                MessageBoxButtons.OK,
+                                MessageBoxIcon.Information);
+                            return;
+                        }
+                        ViewHost.ShowFormInPanel(MainPanel, new BranchListForm());
+                        break;
+                    }
                 case "Customers":
                     ViewHost.ShowFormInPanel(MainPanel, new CustomerListForm());
                     break;
@@ -113,6 +125,9 @@ namespace CC.Forms.Admin
             if (IsDisposed) return;
             try
             {
+                var branchCap = await CrmDataService.GetBranchCapabilityAsync(SessionService.CurrentUser?.CompanyId);
+                SidebarCtrl.SetNavItemVisible("Branches", branchCap.AllowBranching);
+
                 var data = await CrmDataService.GetAdminDashboardDataAsync(
                     companyId: SessionService.CurrentUser?.CompanyId,
                     period: _activePeriod,
