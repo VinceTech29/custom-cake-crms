@@ -1133,7 +1133,9 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 try
                 {
                     await using var tenantContext = CreateDbContextForDatabase(tenantDb.ServerName, tenantDb.DatabaseName);
-                    await EnsureTenantBranchBaselineAsync(tenantContext, tenantDb.CompanyId);
+                    // NOTE: EnsureTenantBranchBaselineAsync is intentionally NOT called here for every tenant.
+                    // It runs during EnsureDatabaseReadyAsync at startup for all tenants, and will be called
+                    // below only for the tenant whose user successfully authenticates.
 
                     var candidate = await tenantContext.AppUsers
                         .Include(u => u.Role)
@@ -1143,6 +1145,9 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
 
                     if (candidate != null && VerifyPassword(password, candidate.PasswordHash))
                     {
+                        // Run branch baseline only for the authenticated user's tenant DB
+                        await EnsureTenantBranchBaselineAsync(tenantContext, tenantDb.CompanyId);
+
                         if (candidate.BranchId == null)
                         {
                             var defBranch = await tenantContext.Branches.FirstOrDefaultAsync(b => b.CompanyId == candidate.CompanyId && b.IsActive);
@@ -3238,7 +3243,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             try
             {
                 await using var tenantContext = CreateDbContext(targetCompanyId);
-                await EnsureTenantBranchBaselineAsync(tenantContext, targetCompanyId);
+                // EnsureTenantBranchBaselineAsync already ran at login; no need to re-run here.
                 activeCount = await tenantContext.Branches
                     .CountAsync(b => b.CompanyId == targetCompanyId && b.IsActive);
             }
@@ -3259,7 +3264,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
         {
             int targetCompanyId = companyId ?? CurrentCompanyId;
             await using var tenantContext = CreateDbContext(targetCompanyId);
-            await EnsureTenantBranchBaselineAsync(tenantContext, targetCompanyId);
+            // EnsureTenantBranchBaselineAsync already ran at login; no need to re-run here.
 
             var query = tenantContext.Branches.Where(b => b.CompanyId == targetCompanyId);
             if (!includeArchived)
@@ -3268,35 +3273,57 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             }
 
             var branches = await query.OrderBy(b => b.BranchId).ToListAsync();
-            var result = new List<BranchListItem>();
+            if (branches.Count == 0)
+                return new List<BranchListItem>();
 
-            foreach (var b in branches)
-            {
-                int orderCount = await tenantContext.SalesOrders.CountAsync(o => o.BranchId == b.BranchId);
-                decimal totalSales = await tenantContext.Payments
-                    .Where(p => p.BranchId == b.BranchId || (p.Order != null && p.Order.BranchId == b.BranchId))
-                    .Where(p => p.StatusId == 1)
-                    .SumAsync(p => (decimal?)p.Amount) ?? 0m;
-                int custCount = await tenantContext.Customers.CountAsync(c => c.BranchId == b.BranchId);
-                int staffCount = await tenantContext.AppUsers.CountAsync(u => u.BranchId == b.BranchId && u.IsActive);
+            // Batch all stats in one pass per table — avoids N+1 round-trips
+            var branchIds = branches.Select(b => b.BranchId).ToList();
 
-                result.Add(new BranchListItem(
-                    b.BranchId,
-                    b.CompanyId,
-                    b.BranchName,
-                    b.BranchCode,
-                    b.Address ?? string.Empty,
-                    b.ContactPhone ?? string.Empty,
-                    b.ContactEmail ?? string.Empty,
-                    b.ManagerName ?? string.Empty,
-                    b.IsActive,
-                    b.CreatedDate,
-                    orderCount,
-                    totalSales,
-                    custCount,
-                    staffCount
-                ));
-            }
+            var orderCounts = await tenantContext.SalesOrders
+                .Where(o => o.BranchId != null && branchIds.Contains(o.BranchId.Value))
+                .GroupBy(o => o.BranchId!.Value)
+                .Select(g => new { BranchId = g.Key, Count = g.Count() })
+                .ToListAsync();
+
+            var paymentSales = await tenantContext.Payments
+                .Where(p => p.StatusId == 1 && p.BranchId != null && branchIds.Contains(p.BranchId.Value))
+                .GroupBy(p => p.BranchId!.Value)
+                .Select(g => new { BranchId = g.Key, Total = g.Sum(p => (decimal?)p.Amount) ?? 0m })
+                .ToListAsync();
+
+            var custCounts = await tenantContext.Customers
+                .Where(c => c.BranchId != null && branchIds.Contains(c.BranchId.Value))
+                .GroupBy(c => c.BranchId!.Value)
+                .Select(g => new { BranchId = g.Key, Count = g.Count() })
+                .ToListAsync();
+
+            var staffCounts = await tenantContext.AppUsers
+                .Where(u => u.IsActive && u.BranchId != null && branchIds.Contains(u.BranchId.Value))
+                .GroupBy(u => u.BranchId!.Value)
+                .Select(g => new { BranchId = g.Key, Count = g.Count() })
+                .ToListAsync();
+
+            var orderCountDict = orderCounts.ToDictionary(x => x.BranchId, x => x.Count);
+            var salesDict = paymentSales.ToDictionary(x => x.BranchId, x => x.Total);
+            var custDict = custCounts.ToDictionary(x => x.BranchId, x => x.Count);
+            var staffDict = staffCounts.ToDictionary(x => x.BranchId, x => x.Count);
+
+            var result = branches.Select(b => new BranchListItem(
+                b.BranchId,
+                b.CompanyId,
+                b.BranchName,
+                b.BranchCode,
+                b.Address ?? string.Empty,
+                b.ContactPhone ?? string.Empty,
+                b.ContactEmail ?? string.Empty,
+                b.ManagerName ?? string.Empty,
+                b.IsActive,
+                b.CreatedDate,
+                orderCountDict.GetValueOrDefault(b.BranchId, 0),
+                salesDict.GetValueOrDefault(b.BranchId, 0m),
+                custDict.GetValueOrDefault(b.BranchId, 0),
+                staffDict.GetValueOrDefault(b.BranchId, 0)
+            )).ToList();
 
             return result;
         }
@@ -3305,7 +3332,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
         {
             int targetCompanyId = companyId ?? CurrentCompanyId;
             await using var tenantContext = CreateDbContext(targetCompanyId);
-            await EnsureTenantBranchBaselineAsync(tenantContext, targetCompanyId);
+            // EnsureTenantBranchBaselineAsync already ran at login; no need to re-run here.
 
             return await tenantContext.Branches
                 .Where(b => b.CompanyId == targetCompanyId && b.IsActive)
