@@ -64,10 +64,11 @@ namespace CC.api.Services
             // If no companyId is passed (e.g., health check, Swagger UI, design time), return default connection string
             if (!companyId.HasValue || companyId.Value <= 0)
             {
-                var defaultConn = _configuration.GetConnectionString("LocalCrm");
+                var defaultConn = _configuration.GetConnectionString("LocalCrms")
+                               ?? _configuration.GetConnectionString("LocalCrm");
                 if (string.IsNullOrEmpty(defaultConn))
                 {
-                    throw new InvalidOperationException("Default CRM connection string 'LocalCrm' was not found in configuration.");
+                    throw new InvalidOperationException("Default CRM connection string ('LocalCrms' or 'LocalCrm') was not found in configuration.");
                 }
                 return defaultConn;
             }

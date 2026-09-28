@@ -14,7 +14,8 @@ builder.Services.AddHttpContextAccessor();
 
 builder.Services.AddDbContext<MasterCrmDbContext>(options =>
     options.UseSqlServer(
-        builder.Configuration.GetConnectionString("MasterCrm")
+        builder.Configuration.GetConnectionString("MasterCrms")
+            ?? builder.Configuration.GetConnectionString("MasterCrm")
     ));
 
 builder.Services.AddScoped<CC.api.Services.ITenantService, CC.api.Services.TenantService>();
