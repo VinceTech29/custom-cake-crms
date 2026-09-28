@@ -110,19 +110,21 @@ namespace CC.Forms.Staff
             rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // Urgent Tasks Table
 
             // 1. TOP HEADER & PERIOD FILTER
+            // 2-row stack: row 0 = title + subtitle, row 1 = period pills + branch selector
             var topTable = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
-                Height = 72,
-                ColumnCount = 2,
-                RowCount = 1,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 1,
+                RowCount = 2,
                 BackColor = Color.Transparent,
                 Margin = Padding.Empty,
-                Padding = new Padding(0, 0, 0, 10)
+                Padding = new Padding(0, 0, 0, 14)
             };
             topTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            topTable.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            topTable.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            topTable.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // row 0: title
+            topTable.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // row 1: filters
 
             var titleStack = new FlowLayoutPanel
             {
@@ -130,7 +132,8 @@ namespace CC.Forms.Staff
                 WrapContents = false,
                 AutoSize = true,
                 Anchor = AnchorStyles.Left | AnchorStyles.Top,
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+                Margin = new Padding(0, 0, 0, 6)
             };
 
             var lblTitle = new Label
@@ -176,22 +179,22 @@ namespace CC.Forms.Staff
                 _ = LoadDashboardDataAsync();
             };
 
-            var rightControlsPanel = new FlowLayoutPanel
+            var filtersRow = new FlowLayoutPanel
             {
                 FlowDirection = FlowDirection.LeftToRight,
                 WrapContents = false,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                Anchor = AnchorStyles.Right | AnchorStyles.Top,
+                Anchor = AnchorStyles.Left | AnchorStyles.Top,
                 BackColor = Color.Transparent,
-                Padding = new Padding(0, 4, 0, 4),
+                Padding = Padding.Empty,
                 Margin = Padding.Empty
             };
-            rightControlsPanel.Controls.Add(periodSelector);
-            rightControlsPanel.Controls.Add(branchSelector);
+            filtersRow.Controls.Add(periodSelector);
+            filtersRow.Controls.Add(branchSelector);
 
             topTable.Controls.Add(titleStack, 0, 0);
-            topTable.Controls.Add(rightControlsPanel, 1, 0);
+            topTable.Controls.Add(filtersRow, 0, 1);
             rootLayout.Controls.Add(topTable, 0, 0);
 
 
