@@ -27,15 +27,18 @@ namespace CC.Services
 
         public const string PlatformBrandName = "Custom Cake CRMS";
 
+        public static bool IsSuperAdmin =>
+            CurrentUser != null && (
+                string.Equals(CurrentUser.Role, "SuperAdmin", System.StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(CurrentUser.Role, "Super Admin", System.StringComparison.OrdinalIgnoreCase) ||
+                CurrentUser.Role?.Replace(" ", "").Equals("SuperAdmin", System.StringComparison.OrdinalIgnoreCase) == true
+            );
+
         public static string GetActiveBrandName()
         {
             if (CurrentUser == null) return PlatformBrandName;
 
-            bool isSuperAdmin = string.Equals(CurrentUser.Role, "SuperAdmin", System.StringComparison.OrdinalIgnoreCase) ||
-                                string.Equals(CurrentUser.Role, "Super Admin", System.StringComparison.OrdinalIgnoreCase) ||
-                                CurrentUser.Role?.Replace(" ", "").Equals("SuperAdmin", System.StringComparison.OrdinalIgnoreCase) == true;
-
-            if (isSuperAdmin)
+            if (IsSuperAdmin)
             {
                 return PlatformBrandName;
             }

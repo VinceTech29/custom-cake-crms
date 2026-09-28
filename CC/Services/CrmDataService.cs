@@ -2735,15 +2735,156 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             return existing;
         }
 
-        public static async Task ToggleUserStatusAsync(int userId, bool isActive)
+        public static async Task<PagedList<SystemUser>> GetAllUsersAcrossTenantsPagedAsync(
+            string? searchQuery = null,
+            string? roleFilter = null,
+            string? statusFilter = null,
+            int? companyIdFilter = null,
+            int page = 1,
+            int pageSize = 10)
         {
-            await using var context = CreateDbContext();
+            pageSize = Math.Max(1, pageSize);
+            page = Math.Max(1, page);
+
+            var allUsers = await GetAllUsersAcrossTenantsAsync(searchQuery, roleFilter, statusFilter, companyIdFilter);
+            int totalCount = allUsers.Count;
+            int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
+            if (page > totalPages) page = totalPages;
+
+            var items = allUsers
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToList();
+
+            return new PagedList<SystemUser>(items, totalCount, page, pageSize);
+        }
+
+        public static async Task<List<SystemUser>> GetAllUsersAcrossTenantsAsync(
+            string? searchQuery = null,
+            string? roleFilter = null,
+            string? statusFilter = null,
+            int? companyIdFilter = null)
+        {
+            var result = new List<SystemUser>();
+            var seenUserKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                await using var masterContext = CreateMasterDbContext();
+                var masterCompanies = await masterContext.Companies.AsNoTracking().ToListAsync();
+                var masterCompanyMap = masterCompanies.ToDictionary(c => c.CompanyId, c => c.CompanyName);
+
+                var dbs = await masterContext.CompanyDatabases.AsNoTracking().Where(d => d.IsActive).ToListAsync();
+
+                // If specific company filtered, restrict DB list
+                if (companyIdFilter.HasValue && companyIdFilter.Value > 0)
+                {
+                    dbs = dbs.Where(d => d.CompanyId == companyIdFilter.Value).ToList();
+                }
+
+                foreach (var db in dbs)
+                {
+                    try
+                    {
+                        await using var tenantContext = CreateDbContextForDatabase(db.ServerName, db.DatabaseName);
+                        var query = tenantContext.AppUsers
+                            .Include(u => u.Role)
+                            .Include(u => u.Branch)
+                            .AsNoTracking();
+
+                        if (companyIdFilter.HasValue && companyIdFilter.Value > 0)
+                        {
+                            query = query.Where(u => u.CompanyId == companyIdFilter.Value || u.CompanyId == 0);
+                        }
+
+                        var tenantUsers = await query.ToListAsync();
+
+                        foreach (var u in tenantUsers)
+                        {
+                            // Ensure Company is attached or populated
+                            if (u.Company == null)
+                            {
+                                int cId = u.CompanyId > 0 ? u.CompanyId : db.CompanyId;
+                                string cName = masterCompanyMap.TryGetValue(cId, out var name) ? name : $"Company #{cId}";
+                                u.Company = new Company { CompanyId = cId, CompanyName = cName };
+                                if (u.CompanyId <= 0) u.CompanyId = cId;
+                            }
+                            else if (string.IsNullOrWhiteSpace(u.Company.CompanyName) && masterCompanyMap.TryGetValue(u.CompanyId, out var name))
+                            {
+                                u.Company.CompanyName = name;
+                            }
+
+                            // Avoid duplicate display if superadmin or user exists in multiple DBs
+                            string userKey = $"{u.CompanyId}_{u.UserId}_{u.Username.ToLowerInvariant()}";
+                            if (seenUserKeys.Add(userKey))
+                            {
+                                result.Add(u);
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[GetAllUsersAcrossTenantsAsync tenant DB '{db.DatabaseName}'] {ex.Message}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[GetAllUsersAcrossTenantsAsync Master DB] {ex.Message}");
+            }
+
+            // Apply in-memory filtering for query, role, status
+            IEnumerable<SystemUser> filtered = result;
+
+            if (!string.IsNullOrWhiteSpace(searchQuery))
+            {
+                var q = searchQuery.Trim().ToLowerInvariant();
+                filtered = filtered.Where(u =>
+                    (u.FirstName != null && u.FirstName.ToLower().Contains(q)) ||
+                    (u.LastName != null && u.LastName.ToLower().Contains(q)) ||
+                    (u.Username != null && u.Username.ToLower().Contains(q)) ||
+                    (u.Email != null && u.Email.ToLower().Contains(q)) ||
+                    (u.Role != null && u.Role.RoleName != null && u.Role.RoleName.ToLower().Contains(q)) ||
+                    (u.Company != null && u.Company.CompanyName != null && u.Company.CompanyName.ToLower().Contains(q)) ||
+                    (u.Branch != null && u.Branch.BranchName != null && u.Branch.BranchName.ToLower().Contains(q)));
+            }
+
+            if (!string.IsNullOrWhiteSpace(roleFilter) && roleFilter != "All Roles")
+            {
+                filtered = filtered.Where(u => u.Role != null && (u.Role.RoleName == roleFilter || (roleFilter == "Business Admin" && (u.Role.RoleName == "Admin" || u.Role.RoleName == "Business Admin"))));
+            }
+
+            if (!string.IsNullOrWhiteSpace(statusFilter) && statusFilter != "All Status")
+            {
+                bool activeOnly = statusFilter.Equals("Active", StringComparison.OrdinalIgnoreCase);
+                filtered = filtered.Where(u => u.IsActive == activeOnly);
+            }
+
+            return filtered.OrderByDescending(u => u.UserId).ToList();
+        }
+
+        public static async Task<UserSummaryMetrics> GetAllUsersAcrossTenantsMetricsAsync(int? companyIdFilter = null)
+        {
+            var allUsers = await GetAllUsersAcrossTenantsAsync(companyIdFilter: companyIdFilter);
+
+            int totalActive = allUsers.Count(u => u.IsActive);
+            int adminCount = allUsers.Count(u => u.IsActive && u.Role != null && (u.Role.RoleName == "Business Admin" || u.Role.RoleName == "Admin" || u.Role.RoleName == "SuperAdmin" || u.RoleId == 1 || u.RoleId == 2));
+            int managerCount = allUsers.Count(u => u.IsActive && u.Role != null && (u.Role.RoleName == "Manager" || u.RoleId == 3));
+            int staffCount = allUsers.Count(u => u.IsActive && u.Role != null && (u.Role.RoleName == "Staff" || u.RoleId == 4));
+
+            return new UserSummaryMetrics(totalActive, adminCount, managerCount, staffCount);
+        }
+
+        public static async Task ToggleUserStatusAsync(int userId, bool isActive, int? companyId = null)
+        {
+            int targetCompanyId = companyId ?? CurrentCompanyId;
+            await using var context = CreateDbContext(targetCompanyId);
             var existing = await context.AppUsers.FirstOrDefaultAsync(u => u.UserId == userId);
             if (existing != null)
             {
                 if (isActive && !existing.IsActive)
                 {
-                    await CheckUserSeatLimitAsync(existing.CompanyId);
+                    await CheckUserSeatLimitAsync(existing.CompanyId > 0 ? existing.CompanyId : targetCompanyId);
                 }
 
                 existing.IsActive = isActive;

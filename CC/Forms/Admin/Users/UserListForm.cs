@@ -35,6 +35,7 @@ namespace CC.Forms.Admin.Users
         private Panel searchFilterPanel = null!;
         private Panel searchPill = null!;
         private TextBox txtSearchBox = null!;
+        private ComboBox? cmbCompanyFilter;
         private ComboBox cmbRoleFilter = null!;
         private ComboBox cmbStatusFilter = null!;
 
@@ -48,6 +49,9 @@ namespace CC.Forms.Admin.Users
         private string activeSearchQuery = string.Empty;
         private string activeRoleFilter = "All Roles";
         private string activeStatusFilter = "All Status";
+        private int? activeCompanyIdFilter = null;
+        private bool _companiesLoaded = false;
+        private bool isSuperAdmin => SessionService.IsSuperAdmin;
 
         public UserListForm()
         {
@@ -63,7 +67,14 @@ namespace CC.Forms.Admin.Users
             Controls.Add(topPanel);
         }
 
-        public async Task InitializeDataAsync() => await RefreshDataAsync();
+        public async Task InitializeDataAsync()
+        {
+            if (isSuperAdmin && !_companiesLoaded)
+            {
+                await LoadCompaniesFilterAsync();
+            }
+            await RefreshDataAsync();
+        }
 
         private void InitializeComponent()
         {
@@ -112,7 +123,7 @@ namespace CC.Forms.Admin.Users
 
             lblTitle = new Label
             {
-                Text = "User Management",
+                Text = isSuperAdmin ? "Platform Users" : "User Management",
                 UseMnemonic = false,
                 Font = new Font(UITheme.FontSerif, 22F, FontStyle.Bold),
                 ForeColor = UITheme.TextDark,
@@ -122,7 +133,9 @@ namespace CC.Forms.Admin.Users
 
             lblSubtitle = new Label
             {
-                Text = "Manage team members, assign roles, and control access permissions",
+                Text = isSuperAdmin
+                    ? "Manage and view team members across all tenant companies and branches"
+                    : "Manage team members, assign roles, and control access permissions",
                 Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Regular),
                 ForeColor = UITheme.TextMuted,
                 AutoSize = true,
@@ -150,7 +163,8 @@ namespace CC.Forms.Admin.Users
                 Cursor = Cursors.Hand,
                 Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold),
                 BackColor = UITheme.PrimaryMauve,
-                ForeColor = Color.White
+                ForeColor = Color.White,
+                Visible = !isSuperAdmin
             };
             btnAddUser.FlatAppearance.BorderSize = 0;
             btnAddUser.ApplyRoundedRegion(10);
@@ -203,19 +217,19 @@ namespace CC.Forms.Admin.Users
             kpiTable.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
             // Card 1: Total Active
-            var cardActive = CreateKpiCard("TOTAL ACTIVE", "4", "Team members active", "\uE77B",
+            var cardActive = CreateKpiCard("TOTAL ACTIVE", "0", isSuperAdmin ? "Across all tenants" : "Team members active", "\uE77B",
                 Color.FromArgb(240, 248, 245), Color.FromArgb(46, 133, 90), out lblTotalActive);
 
             // Card 2: Business Admin
-            var cardAdmin = CreateKpiCard("BUSINESS ADMIN", "1", "Full access", "\uE7EF",
+            var cardAdmin = CreateKpiCard(isSuperAdmin ? "ADMINISTRATORS" : "BUSINESS ADMIN", "0", "Full access", "\uE7EF",
                 Color.FromArgb(247, 240, 243), UITheme.PrimaryMauve, out lblAdminCount);
 
             // Card 3: Managers
-            var cardManager = CreateKpiCard("MANAGERS", "1", "Operations & reports", "\uE72A",
+            var cardManager = CreateKpiCard("MANAGERS", "0", "Operations & reports", "\uE72A",
                 Color.FromArgb(240, 244, 255), Color.FromArgb(41, 98, 178), out lblManagerCount);
 
             // Card 4: Staff
-            var cardStaff = CreateKpiCard("STAFF", "2", "Sales & inquiries", "\uE716",
+            var cardStaff = CreateKpiCard("STAFF", "0", "Sales & inquiries", "\uE716",
                 Color.FromArgb(242, 245, 238), Color.FromArgb(70, 110, 60), out lblStaffCount);
 
             kpiTable.Controls.Add(cardActive, 0, 0);
@@ -352,7 +366,7 @@ namespace CC.Forms.Admin.Users
             // Search pill
             searchPill = new Panel
             {
-                Size = new Size(300, 40),
+                Size = new Size(isSuperAdmin ? 250 : 300, 40),
                 BackColor = Color.White,
                 Margin = new Padding(0, 0, 14, 0)
             };
@@ -387,6 +401,47 @@ namespace CC.Forms.Admin.Users
             };
             searchPill.Controls.Add(txtSearchBox);
             rowFlow.Controls.Add(searchPill);
+
+            // Company filter dropdown (for Super Admin)
+            if (isSuperAdmin)
+            {
+                var companyFilterPill = new Panel
+                {
+                    Size = new Size(200, 40),
+                    BackColor = Color.White,
+                    Margin = new Padding(0, 0, 12, 0)
+                };
+                companyFilterPill.Paint += (s, e) =>
+                {
+                    e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                    using var pen = new Pen(UITheme.BorderColor, 1.2f);
+                    e.Graphics.DrawRoundedRectangle(pen, new Rectangle(0, 0, companyFilterPill.Width - 1, companyFilterPill.Height - 1), 12);
+                };
+                companyFilterPill.ApplyRoundedRegion(12);
+
+                cmbCompanyFilter = new ComboBox
+                {
+                    DropDownStyle = ComboBoxStyle.DropDownList,
+                    FlatStyle = FlatStyle.Flat,
+                    Font = new Font(UITheme.FontSans, 9.5F),
+                    Location = new Point(10, 9),
+                    Width = 180,
+                    BackColor = Color.White
+                };
+                cmbCompanyFilter.Items.Add(new CompanyFilterItem { CompanyId = null, DisplayName = "All Companies" });
+                cmbCompanyFilter.SelectedIndex = 0;
+                cmbCompanyFilter.SelectedIndexChanged += async (s, e) =>
+                {
+                    if (cmbCompanyFilter.SelectedItem is CompanyFilterItem sel)
+                    {
+                        activeCompanyIdFilter = sel.CompanyId;
+                        currentPage = 1;
+                        await RefreshDataAsync();
+                    }
+                };
+                companyFilterPill.Controls.Add(cmbCompanyFilter);
+                rowFlow.Controls.Add(companyFilterPill);
+            }
 
             // Role filter dropdown
             var roleFilterPill = new Panel
@@ -500,15 +555,27 @@ namespace CC.Forms.Admin.Users
                 Name = "colUser",
                 HeaderText = "USER",
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                FillWeight = 24F
+                FillWeight = isSuperAdmin ? 22F : 24F
             };
+
+            DataGridViewTextBoxColumn? colCompany = null;
+            if (isSuperAdmin)
+            {
+                colCompany = new DataGridViewTextBoxColumn
+                {
+                    Name = "colCompany",
+                    HeaderText = "COMPANY / TENANT",
+                    AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                    FillWeight = 20F
+                };
+            }
 
             var colRole = new DataGridViewTextBoxColumn
             {
                 Name = "colRole",
                 HeaderText = "ROLE",
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                FillWeight = 20F
+                FillWeight = isSuperAdmin ? 18F : 20F
             };
 
             var colLastLogin = new DataGridViewTextBoxColumn
@@ -516,7 +583,7 @@ namespace CC.Forms.Admin.Users
                 Name = "colLastLogin",
                 HeaderText = "LAST LOGIN",
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                FillWeight = 22F
+                FillWeight = isSuperAdmin ? 18F : 22F
             };
 
             var colStatus = new DataGridViewTextBoxColumn
@@ -524,7 +591,7 @@ namespace CC.Forms.Admin.Users
                 Name = "colStatus",
                 HeaderText = "STATUS",
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                FillWeight = 16F
+                FillWeight = isSuperAdmin ? 12F : 16F
             };
 
             var colActions = new DataGridViewTextBoxColumn
@@ -532,10 +599,17 @@ namespace CC.Forms.Admin.Users
                 Name = "colActions",
                 HeaderText = "ACTIONS",
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                FillWeight = 18F
+                FillWeight = isSuperAdmin ? 14F : 18F
             };
 
-            gridUsers.Columns.AddRange(colUser, colRole, colLastLogin, colStatus, colActions);
+            if (colCompany != null)
+            {
+                gridUsers.Columns.AddRange(colUser, colCompany, colRole, colLastLogin, colStatus, colActions);
+            }
+            else
+            {
+                gridUsers.Columns.AddRange(colUser, colRole, colLastLogin, colStatus, colActions);
+            }
 
             gridUsers.CellPainting += GridUsers_CellPainting;
             gridUsers.CellClick += GridUsers_CellClick;
@@ -569,6 +643,7 @@ namespace CC.Forms.Admin.Users
             if (user == null) return;
 
             int colIdxUser = gridUsers.Columns["colUser"]?.Index ?? -1;
+            int colIdxCompany = gridUsers.Columns["colCompany"]?.Index ?? -1;
             int colIdxRole = gridUsers.Columns["colRole"]?.Index ?? -1;
             int colIdxLastLogin = gridUsers.Columns["colLastLogin"]?.Index ?? -1;
             int colIdxStatus = gridUsers.Columns["colStatus"]?.Index ?? -1;
@@ -613,7 +688,18 @@ namespace CC.Forms.Admin.Users
 
                 e.Handled = true;
             }
-            // 2. ROLE COLUMN: Badge Pill + Branch Pill (if assigned)
+            // 2. COMPANY / TENANT COLUMN (Super Admin only)
+            else if (colIdxCompany >= 0 && e.ColumnIndex == colIdxCompany)
+            {
+                string compName = user.Company?.CompanyName
+                    ?? (!string.IsNullOrWhiteSpace(user.Company?.CompanyCode) ? user.Company.CompanyCode : $"Company #{user.CompanyId}");
+
+                Color compBg = Color.FromArgb(245, 240, 248);
+                Color compText = Color.FromArgb(100, 60, 140);
+                DrawBadgePill(g, e.CellBounds, compName, compBg, compText);
+                e.Handled = true;
+            }
+            // 3. ROLE COLUMN: Badge Pill + Branch Pill (if assigned)
             else if (colIdxRole >= 0 && e.ColumnIndex == colIdxRole)
             {
                 string roleName = user.Role?.RoleName ?? (user.RoleId == 2 ? "Business Admin" : (user.RoleId == 3 ? "Manager" : "Staff"));
@@ -651,7 +737,7 @@ namespace CC.Forms.Admin.Users
 
                 e.Handled = true;
             }
-            // 3. LAST LOGIN COLUMN
+            // 4. LAST LOGIN COLUMN
             else if (colIdxLastLogin >= 0 && e.ColumnIndex == colIdxLastLogin)
             {
                 string loginText = user.LastLoginDate.HasValue
@@ -663,7 +749,7 @@ namespace CC.Forms.Admin.Users
                 TextRenderer.DrawText(g, loginText, font, rect, UITheme.TextDark, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
                 e.Handled = true;
             }
-            // 4. STATUS COLUMN: Active / Inactive Badge
+            // 5. STATUS COLUMN: Active / Inactive Badge
             else if (colIdxStatus >= 0 && e.ColumnIndex == colIdxStatus)
             {
                 string statusText = user.IsActive ? "• Active" : "• Inactive";
@@ -673,7 +759,7 @@ namespace CC.Forms.Admin.Users
                 DrawBadgePill(g, e.CellBounds, statusText, pillBg, pillText);
                 e.Handled = true;
             }
-            // 5. ACTIONS COLUMN: Edit | Deactivate / Activate buttons
+            // 6. ACTIONS COLUMN: Edit | Deactivate / Activate buttons
             else if (colIdxActions >= 0 && e.ColumnIndex == colIdxActions)
             {
                 using var font = new Font(UITheme.FontSans, 9F, FontStyle.Bold);
@@ -702,9 +788,10 @@ namespace CC.Forms.Admin.Users
         {
             using var font = new Font(UITheme.FontSans, 8.5F, FontStyle.Bold);
             var size = TextRenderer.MeasureText(text, font);
-            int pillWidth = size.Width + 16;
-            int pillHeight = 24;
             int pillX = customLeft ?? (bounds.Left + 16);
+            int maxPillWidth = Math.Max(20, bounds.Right - pillX - 8);
+            int pillWidth = Math.Min(size.Width + 16, maxPillWidth);
+            int pillHeight = 24;
             int pillY = bounds.Top + (bounds.Height - pillHeight) / 2;
 
             var pillRect = new Rectangle(pillX, pillY, pillWidth, pillHeight);
@@ -714,7 +801,7 @@ namespace CC.Forms.Admin.Users
             }
 
             TextRenderer.DrawText(g, text, font, pillRect, textColor,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
 
             return pillX + pillWidth;
         }
@@ -801,7 +888,7 @@ namespace CC.Forms.Admin.Users
 
             if (res == DialogResult.Yes)
             {
-                await CrmDataService.ToggleUserStatusAsync(user.UserId, !user.IsActive);
+                await CrmDataService.ToggleUserStatusAsync(user.UserId, !user.IsActive, user.CompanyId > 0 ? user.CompanyId : null);
                 await RefreshDataAsync();
             }
         }
@@ -813,52 +900,133 @@ namespace CC.Forms.Admin.Users
         {
             try
             {
-                // Query users from database with pagination
-                var paged = await CrmDataService.GetUsersPagedAsync(
-                    searchQuery: activeSearchQuery,
-                    roleFilter: activeRoleFilter,
-                    statusFilter: activeStatusFilter,
-                    page: currentPage,
-                    pageSize: PageSize
-                );
-
-                if (paged.TotalPages > 0 && currentPage > paged.TotalPages)
+                if (isSuperAdmin)
                 {
-                    currentPage = paged.TotalPages;
-                    paged = await CrmDataService.GetUsersPagedAsync(
+                    if (!_companiesLoaded)
+                    {
+                        await LoadCompaniesFilterAsync();
+                    }
+
+                    var paged = await CrmDataService.GetAllUsersAcrossTenantsPagedAsync(
+                        searchQuery: activeSearchQuery,
+                        roleFilter: activeRoleFilter,
+                        statusFilter: activeStatusFilter,
+                        companyIdFilter: activeCompanyIdFilter,
+                        page: currentPage,
+                        pageSize: PageSize
+                    );
+
+                    if (paged.TotalPages > 0 && currentPage > paged.TotalPages)
+                    {
+                        currentPage = paged.TotalPages;
+                        paged = await CrmDataService.GetAllUsersAcrossTenantsPagedAsync(
+                            searchQuery: activeSearchQuery,
+                            roleFilter: activeRoleFilter,
+                            statusFilter: activeStatusFilter,
+                            companyIdFilter: activeCompanyIdFilter,
+                            page: currentPage,
+                            pageSize: PageSize
+                        );
+                    }
+
+                    usersList = paged.Items;
+
+                    gridUsers.Rows.Clear();
+                    foreach (var u in usersList)
+                    {
+                        int rowIdx = gridUsers.Rows.Add();
+                        gridUsers.Rows[rowIdx].Tag = u;
+                    }
+
+                    string compLabel = activeCompanyIdFilter.HasValue && cmbCompanyFilter?.SelectedItem != null
+                        ? cmbCompanyFilter.SelectedItem.ToString()!
+                        : "All Companies";
+                    lblSubtitle.Text = $"{paged.TotalCount} platform user(s) listed \u00B7 {compLabel} \u00B7 {activeRoleFilter}";
+                    pagination.SetPagination(paged.Page, paged.PageSize, paged.TotalCount, "users");
+
+                    var metrics = await CrmDataService.GetAllUsersAcrossTenantsMetricsAsync(activeCompanyIdFilter);
+                    lblTotalActive.Text = metrics.TotalActive.ToString();
+                    lblAdminCount.Text = metrics.AdminCount.ToString();
+                    lblManagerCount.Text = metrics.ManagerCount.ToString();
+                    lblStaffCount.Text = metrics.StaffCount.ToString();
+                }
+                else
+                {
+                    // Query users from database with pagination
+                    var paged = await CrmDataService.GetUsersPagedAsync(
                         searchQuery: activeSearchQuery,
                         roleFilter: activeRoleFilter,
                         statusFilter: activeStatusFilter,
                         page: currentPage,
                         pageSize: PageSize
                     );
+
+                    if (paged.TotalPages > 0 && currentPage > paged.TotalPages)
+                    {
+                        currentPage = paged.TotalPages;
+                        paged = await CrmDataService.GetUsersPagedAsync(
+                            searchQuery: activeSearchQuery,
+                            roleFilter: activeRoleFilter,
+                            statusFilter: activeStatusFilter,
+                            page: currentPage,
+                            pageSize: PageSize
+                        );
+                    }
+
+                    usersList = paged.Items;
+
+                    // Update Grid
+                    gridUsers.Rows.Clear();
+                    foreach (var u in usersList)
+                    {
+                        int rowIdx = gridUsers.Rows.Add();
+                        gridUsers.Rows[rowIdx].Tag = u;
+                    }
+
+                    // Update Subtitle count
+                    lblSubtitle.Text = $"{paged.TotalCount} team member(s) listed \u00B7 {activeRoleFilter}";
+                    pagination.SetPagination(paged.Page, paged.PageSize, paged.TotalCount, "users");
+
+                    // Update KPI Cards
+                    var metrics = await CrmDataService.GetUserSummaryMetricsAsync();
+                    lblTotalActive.Text = metrics.TotalActive.ToString();
+                    lblAdminCount.Text = metrics.AdminCount.ToString();
+                    lblManagerCount.Text = metrics.ManagerCount.ToString();
+                    lblStaffCount.Text = metrics.StaffCount.ToString();
                 }
-
-                usersList = paged.Items;
-
-                // Update Grid
-                gridUsers.Rows.Clear();
-                foreach (var u in usersList)
-                {
-                    int rowIdx = gridUsers.Rows.Add();
-                    gridUsers.Rows[rowIdx].Tag = u;
-                }
-
-                // Update Subtitle count
-                lblSubtitle.Text = $"{paged.TotalCount} team member(s) listed \u00B7 {activeRoleFilter}";
-                pagination.SetPagination(paged.Page, paged.PageSize, paged.TotalCount, "users");
-
-                // Update KPI Cards
-                var metrics = await CrmDataService.GetUserSummaryMetricsAsync();
-                lblTotalActive.Text = metrics.TotalActive.ToString();
-                lblAdminCount.Text = metrics.AdminCount.ToString();
-                lblManagerCount.Text = metrics.ManagerCount.ToString();
-                lblStaffCount.Text = metrics.StaffCount.ToString();
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"[UserListForm.RefreshDataAsync] {ex.Message}");
             }
+        }
+
+        private async Task LoadCompaniesFilterAsync()
+        {
+            if (!isSuperAdmin || cmbCompanyFilter == null) return;
+            try
+            {
+                var companies = await CrmDataService.GetCompaniesAsync();
+                cmbCompanyFilter.Items.Clear();
+                cmbCompanyFilter.Items.Add(new CompanyFilterItem { CompanyId = null, DisplayName = "All Companies" });
+                foreach (var c in companies.OrderBy(c => c.CompanyName))
+                {
+                    cmbCompanyFilter.Items.Add(new CompanyFilterItem { CompanyId = c.CompanyId, DisplayName = c.CompanyName });
+                }
+                cmbCompanyFilter.SelectedIndex = 0;
+                _companiesLoaded = true;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[UserListForm.LoadCompaniesFilterAsync] {ex.Message}");
+            }
+        }
+
+        private class CompanyFilterItem
+        {
+            public int? CompanyId { get; set; }
+            public string DisplayName { get; set; } = string.Empty;
+            public override string ToString() => DisplayName;
         }
     }
 }
