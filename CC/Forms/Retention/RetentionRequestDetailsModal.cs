@@ -351,7 +351,7 @@ namespace CC.Forms.Retention
                 sec4.Controls.Add(pnlSuccessBanner);
 
                 sec4.Controls.Add(CreateDataRow("Campaign Status:", "Ready to Send (Personalized retention offer)"));
-                sec4.Controls.Add(CreateDataRow("Email Subject:", request.GeneratedCampaignSubject ?? "Special Offer from Sweet Story"));
+                sec4.Controls.Add(CreateDataRow("Email Subject:", request.GeneratedCampaignSubject ?? $"Special Offer from {SessionService.GetActiveBrandName()}"));
 
                 var lblBodyLabel = new Label
                 {

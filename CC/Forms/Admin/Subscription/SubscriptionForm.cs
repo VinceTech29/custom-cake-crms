@@ -785,7 +785,7 @@ namespace CC.Forms.Admin.Subscription
             {
                 var sb = new StringBuilder();
                 sb.AppendLine("=================================================");
-                sb.AppendLine("         SWEET STORY CUSTOM CAKE CRM             ");
+                sb.AppendLine($"         {SessionService.PlatformBrandName.ToUpperInvariant()}             ");
                 sb.AppendLine("            OFFICIAL BILLING INVOICE             ");
                 sb.AppendLine("=================================================");
                 sb.AppendLine($"Invoice Date:    {item.Date:MMMM dd, yyyy}");
@@ -794,7 +794,7 @@ namespace CC.Forms.Admin.Subscription
                 sb.AppendLine($"Status:          {item.Status}");
                 sb.AppendLine($"Payment Method:  Visa ending in 4242");
                 sb.AppendLine("=================================================");
-                sb.AppendLine("Thank you for choosing Sweet Story Cake CRM!");
+                sb.AppendLine($"Thank you for choosing {SessionService.PlatformBrandName}!");
 
                 File.WriteAllText(sfd.FileName, sb.ToString());
                 MessageBox.Show($"Invoice downloaded successfully to:\n{sfd.FileName}", "Invoice Downloaded", MessageBoxButtons.OK, MessageBoxIcon.Information);

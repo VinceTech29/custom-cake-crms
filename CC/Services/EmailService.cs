@@ -14,7 +14,7 @@ namespace CC.Services
         public string Username { get; set; } = string.Empty;
         public string Password { get; set; } = string.Empty;
         public string FromEmail { get; set; } = string.Empty;
-        public string FromName { get; set; } = "Sweet Story Cake Shop";
+        public string FromName { get; set; } = SessionService.GetActiveBrandName();
         public bool EnableSsl { get; set; } = true;
         public bool SimulationMode { get; set; } = true;
 
@@ -117,7 +117,7 @@ namespace CC.Services
 
             string fromName = Environment.GetEnvironmentVariable("SMTP_FROM_NAME")
                            ?? Environment.GetEnvironmentVariable("SMTP_SENDER_NAME")
-                           ?? "Sweet Story Cake Shop";
+                           ?? SessionService.GetActiveBrandName();
 
             string sslStr = Environment.GetEnvironmentVariable("SMTP_ENABLE_SSL")
                          ?? Environment.GetEnvironmentVariable("SMTP_USE_SSL")
@@ -228,7 +228,7 @@ SMTP_ENABLE_SSL={config.EnableSsl.ToString().ToLower()}
                 {
                     From = new MailAddress(string.IsNullOrWhiteSpace(config.FromEmail) ? config.Username : config.FromEmail, config.FromName),
                     Subject = "CRM Email Connection Test",
-                    Body = "This is a connection verification test from your Sweet Story CRM.",
+                    Body = $"This is a connection verification test from your {SessionService.GetActiveBrandName()} CRM.",
                     IsBodyHtml = false
                 };
                 msg.To.Add(new MailAddress(config.Username));

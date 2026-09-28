@@ -7,6 +7,35 @@ namespace CC.Services
     {
         public static CurrentUser? CurrentUser { get; set; }
 
+        public const string PlatformBrandName = "Custom Cake CRMS";
+
+        public static string GetActiveBrandName()
+        {
+            if (CurrentUser == null) return PlatformBrandName;
+
+            bool isSuperAdmin = string.Equals(CurrentUser.Role, "SuperAdmin", System.StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(CurrentUser.Role, "Super Admin", System.StringComparison.OrdinalIgnoreCase) ||
+                                CurrentUser.Role?.Replace(" ", "").Equals("SuperAdmin", System.StringComparison.OrdinalIgnoreCase) == true;
+
+            if (isSuperAdmin)
+            {
+                return PlatformBrandName;
+            }
+
+            if (!string.IsNullOrWhiteSpace(CurrentUser.CompanyName))
+            {
+                return CurrentUser.CompanyName.Trim();
+            }
+
+            return PlatformBrandName;
+        }
+
+        public static void ClearSession()
+        {
+            CurrentUser = null;
+            CrmDataService.ClearTenantSession();
+        }
+
         // In-memory stores for UI testing
         public static List<Customer> Customers { get; } = new List<Customer>();
         public static List<SalesOrder> Orders { get; } = new List<SalesOrder>();

@@ -139,7 +139,7 @@ namespace CC.Forms.Retention
 
             // Sender Name & From Email
             var lblFromName = new Label { Text = "Sender Display Name:", Font = new Font(UITheme.FontSans, 8.5F, FontStyle.Bold), ForeColor = UITheme.TextDark, Location = new Point(18, 262), AutoSize = true };
-            txtFromName = new TextBox { Font = new Font(UITheme.FontSans, 9F), Location = new Point(18, 282), Width = 230, Text = "Sweet Story Cake Shop" };
+            txtFromName = new TextBox { Font = new Font(UITheme.FontSans, 9F), Location = new Point(18, 282), Width = 230, Text = SessionService.GetActiveBrandName() };
 
             var lblFromEmail = new Label { Text = "Sender Email (Optional):", Font = new Font(UITheme.FontSans, 8.5F, FontStyle.Bold), ForeColor = UITheme.TextDark, Location = new Point(260, 262), AutoSize = true };
             txtFromEmail = new TextBox { Font = new Font(UITheme.FontSans, 9F), Location = new Point(260, 282), Width = 238, PlaceholderText = "Leaves blank to use Username" };
@@ -311,7 +311,7 @@ namespace CC.Forms.Retention
                 Port = (int)numPort.Value,
                 Username = txtUsername.Text.Trim(),
                 Password = txtPassword.Text.Trim(),
-                FromName = string.IsNullOrWhiteSpace(txtFromName.Text) ? "Sweet Story Cake Shop" : txtFromName.Text.Trim(),
+                FromName = string.IsNullOrWhiteSpace(txtFromName.Text) ? SessionService.GetActiveBrandName() : txtFromName.Text.Trim(),
                 FromEmail = txtFromEmail.Text.Trim(),
                 EnableSsl = chkSsl.Checked,
                 SimulationMode = chkSimulation.Checked

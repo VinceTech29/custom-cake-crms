@@ -93,7 +93,7 @@ namespace CC.Domain.Entities
         public string? SmtpUsername { get; set; }
         public string? SmtpPassword { get; set; }
         public string? SmtpFromEmail { get; set; }
-        public string? SmtpFromName { get; set; } = "Sweet Story Cake Shop";
+        public string? SmtpFromName { get; set; }
         public bool SmtpEnableSsl { get; set; } = true;
         public bool SmtpMockMode { get; set; } = true;
     }

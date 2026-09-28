@@ -137,7 +137,7 @@ namespace CC.Forms.Staff
 
             var lblSubtitle = new Label
             {
-                Text = $"Today's Personal Operations & Daily Transactions \u00B7 {DateTime.Now:MMM d, yyyy}",
+                Text = $"{SessionService.GetActiveBrandName()} \u00B7 Today's Personal Operations & Daily Transactions \u00B7 {DateTime.Now:MMM d, yyyy}",
                 Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Regular),
                 ForeColor = UITheme.TextMuted,
                 AutoSize = true,

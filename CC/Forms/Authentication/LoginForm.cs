@@ -806,6 +806,12 @@ namespace CC.Forms.Authentication
                     _ => "Staff"
                 });
 
+                string resolvedCompanyName = user.Company?.CompanyName ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(resolvedCompanyName) && user.CompanyId > 0 && !string.Equals(roleName, "SuperAdmin", StringComparison.OrdinalIgnoreCase))
+                {
+                    resolvedCompanyName = (await CrmDataService.GetCompanyNameAsync(user.CompanyId)) ?? string.Empty;
+                }
+
                 SessionService.CurrentUser = new CurrentUser
                 {
                     UserId = user.UserId,
@@ -815,7 +821,7 @@ namespace CC.Forms.Authentication
                     Email = user.Email,
                     Role = roleName,
                     CompanyId = user.CompanyId,
-                    CompanyName = user.Company?.CompanyName ?? string.Empty,
+                    CompanyName = resolvedCompanyName,
                     TenantServer = result.TenantServer,
                     TenantDatabase = result.TenantDatabase
                 };
@@ -884,6 +890,7 @@ namespace CC.Forms.Authentication
 
         private void Dashboard_FormClosed(object? sender, FormClosedEventArgs e)
         {
+            SessionService.ClearSession();
             Show();
             txtPassword.Clear();
         }

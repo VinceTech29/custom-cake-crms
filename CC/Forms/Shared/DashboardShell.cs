@@ -49,7 +49,7 @@ namespace CC.Forms.Shared
             {
                 if (lblPageTitle != null)
                     lblPageTitle.Text = value;
-                Text = value;
+                Text = $"{SessionService.GetActiveBrandName()} - {value}";
             }
         }
 
@@ -65,6 +65,7 @@ namespace CC.Forms.Shared
                 Dock = DockStyle.Left,
                 Width = SidebarControl.SidebarWidth
             };
+            SidebarCtrl.SetCompanyName(SessionService.GetActiveBrandName());
 
             var cu = SessionService.CurrentUser;
             if (cu != null)
@@ -217,7 +218,7 @@ namespace CC.Forms.Shared
             });
             userInfo.Controls.Add(new Label
             {
-                Text = "Custom Cake CRMS",
+                Text = SessionService.GetActiveBrandName(),
                 Font = new Font(UITheme.FontSans, 8f, FontStyle.Regular),
                 ForeColor = UITheme.TextMuted,
                 AutoSize = true,
@@ -273,7 +274,7 @@ namespace CC.Forms.Shared
 
         protected virtual void OnSignOutRequested()
         {
-            SessionService.CurrentUser = null;
+            SessionService.ClearSession();
             Close();
         }
 

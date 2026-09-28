@@ -150,7 +150,7 @@ namespace CC.Forms.Manager
 
             var lblSubtitle = new Label
             {
-                Text = $"Operational Oversight & Order Pipeline \u00B7 {DateTime.Now:MMM d, yyyy}",
+                Text = $"{SessionService.GetActiveBrandName()} \u00B7 Operational Oversight & Order Pipeline \u00B7 {DateTime.Now:MMM d, yyyy}",
                 Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Regular),
                 ForeColor = UITheme.TextMuted,
                 AutoSize = true,

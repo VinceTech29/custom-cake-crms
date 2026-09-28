@@ -892,7 +892,7 @@ namespace CC.Forms.Manager.Reports
                 var sb = new StringBuilder();
 
                 // CSV Header / Metadata Block
-                sb.AppendLine("SWEET STORY CUSTOM CAKE CRM - TRANSACTION REPORT");
+                sb.AppendLine($"{SessionService.GetActiveBrandName().ToUpperInvariant()} - TRANSACTION REPORT");
                 sb.AppendLine($"Report Type,{exportType}");
                 sb.AppendLine($"Target Date,{target:yyyy-MM-dd}");
                 sb.AppendLine($"Generated On,{DateTime.Now:yyyy-MM-dd HH:mm:ss}");

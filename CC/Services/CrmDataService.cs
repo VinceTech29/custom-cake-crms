@@ -305,6 +305,48 @@ namespace CC.Services
             return fallback;
         }
 
+        public static void ClearTenantSession()
+        {
+            _tenantConnectionCache.Clear();
+        }
+
+        public static async Task<string?> GetCompanyNameAsync(int companyId)
+        {
+            try
+            {
+                await using var masterContext = CreateMasterDbContext();
+                var company = await masterContext.Companies
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(c => c.CompanyId == companyId);
+                if (company != null && !string.IsNullOrWhiteSpace(company.CompanyName))
+                {
+                    return company.CompanyName.Trim();
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[GetCompanyNameAsync master DB] {ex.Message}");
+            }
+
+            try
+            {
+                await using var tenantContext = CreateDbContext(companyId);
+                var company = await tenantContext.Companies
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(c => c.CompanyId == companyId);
+                if (company != null && !string.IsNullOrWhiteSpace(company.CompanyName))
+                {
+                    return company.CompanyName.Trim();
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[GetCompanyNameAsync tenant DB] {ex.Message}");
+            }
+
+            return null;
+        }
+
         public static CrmDbContext CreateDbContext(int? companyId = null)
         {
             string connectionString = GetTenantConnectionString(companyId);
@@ -984,6 +1026,34 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 if (company != null && !company.IsActive)
                 {
                     return new AuthResult(false, "Your company account has been deactivated. Please contact platform support.", null, null, null);
+                }
+
+                if (company != null && !string.IsNullOrWhiteSpace(company.CompanyName))
+                {
+                    if (matchedUser.Company == null)
+                    {
+                        matchedUser.Company = new Company { CompanyId = company.CompanyId, CompanyName = company.CompanyName.Trim() };
+                    }
+                    else
+                    {
+                        matchedUser.Company.CompanyName = company.CompanyName.Trim();
+                    }
+                }
+            }
+
+            if (!isSuperAdmin && string.IsNullOrWhiteSpace(matchedUser.Company?.CompanyName))
+            {
+                string? compName = await GetCompanyNameAsync(matchedUser.CompanyId);
+                if (!string.IsNullOrWhiteSpace(compName))
+                {
+                    if (matchedUser.Company == null)
+                    {
+                        matchedUser.Company = new Company { CompanyId = matchedUser.CompanyId, CompanyName = compName };
+                    }
+                    else
+                    {
+                        matchedUser.Company.CompanyName = compName;
+                    }
                 }
             }
 
@@ -5421,7 +5491,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             var template = await context.RetentionEmailTemplates
                 .FirstOrDefaultAsync(t => t.SegmentName == segmentName && t.IsActive);
 
-            string subject = overrideSubject ?? template?.Subject ?? $"Exclusive Offer from Sweet Story for {customer.FirstName}";
+            string brandName = SessionService.GetActiveBrandName();
+            string subject = overrideSubject ?? template?.Subject ?? $"Exclusive Offer from {brandName} for {customer.FirstName}";
             string body = overrideBody ?? template?.BodyText ?? $"Hi {customer.FirstName},\n\nWe appreciate you being our customer!";
 
             subject = subject.Replace("{{customer_name}}", customer.FirstName.Trim());
@@ -5531,7 +5602,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             var template = await context.RetentionEmailTemplates
                 .FirstOrDefaultAsync(t => t.SegmentName == segmentName && t.IsActive);
 
-            string subject = overrideSubject ?? template?.Subject ?? $"Exclusive Offer from Sweet Story for {customer.FirstName}";
+            string brandName = SessionService.GetActiveBrandName();
+            string subject = overrideSubject ?? template?.Subject ?? $"Exclusive Offer from {brandName} for {customer.FirstName}";
             string body = overrideBody ?? template?.BodyText ?? $"Hi {customer.FirstName},\n\nWe appreciate you being our customer!";
 
             subject = subject.Replace("{{customer_name}}", customer.FirstName.Trim());
@@ -5608,7 +5680,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 .FirstOrDefaultAsync(t => t.SegmentName == segmentName && t.IsActive);
 
             string cleanName = string.IsNullOrWhiteSpace(recipientName) ? "Valued Customer" : recipientName.Trim();
-            string subject = (template?.Subject ?? "Exclusive Offer from Sweet Story").Replace("{{customer_name}}", cleanName);
+            string brandName = SessionService.GetActiveBrandName();
+            string subject = (template?.Subject ?? $"Exclusive Offer from {brandName}").Replace("{{customer_name}}", cleanName);
             string body = (template?.BodyText ?? "We appreciate you being our customer!").Replace("{{customer_name}}", cleanName);
 
             string status = "Delivered";
@@ -5899,6 +5972,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             decimal discount = req.DiscountPercent;
             string discountText = discount > 0 ? $"{discount:0.#}%" : "Exclusive";
 
+            string brandName = SessionService.GetActiveBrandName();
+
             // Subject generation based on retention reason and purpose (Requirement 5)
             string subject;
             string reason = req.ReasonCategory?.Trim() ?? "";
@@ -5907,34 +5982,34 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             {
                 case "Prevent Customer Churn":
                     subject = discount > 0
-                        ? $"We Miss You at Sweet Story! Enjoy a Special {discountText} Welcome-Back Gift"
-                        : "We Miss You at Sweet Story! Here is a Special Treat for You";
+                        ? $"We Miss You at {brandName}! Enjoy a Special {discountText} Welcome-Back Gift"
+                        : $"We Miss You at {brandName}! Here is a Special Treat for You";
                     break;
                 case "Maximize Profit Margins":
                 case "VIP Loyalty Reward":
                     subject = discount > 0
-                        ? $"An Exclusive Sweet Story VIP Reward: {discountText} Off Just for You, {firstName}!"
-                        : $"Exclusive VIP Reward: A Special Invitation from Sweet Story for {firstName}";
+                        ? $"An Exclusive {brandName} VIP Reward: {discountText} Off Just for You, {firstName}!"
+                        : $"Exclusive VIP Reward: A Special Invitation from {brandName} for {firstName}";
                     break;
                 case "Improve Customer Retention":
                     subject = discount > 0
                         ? $"A Heartfelt Thank You & Special {discountText} Discount for {firstName}"
-                        : $"A Special Appreciation Gift for {firstName} from Sweet Story";
+                        : $"A Special Appreciation Gift for {firstName} from {brandName}";
                     break;
                 case "Monthly Sales Target Not Met":
                     subject = discount > 0
                         ? $"Special Celebration Offer: Enjoy {discountText} Off Your Next Order!"
-                        : "Special Celebration Offer Just for You from Sweet Story!";
+                        : $"Special Celebration Offer Just for You from {brandName}!";
                     break;
                 case "Promotional or Strategic Decision":
                     subject = discount > 0
-                        ? $"Exclusive Promotion: Enjoy {discountText} Off Your Next Sweet Story Order"
-                        : "Exclusive Celebration Promotion from Sweet Story";
+                        ? $"Exclusive Promotion: Enjoy {discountText} Off Your Next {brandName} Order"
+                        : $"Exclusive Celebration Promotion from {brandName}";
                     break;
                 default:
                     subject = discount > 0
-                        ? $"Special Appreciation Offer: {discountText} Off for {firstName} from Sweet Story"
-                        : $"A Special Personalized Offer for {firstName} from Sweet Story";
+                        ? $"Special Appreciation Offer: {discountText} Off for {firstName} from {brandName}"
+                        : $"A Special Personalized Offer for {firstName} from {brandName}";
                     break;
             }
 
@@ -5942,7 +6017,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             var sb = new System.Text.StringBuilder();
             sb.AppendLine($"Dear {customerName},");
             sb.AppendLine();
-            sb.AppendLine("Thank you for being a valued part of the Sweet Story family! Your trust and support mean the world to us, and we are grateful for every celebration and sweet moment we have had the privilege to be part of.");
+            sb.AppendLine($"Thank you for being a valued part of the {brandName} family! Your trust and support mean the world to us, and we are grateful for every celebration and sweet moment we have had the privilege to be part of.");
             sb.AppendLine();
 
             if (discount > 0)
@@ -5978,10 +6053,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             sb.AppendLine();
             sb.AppendLine("Warmest regards,");
             sb.AppendLine();
-            sb.AppendLine("The Sweet Story Management Team");
-            sb.AppendLine("Sweet Story Cake Shop & Café");
-            sb.AppendLine("📍 123 Baker Street, Metro Manila");
-            sb.AppendLine("📞 (02) 8123-4567  |  ✉ support@sweetstory.com");
+            sb.AppendLine($"The {brandName} Management Team");
+            sb.AppendLine(brandName);
             sb.AppendLine("Crafting Sweet Moments for Every Celebration");
 
             return (subject, sb.ToString());

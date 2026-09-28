@@ -156,7 +156,7 @@ namespace CC.Forms.Admin
 
             var lblSubtitle = new Label
             {
-                Text = $"Executive Financial & CRM Intelligence \u00B7 {DateTime.Now:MMM d, yyyy}",
+                Text = $"{SessionService.GetActiveBrandName()} \u00B7 Executive Financial & CRM Intelligence \u00B7 {DateTime.Now:MMM d, yyyy}",
                 Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Regular),
                 ForeColor = UITheme.TextMuted,
                 AutoSize = true,

@@ -1254,7 +1254,7 @@ namespace CC.Forms.Retention
 
             var lblRecip = new Label { Text = $"Recipient: {req.CustomerName} ({req.CustomerEmail})", Location = new Point(0, 6), AutoSize = true, Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold), ForeColor = UITheme.TextDark };
             var lblSub = new Label { Text = "Email Subject Line:", Location = new Point(0, 36), AutoSize = true, Font = new Font(UITheme.FontSans, 8.5F, FontStyle.Bold), ForeColor = UITheme.TextDark };
-            var txtSub = new TextBox { Text = req.GeneratedCampaignSubject ?? "Special Offer from Sweet Story", Location = new Point(0, 56), Width = 610, Font = new Font(UITheme.FontSans, 9.5F) };
+            var txtSub = new TextBox { Text = req.GeneratedCampaignSubject ?? $"Special Offer from {SessionService.GetActiveBrandName()}", Location = new Point(0, 56), Width = 610, Font = new Font(UITheme.FontSans, 9.5F) };
 
             var lblBody = new Label { Text = "Email Body (Personalized):", Location = new Point(0, 92), AutoSize = true, Font = new Font(UITheme.FontSans, 8.5F, FontStyle.Bold), ForeColor = UITheme.TextDark };
             var txtBody = new TextBox
@@ -2122,8 +2122,9 @@ namespace CC.Forms.Retention
                     ? selectedCustomerFirstName
                     : (!string.IsNullOrWhiteSpace(txtName.Text) ? txtName.Text.Split(' ')[0] : "Valued Customer");
 
-                txtSub.Text = (t?.Subject ?? "Exclusive Offer from Sweet Story for {{customer_name}}").Replace("{{customer_name}}", displayName);
-                txtBody.Text = (t?.BodyText ?? "Hi {{customer_name}},\n\nThank you for choosing Sweet Story!").Replace("{{customer_name}}", displayName);
+                string brand = SessionService.GetActiveBrandName();
+                txtSub.Text = (t?.Subject ?? $"Exclusive Offer from {brand} for {{{{customer_name}}}}").Replace("{{customer_name}}", displayName);
+                txtBody.Text = (t?.BodyText ?? $"Hi {{{{customer_name}}}},\n\nThank you for choosing {brand}!").Replace("{{customer_name}}", displayName);
             }
 
             void ApplySelectedCustomer(CrmDataService.RetentionCustomerSearchResult c)
