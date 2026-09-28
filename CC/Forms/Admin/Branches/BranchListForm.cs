@@ -48,8 +48,11 @@ namespace CC.Forms.Admin.Branches
         private string activeSearchQuery = string.Empty;
         private string activeStatusFilter = "All Branches";
 
-        public BranchListForm()
+        public BranchListForm() : this(null) { }
+
+        public BranchListForm(BranchCapabilityInfo? preloadedCapability)
         {
+            branchCapability = preloadedCapability; // Skip the DB round-trip if already fetched
             InitializeComponent();
             BuildTopToolbar();
             BuildKpiCards();
@@ -489,7 +492,10 @@ namespace CC.Forms.Admin.Branches
         {
             try
             {
-                branchCapability = await CrmDataService.GetBranchCapabilityAsync();
+                // Only fetch capability if it wasn't pre-loaded by the navigation caller
+                if (branchCapability == null)
+                    branchCapability = await CrmDataService.GetBranchCapabilityAsync();
+
                 branchesList = await CrmDataService.GetBranchesAsync(includeArchived: true);
 
                 UpdateCapabilityBanner();

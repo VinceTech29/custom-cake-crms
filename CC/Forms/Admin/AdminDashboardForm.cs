@@ -56,20 +56,9 @@ namespace CC.Forms.Admin
                     _ = LoadDashboardDataAsync();
                     break;
                 case "Branches":
-                    {
-                        var cap = CrmDataService.GetBranchCapabilityAsync(SessionService.CurrentUser?.CompanyId).GetAwaiter().GetResult();
-                        if (!cap.AllowBranching)
-                        {
-                            MessageBox.Show(
-                                $"Multi-Branching is not enabled on your current subscription plan ({cap.PlanName}).\n\nTo create multiple branch locations, assign branch managers, and track branch-isolated sales, please upgrade to a subscription plan that supports multi-branch operations.",
-                                "Multi-Branching Required",
-                                MessageBoxButtons.OK,
-                                MessageBoxIcon.Information);
-                            return;
-                        }
-                        ViewHost.ShowFormInPanel(MainPanel, new BranchListForm());
-                        break;
-                    }
+                    // Fire async — never block the UI thread with .GetAwaiter().GetResult()
+                    _ = NavigateToBranchesAsync();
+                    break;
                 case "Customers":
                     ViewHost.ShowFormInPanel(MainPanel, new CustomerListForm());
                     break;
@@ -97,6 +86,29 @@ namespace CC.Forms.Admin
                 case "Subscription":
                     ViewHost.ShowFormInPanel(MainPanel, new SubscriptionForm());
                     break;
+            }
+        }
+
+        private async Task NavigateToBranchesAsync()
+        {
+            try
+            {
+                var cap = await CrmDataService.GetBranchCapabilityAsync(SessionService.CurrentUser?.CompanyId);
+                if (!cap.AllowBranching)
+                {
+                    MessageBox.Show(
+                        $"Multi-Branching is not enabled on your current subscription plan ({cap.PlanName}).\n\nTo create multiple branch locations, assign branch managers, and track branch-isolated sales, please upgrade to a subscription plan that supports multi-branch operations.",
+                        "Multi-Branching Required",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    return;
+                }
+                // Pass capability into BranchListForm so it doesn't need to re-query it
+                ViewHost.ShowFormInPanel(MainPanel, new BranchListForm(cap));
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[NavigateToBranchesAsync] {ex.Message}");
             }
         }
 
