@@ -89,7 +89,8 @@ namespace CC.Forms.Staff
                 var data = await CrmDataService.GetStaffDashboardDataAsync(
                     userId: SessionService.CurrentUser?.UserId,
                     companyId: SessionService.CurrentUser?.CompanyId,
-                    period: _activePeriod);
+                    period: _activePeriod,
+                    branchId: SessionService.ActiveBranchId);
 
                 if (IsDisposed) return;
 
@@ -135,9 +136,10 @@ namespace CC.Forms.Staff
                 Margin = new Padding(0, 0, 0, 4)
             };
 
+            string branchBadge = SessionService.GetActiveBranchDisplay();
             var lblSubtitle = new Label
             {
-                Text = $"{SessionService.GetActiveBrandName()} \u00B7 Today's Personal Operations & Daily Transactions \u00B7 {DateTime.Now:MMM d, yyyy}",
+                Text = $"{SessionService.GetActiveBrandName()} ({branchBadge}) \u00B7 Today's Personal Operations & Daily Transactions \u00B7 {DateTime.Now:MMM d, yyyy}",
                 Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Regular),
                 ForeColor = UITheme.TextMuted,
                 AutoSize = true,
@@ -158,7 +160,18 @@ namespace CC.Forms.Staff
                 _ = LoadDashboardDataAsync();
             };
 
+            var branchSelector = new BranchSelectorControl
+            {
+                Dock = DockStyle.Right,
+                Margin = new Padding(0, 0, 10, 0)
+            };
+            branchSelector.BranchChanged += (s, branchId) =>
+            {
+                _ = LoadDashboardDataAsync();
+            };
+
             topPanel.Controls.Add(periodSelector);
+            topPanel.Controls.Add(branchSelector);
             topPanel.Controls.Add(titleStack);
             rootLayout.Controls.Add(topPanel, 0, 0);
 

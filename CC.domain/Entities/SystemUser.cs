@@ -31,10 +31,14 @@ namespace CC.Domain.Entities
 
         public DateTime? LastLoginDate { get; set; }
 
+        public int? BranchId { get; set; }
+
         // Navigation
         public Company? Company { get; set; }
 
         public Role? Role { get; set; }
+
+        public Branch? Branch { get; set; }
 
         public ICollection<Customer> Customers { get; set; }
             = new List<Customer>();

@@ -31,6 +31,7 @@ namespace CC.Forms.Admin.Users
         private TextBox txtPhone = null!;
         private ComboBox cmbRole = null!;
         private TextBox txtPassword = null!;
+        private ComboBox cmbBranch = null!;
         private CheckBox chkIsActive = null!;
 
         private Label lblError = null!;
@@ -54,12 +55,14 @@ namespace CC.Forms.Admin.Users
             {
                 PopulateExistingData(user);
             }
+
+            PopulateBranchesAsync();
         }
 
         private void InitializeModal()
         {
             Text = _isEditMode ? "Edit User" : "Add New User";
-            Size = new Size(580, 700);
+            Size = new Size(580, 750);
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterParent;
             BackColor = ColorModalBg;
@@ -207,6 +210,25 @@ namespace CC.Forms.Admin.Users
             cmbRole.Items.AddRange(new object[] { "Staff", "Manager", "Business Admin" });
             cmbRole.SelectedIndex = 0;
             bodyPanel.Controls.Add(cmbRole);
+            y += 50;
+
+            // Branch Assignment
+            var lblBranch = CreateFieldLabel("BRANCH ASSIGNMENT", false);
+            lblBranch.Location = new Point(0, y);
+            bodyPanel.Controls.Add(lblBranch);
+            y += 24;
+
+            cmbBranch = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Font = new Font(UITheme.FontSans, 10F),
+                Location = new Point(0, y),
+                Width = bodyPanel.Width - 5,
+                Height = 36,
+                BackColor = ColorFieldBg,
+                FlatStyle = FlatStyle.Flat
+            };
+            bodyPanel.Controls.Add(cmbBranch);
             y += 50;
 
             // Password
@@ -410,14 +432,19 @@ namespace CC.Forms.Admin.Users
                     _existingUser.RoleId = roleId;
                     _existingUser.IsActive = chkIsActive.Checked;
 
+                    var selBranch = cmbBranch.SelectedItem as BranchComboItem;
+                    _existingUser.BranchId = selBranch?.BranchId;
+
                     ResultUser = await CrmDataService.UpdateUserAsync(_existingUser, string.IsNullOrEmpty(pass) ? null : pass);
                 }
                 else
                 {
+                    var selBranch = cmbBranch.SelectedItem as BranchComboItem;
                     var newUser = new SystemUser
                     {
                         CompanyId = SessionService.CurrentUser?.CompanyId > 0 ? SessionService.CurrentUser.CompanyId : CrmDataService.DefaultCompanyId,
                         RoleId = roleId,
+                        BranchId = selBranch?.BranchId,
                         FirstName = first,
                         LastName = last,
                         Username = username,
@@ -438,6 +465,47 @@ namespace CC.Forms.Admin.Users
                 lblError.Text = $"Failed to save user: {ex.Message}";
                 btnSave.Enabled = true;
             }
+        }
+
+        private async void PopulateBranchesAsync()
+        {
+            try
+            {
+                cmbBranch.Items.Clear();
+                var allItem = new BranchComboItem { BranchId = null, DisplayText = "All Branches / Head Office" };
+                cmbBranch.Items.Add(allItem);
+
+                var activeBranches = await CrmDataService.GetActiveBranchesAsync();
+                BranchComboItem? selected = null;
+
+                foreach (var b in activeBranches)
+                {
+                    var item = new BranchComboItem
+                    {
+                        BranchId = b.BranchId,
+                        DisplayText = $"{b.BranchName} ({b.BranchCode})"
+                    };
+                    cmbBranch.Items.Add(item);
+
+                    if (_existingUser?.BranchId == b.BranchId)
+                    {
+                        selected = item;
+                    }
+                }
+
+                cmbBranch.SelectedItem = selected ?? allItem;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[UserModal.PopulateBranchesAsync] {ex.Message}");
+            }
+        }
+
+        private class BranchComboItem
+        {
+            public int? BranchId { get; set; }
+            public string DisplayText { get; set; } = string.Empty;
+            public override string ToString() => DisplayText;
         }
     }
 }

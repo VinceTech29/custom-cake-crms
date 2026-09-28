@@ -32,8 +32,12 @@ namespace CC.Domain.Entities
         public string? Notes { get; set; }
         public bool IsUnsubscribed { get; set; } = false;
 
+        public int? BranchId { get; set; }
+
         // Navigation
         public Company? Company { get; set; }
+
+        public Branch? Branch { get; set; }
 
         public Address? Address { get; set; }
 

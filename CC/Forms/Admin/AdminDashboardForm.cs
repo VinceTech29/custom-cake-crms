@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using CC.Controls;
+using CC.Forms.Admin.Branches;
 using CC.Forms.Admin.Subscription;
 using CC.Forms.Admin.Users;
 using CC.Forms.Authentication;
@@ -32,9 +33,10 @@ namespace CC.Forms.Admin
         public AdminDashboardForm() : base("Business Admin")
         {
             PageTitle = "Business Admin Dashboard";
+            SidebarCtrl.AddNavItem("Branches", "\uE716");
             SidebarCtrl.AddNavItem("Reports", "\uE9F9");
             SidebarCtrl.AddNavItem("Retention & Campaigns", "\uE715");
-            SidebarCtrl.AddNavItem("User Management", "\uE716");
+            SidebarCtrl.AddNavItem("User Management", "\uE77B");
             SidebarCtrl.AddNavItem("Subscription", "\uE8C7");
             SidebarCtrl.SetActiveItem("Dashboard");
             BuildDashboardShell();
@@ -52,6 +54,9 @@ namespace CC.Forms.Admin
                 case "Dashboard":
                     BuildDashboardShell();
                     _ = LoadDashboardDataAsync();
+                    break;
+                case "Branches":
+                    ViewHost.ShowFormInPanel(MainPanel, new BranchListForm());
                     break;
                 case "Customers":
                     ViewHost.ShowFormInPanel(MainPanel, new CustomerListForm());
@@ -110,7 +115,8 @@ namespace CC.Forms.Admin
             {
                 var data = await CrmDataService.GetAdminDashboardDataAsync(
                     companyId: SessionService.CurrentUser?.CompanyId,
-                    period: _activePeriod);
+                    period: _activePeriod,
+                    branchId: SessionService.ActiveBranchId);
 
             var rootLayout = new TableLayoutPanel
             {
@@ -154,9 +160,10 @@ namespace CC.Forms.Admin
                 Margin = new Padding(0, 0, 0, 4)
             };
 
+            string branchBadge = SessionService.GetActiveBranchDisplay();
             var lblSubtitle = new Label
             {
-                Text = $"{SessionService.GetActiveBrandName()} \u00B7 Executive Financial & CRM Intelligence \u00B7 {DateTime.Now:MMM d, yyyy}",
+                Text = $"{SessionService.GetActiveBrandName()} ({branchBadge}) \u00B7 Executive Financial & CRM Intelligence \u00B7 {DateTime.Now:MMM d, yyyy}",
                 Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Regular),
                 ForeColor = UITheme.TextMuted,
                 AutoSize = true,
@@ -177,7 +184,18 @@ namespace CC.Forms.Admin
                 _ = LoadDashboardDataAsync();
             };
 
+            var branchSelector = new BranchSelectorControl
+            {
+                Dock = DockStyle.Right,
+                Margin = new Padding(0, 0, 10, 0)
+            };
+            branchSelector.BranchChanged += (s, branchId) =>
+            {
+                _ = LoadDashboardDataAsync();
+            };
+
             topPanel.Controls.Add(periodSelector);
+            topPanel.Controls.Add(branchSelector);
             topPanel.Controls.Add(titleStack);
             rootLayout.Controls.Add(topPanel, 0, 0);
 

@@ -823,8 +823,14 @@ namespace CC.Forms.Authentication
                     CompanyId = user.CompanyId,
                     CompanyName = resolvedCompanyName,
                     TenantServer = result.TenantServer,
-                    TenantDatabase = result.TenantDatabase
+                    TenantDatabase = result.TenantDatabase,
+                    BranchId = user.BranchId,
+                    BranchName = user.Branch?.BranchName
                 };
+
+                // Initialize Active Branch:
+                // If user has an explicit branch assigned, scope to that branch; otherwise default to "All Branches" (null).
+                SessionService.SetActiveBranch(user.BranchId, user.Branch?.BranchName);
 
                 try
                 {

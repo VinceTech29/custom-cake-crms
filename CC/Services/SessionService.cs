@@ -7,6 +7,24 @@ namespace CC.Services
     {
         public static CurrentUser? CurrentUser { get; set; }
 
+        public static int? ActiveBranchId { get; set; }
+        public static string? ActiveBranchName { get; set; }
+        public static event System.Action? ActiveBranchChanged;
+
+        public static void SetActiveBranch(int? branchId, string? branchName)
+        {
+            ActiveBranchId = branchId;
+            ActiveBranchName = string.IsNullOrWhiteSpace(branchName)
+                ? (branchId == null ? "All Branches" : null)
+                : branchName.Trim();
+            ActiveBranchChanged?.Invoke();
+        }
+
+        public static void NotifyActiveBranchChanged() => ActiveBranchChanged?.Invoke();
+
+        public static string GetActiveBranchDisplay() =>
+            !string.IsNullOrWhiteSpace(ActiveBranchName) ? ActiveBranchName : "All Branches";
+
         public const string PlatformBrandName = "Custom Cake CRMS";
 
         public static string GetActiveBrandName()
@@ -33,6 +51,8 @@ namespace CC.Services
         public static void ClearSession()
         {
             CurrentUser = null;
+            ActiveBranchId = null;
+            ActiveBranchName = null;
             CrmDataService.ClearTenantSession();
         }
 
@@ -283,6 +303,8 @@ namespace CC.Services
         public string CompanyName { get; set; } = string.Empty;
         public string? TenantServer { get; set; }
         public string? TenantDatabase { get; set; }
+        public int? BranchId { get; set; }
+        public string? BranchName { get; set; }
 
         public string FullName => $"{FirstName} {LastName}".Trim();
     }
