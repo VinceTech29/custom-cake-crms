@@ -70,7 +70,15 @@ namespace CC.Forms.Shared
             var cu = SessionService.CurrentUser;
             if (cu != null)
             {
-                SidebarCtrl.SetUserDisplayName($"{cu.FirstName} {cu.LastName}".Trim());
+                string displayName = $"{cu.FirstName} {cu.LastName}".Trim();
+                if (string.Equals(displayName, "Test Admin", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(cu.Username, "superadmin", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(cu.Role, "SuperAdmin", StringComparison.OrdinalIgnoreCase))
+                {
+                    displayName = "Super Admin";
+                }
+
+                SidebarCtrl.SetUserDisplayName(displayName);
                 string roleDisplay = cu.Role switch
                 {
                     "Admin" => "Business Admin",

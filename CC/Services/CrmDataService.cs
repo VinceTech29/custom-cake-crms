@@ -793,7 +793,7 @@ namespace CC.Services
                 await context.Database.ExecuteSqlRawAsync(@"
                     UPDATE AppUsers SET PasswordHash = 'admin123' WHERE PasswordHash = 'TEST_HASH' OR PasswordHash IS NULL OR PasswordHash = '';
                     UPDATE AppUsers SET Username = 'lea.abad' WHERE UserId = 5 AND Username = 'admin';
-                    UPDATE AppUsers SET IsActive = 1, PasswordHash = 'admin123' WHERE Username = 'superadmin';
+                    UPDATE AppUsers SET IsActive = 1, PasswordHash = 'admin123', FirstName = 'Super', LastName = 'Admin' WHERE Username = 'superadmin' OR RoleId = 1;
                 ");
 
                 // 3. Ensure Master DB Company and CompanyDatabases exist for Company 2
