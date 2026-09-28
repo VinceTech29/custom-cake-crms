@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using CC.Models;
+using CC.Domain.Entities;
 
 namespace CC.Services
 {
