@@ -194,7 +194,7 @@ namespace CC.Forms.SuperAdmin.Businesses
                 Dock = DockStyle.Fill,
                 BackColor = Color.White,
                 Padding = new Padding(16, 12, 16, 12),
-                Margin = new Padding(colIdx == 0 ? 0 : 7, 0, colIdx == 3 ? 0 : 7, 0)
+                Margin = new Padding(4, 0, 4, 0)
             };
 
             card.Paint += (s, e) =>

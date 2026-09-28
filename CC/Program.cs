@@ -30,16 +30,76 @@ namespace CC
             if (args.Length > 0 && args[0] == "--seed-demo-data")
             {
                 bool force = args.Length > 1 && args[1] == "--force";
-                Console.WriteLine("Starting demo data seeding for CustomCakeCRM...");
-                var result = DatabaseSeeder.SeedDemoDataAsync(2, force).GetAwaiter().GetResult();
-                Console.WriteLine(result.Message);
+                Console.WriteLine("Starting demo data seeding for all tenant companies...");
+                var results = DatabaseSeeder.SeedAllTenantsDemoDataAsync(force).GetAwaiter().GetResult();
+                foreach (var res in results)
+                {
+                    Console.WriteLine(res.Message);
+                }
+                return;
+            }
+
+            if (args.Length > 0 && args[0] == "--list-all-companies")
+            {
+                var companies = CrmDataService.GetCompaniesAsync().GetAwaiter().GetResult();
+                Console.WriteLine($"Found {companies.Count} companies in Master DB:");
+                foreach (var c in companies)
+                {
+                    Console.WriteLine($"  ID={c.CompanyId}, Code={c.CompanyCode}, Name={c.CompanyName}, DB={c.DatabaseName}, Server={c.ServerName}");
+                }
                 return;
             }
 
             if (args.Length > 0 && args[0] == "--verify-db-counts")
             {
-                Console.WriteLine("Verifying database row counts for CustomCakeCRM...");
-                DatabaseSeeder.PrintDatabaseCountsAsync(2).GetAwaiter().GetResult();
+                Console.WriteLine("Verifying database row counts for all tenant companies...");
+                DatabaseSeeder.PrintAllDatabaseCountsAsync().GetAwaiter().GetResult();
+                return;
+            }
+
+            if (args.Length > 0 && args[0] == "--capture-reports-screen")
+            {
+                Console.WriteLine("Capturing Reports Module screenshot...");
+                SessionService.CurrentUser = new CurrentUser
+                {
+                    UserId = 2,
+                    FirstName = "Mark",
+                    LastName = "Perez",
+                    Role = "Manager",
+                    CompanyId = 2,
+                    CompanyName = "CC Custom Cake Shop",
+                    TenantDatabase = "CustomCakeCRM",
+                    TenantServer = "(localdb)\\MSSQLLocalDB"
+                };
+
+                using var form = new Form
+                {
+                    ClientSize = new Size(1300, 850),
+                    StartPosition = FormStartPosition.CenterScreen,
+                    Text = "Reports Module Preview"
+                };
+
+                var reportForm = new CC.Forms.Manager.Reports.ReportListForm
+                {
+                    TopLevel = false,
+                    Dock = DockStyle.Fill
+                };
+                form.Controls.Add(reportForm);
+                reportForm.Show();
+                form.Show();
+
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                while (sw.ElapsedMilliseconds < 2500)
+                {
+                    Application.DoEvents();
+                    Thread.Sleep(20);
+                }
+
+                using var bmp = new Bitmap(form.Width, form.Height);
+                form.DrawToBitmap(bmp, new Rectangle(0, 0, form.Width, form.Height));
+                string outPath = @"C:\Users\user1\.gemini\antigravity\brain\7aee3b98-6126-4c32-b0bc-280b2549c485\screen_reports_module.png";
+                bmp.Save(outPath, ImageFormat.Png);
+                Console.WriteLine($"[PASS] Saved screenshot to {outPath}");
                 return;
             }
 
@@ -49,6 +109,65 @@ namespace CC
                 var progress = new Progress<string>(msg => Console.WriteLine($"[PROGRESS] {msg}"));
                 var result = BackupService.BackupToCloudAsync(progress).GetAwaiter().GetResult();
                 Console.WriteLine($"[RESULT] Success={result.Success}, TablesSynced={result.TablesSynced}, TotalRecordsSynced={result.TotalRecordsSynced}, Message={result.Message}, Error={result.Error}");
+                return;
+            }
+
+            if (args.Length > 0 && args[0] == "--test-pdf-export")
+            {
+                Console.WriteLine("Testing PDF report generation with PdfReportService...");
+                string testPath1 = Path.Combine(Path.GetTempPath(), "test_report_single.pdf");
+                string testPath2 = Path.Combine(Path.GetTempPath(), "test_report_multi.pdf");
+
+                var records1 = new List<TransactionRecord>
+                {
+                    new TransactionRecord(1, "ORD-2026-0001", DateTime.Now, "Order", "Maria Santos", "Chocolate Tier Cake", 4500m, "GCash", "Confirmed")
+                };
+
+                var recordsMulti = new List<TransactionRecord>();
+                for (int i = 1; i <= 60; i++)
+                {
+                    recordsMulti.Add(new TransactionRecord(
+                        i,
+                        $"ORD-2026-{i:D4}",
+                        DateTime.Now.AddHours(-i),
+                        (i % 2 == 0) ? "Payment" : "Order",
+                        $"Customer Number {i}",
+                        $"Custom Cake Order #{i} Description",
+                        1000m + (i * 50),
+                        "Cash",
+                        "Completed"
+                    ));
+                }
+
+                Console.WriteLine("Generating single-page PDF report...");
+                PdfReportService.GenerateTransactionReport(testPath1, new PdfReportOptions
+                {
+                    CompanyName = "Custom Cake CRMS",
+                    BranchName = "Main Branch",
+                    Records = records1
+                });
+                Console.WriteLine($"[PASS] Single-page PDF generated: {new FileInfo(testPath1).Length} bytes");
+
+                Console.WriteLine("Generating multi-page PDF report (60 records)...");
+                PdfReportService.GenerateTransactionReport(testPath2, new PdfReportOptions
+                {
+                    CompanyName = "Custom Cake CRMS",
+                    BranchName = "All Branches",
+                    Records = recordsMulti
+                });
+                Console.WriteLine($"[PASS] Multi-page PDF generated: {new FileInfo(testPath2).Length} bytes");
+
+                Console.WriteLine("Generating empty-records PDF report (0 records)...");
+                string testPath3 = Path.Combine(Path.GetTempPath(), "test_report_empty.pdf");
+                PdfReportService.GenerateTransactionReport(testPath3, new PdfReportOptions
+                {
+                    CompanyName = "Custom Cake CRMS",
+                    BranchName = "All Branches",
+                    Records = new List<TransactionRecord>()
+                });
+                Console.WriteLine($"[PASS] Empty-records PDF generated: {new FileInfo(testPath3).Length} bytes");
+
+                Console.WriteLine("All PDF generation tests passed successfully!");
                 return;
             }
 

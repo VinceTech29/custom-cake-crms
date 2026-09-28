@@ -454,7 +454,7 @@ namespace CC.Forms.Staff.Orders
             {
                 decimal total = order.OrderDetails.Sum(d => d.Quantity * d.UnitPrice);
                 if (total == 0) total = order.TotalAmount > 0 ? order.TotalAmount : 3500m;
-                string amt = $"₱{total:N0}";
+                string amt = $"₱{total:N2}";
                 using var font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold);
                 using var brush = new SolidBrush(UITheme.TextDark);
                 g.DrawString(amt, font, brush, e.CellBounds.Left + px5, cellY);

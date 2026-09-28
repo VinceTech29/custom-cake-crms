@@ -202,6 +202,9 @@ namespace CC.Services
                     // Check page break
                     if (currentY + rowHeight > pageHeight - bottomMargin - 30)
                     {
+                        // Dispose graphics for the current page before allocating a new page
+                        gfx.Dispose();
+
                         // Add new page
                         page = document.AddPage();
                         page.Size = PageSize.A4;
@@ -272,6 +275,8 @@ namespace CC.Services
                 // ----------------------------------------------------
                 if (currentY + 28 > pageHeight - bottomMargin)
                 {
+                    gfx.Dispose();
+
                     page = document.AddPage();
                     page.Size = PageSize.A4;
                     page.Orientation = options.Orientation;
@@ -301,6 +306,9 @@ namespace CC.Services
 
                 currentY += totalBarHeight + 10;
             }
+
+            // Dispose main body graphics before rendering footers
+            gfx.Dispose();
 
             // ----------------------------------------------------
             // Page Footers (Page X of Y on every page)

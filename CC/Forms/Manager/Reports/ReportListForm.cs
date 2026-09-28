@@ -21,7 +21,13 @@ namespace CC.Forms.Manager.Reports
         private Panel topPanel = null!;
         private Label lblTitle = null!;
         private Label lblSubtitle = null!;
-        private Button btnTopExportPdf = null!;
+
+        private Label lblFromDate = null!;
+        private DateTimePicker dtpFrom = null!;
+        private Label lblToDate = null!;
+        private DateTimePicker dtpTo = null!;
+        private Button btnGenerateReport = null!;
+        private Button btnExportPdf = null!;
 
         private TableLayoutPanel kpiTable = null!;
         private Label lblTotalRevenue = null!;
@@ -29,18 +35,8 @@ namespace CC.Forms.Manager.Reports
         private Label lblDailySummary = null!;
         private Label lblMonthlySummary = null!;
 
-        private Panel searchFilterPanel = null!;
-        private Panel searchPill = null!;
-        private TextBox txtSearchBox = null!;
+        private Panel categoryPillsPanel = null!;
         private FlowLayoutPanel filterPillContainer = null!;
-        private Label lblBranch = null!;
-        private ComboBox cmbBranchFilter = null!;
-        private DateTimePicker dtpFrom = null!;
-        private DateTimePicker dtpTo = null!;
-        private Label lblFromDate = null!;
-        private Label lblToDate = null!;
-        private Button btnGenerateReport = null!;
-        private Button btnExportPdf = null!;
 
         private Panel tableCardPanel = null!;
         private DataGridView gridTransactions = null!;
@@ -50,11 +46,8 @@ namespace CC.Forms.Manager.Reports
         private const int PageSize = 10;
 
         private string activeFilter = "All"; // "All", "Orders", "Payments", "Retention"
-        private string activeSearchQuery = string.Empty;
         private List<TransactionRecord> currentRecords = new List<TransactionRecord>();
 
-        private BranchCapabilityInfo? branchCapability;
-        private List<BranchListItem> availableBranches = new();
         private bool _isInitialized = false;
 
         public ReportListForm()
@@ -62,11 +55,11 @@ namespace CC.Forms.Manager.Reports
             InitializeComponent();
             BuildTopToolbar();
             BuildKpiCards();
-            BuildSearchAndFilterBar();
+            BuildCategoryFilterBar();
             BuildDataGridCard();
 
             Controls.Add(tableCardPanel);
-            Controls.Add(searchFilterPanel);
+            Controls.Add(categoryPillsPanel);
             Controls.Add(kpiTable);
             Controls.Add(topPanel);
 
@@ -82,7 +75,6 @@ namespace CC.Forms.Manager.Reports
         public async Task InitializeDataAsync()
         {
             _isInitialized = true;
-            await LoadBranchFiltersAsync();
             await RefreshDataAsync();
         }
 
@@ -99,53 +91,55 @@ namespace CC.Forms.Manager.Reports
         }
 
         // =========================================================
-        // 1. TOP TOOLBAR (Title, Subtitle, and Top Export PDF Button)
+        // 1. TOP TOOLBAR & DATE FILTRATION (Above KPIs, Same to Dashboard)
         // =========================================================
         private void BuildTopToolbar()
         {
             topPanel = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 78,
-                Padding = new Padding(0, 0, 0, 14),
+                AutoSize = true,
+                Padding = new Padding(0, 0, 0, 16),
                 BackColor = Color.Transparent
             };
 
-            var headerTable = new TableLayoutPanel
+            var topTable = new TableLayoutPanel
             {
-                Dock = DockStyle.Fill,
-                ColumnCount = 2,
-                RowCount = 1,
-                BackColor = Color.Transparent
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                ColumnCount = 1,
+                RowCount = 2,
+                BackColor = Color.Transparent,
+                Margin = Padding.Empty,
+                Padding = Padding.Empty
             };
-            headerTable.ColumnStyles.Clear();
-            headerTable.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            headerTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            headerTable.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            topTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            topTable.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // row 0: title + subtitle
+            topTable.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // row 1: date filter + actions
 
+            // Row 0: Title & Subtitle
             var titleStack = new FlowLayoutPanel
             {
                 FlowDirection = FlowDirection.TopDown,
                 WrapContents = false,
                 AutoSize = true,
-                Dock = DockStyle.Fill,
                 BackColor = Color.Transparent,
-                Margin = new Padding(0, 0, 16, 0)
+                Margin = new Padding(0, 0, 0, 10)
             };
 
             lblTitle = new Label
             {
                 Text = "Reports & Analytics",
                 UseMnemonic = false,
-                Font = new Font(UITheme.FontSerif, 22F, FontStyle.Bold),
+                Font = new Font(UITheme.FontSerif, 20F, FontStyle.Bold),
                 ForeColor = UITheme.TextDark,
                 AutoSize = true,
-                Margin = new Padding(0, 0, 0, 4)
+                Margin = new Padding(0, 0, 0, 3)
             };
 
             lblSubtitle = new Label
             {
-                Text = "Overall transactions, revenue, and date-range analytics",
+                Text = $"{SessionService.GetActiveBrandName()} \u00B7 Overall transactions, revenue, and date-range analytics",
                 Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Regular),
                 ForeColor = UITheme.TextMuted,
                 AutoSize = true,
@@ -155,39 +149,113 @@ namespace CC.Forms.Manager.Reports
             titleStack.Controls.Add(lblTitle);
             titleStack.Controls.Add(lblSubtitle);
 
-            // Action button stack on the right
-            var btnStack = new FlowLayoutPanel
+            // Row 1: From-To filtration bar on upper part of KPIs (same to dashboard)
+            var filtersRow = new FlowLayoutPanel
             {
-                FlowDirection = FlowDirection.RightToLeft,
+                FlowDirection = FlowDirection.LeftToRight,
                 WrapContents = false,
-                Dock = DockStyle.Fill,
+                AutoSize = true,
                 BackColor = Color.Transparent,
-                Padding = new Padding(0, 6, 0, 0)
+                Margin = Padding.Empty,
+                Padding = Padding.Empty
             };
 
-            btnTopExportPdf = new Button
+            lblFromDate = new Label
+            {
+                Text = "From:",
+                AutoSize = true,
+                Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold),
+                ForeColor = UITheme.TextDark,
+                Margin = new Padding(0, 8, 6, 0)
+            };
+
+            dtpFrom = new DateTimePicker
+            {
+                Format = DateTimePickerFormat.Short,
+                Value = DateTime.Today.AddDays(-30),
+                Height = 36,
+                Width = 120,
+                Font = new Font(UITheme.FontSans, 9.5F),
+                Margin = new Padding(0, 1, 16, 0)
+            };
+
+            lblToDate = new Label
+            {
+                Text = "To:",
+                AutoSize = true,
+                Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold),
+                ForeColor = UITheme.TextDark,
+                Margin = new Padding(0, 8, 6, 0)
+            };
+
+            dtpTo = new DateTimePicker
+            {
+                Format = DateTimePickerFormat.Short,
+                Value = DateTime.Today,
+                Height = 36,
+                Width = 120,
+                Font = new Font(UITheme.FontSans, 9.5F),
+                Margin = new Padding(0, 1, 18, 0)
+            };
+
+            btnGenerateReport = new Button
+            {
+                Text = "Generate Report",
+                Height = 36,
+                Width = 150,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold),
+                BackColor = UITheme.PrimaryMauve,
+                ForeColor = Color.White,
+                Cursor = Cursors.Hand,
+                Margin = new Padding(0, 0, 12, 0)
+            };
+            btnGenerateReport.FlatAppearance.BorderSize = 0;
+            btnGenerateReport.ApplyRoundedRegion(10);
+            UITheme.ApplyActionButton(btnGenerateReport, "\uE768", 11);
+            btnGenerateReport.Click += async (s, e) =>
+            {
+                if (dtpFrom.Value.Date > dtpTo.Value.Date)
+                {
+                    MessageBox.Show(
+                        "\"From Date\" cannot be later than \"To Date\". Please adjust your date range.",
+                        "Validation Error",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                    return;
+                }
+                currentPage = 1;
+                await RefreshDataAsync();
+            };
+
+            // SINGLE Export PDF button in the form
+            btnExportPdf = new Button
             {
                 Text = "Export PDF",
-                Height = 38,
+                Height = 36,
                 Width = 135,
                 FlatStyle = FlatStyle.Flat,
-                Cursor = Cursors.Hand,
                 Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold),
                 BackColor = Color.FromArgb(175, 45, 45),
                 ForeColor = Color.White,
-                Margin = new Padding(6, 0, 0, 0)
+                Cursor = Cursors.Hand,
+                Margin = Padding.Empty
             };
-            btnTopExportPdf.FlatAppearance.BorderSize = 0;
-            btnTopExportPdf.ApplyRoundedRegion(10);
-            UITheme.ApplyActionButton(btnTopExportPdf, "\uE787", 12);
-            btnTopExportPdf.Click += async (s, e) => await ExportPdfAsync();
+            btnExportPdf.FlatAppearance.BorderSize = 0;
+            btnExportPdf.ApplyRoundedRegion(10);
+            UITheme.ApplyActionButton(btnExportPdf, "\uE787", 11);
+            btnExportPdf.Click += async (s, e) => await ExportPdfAsync();
 
-            btnStack.Controls.Add(btnTopExportPdf);
+            filtersRow.Controls.Add(lblFromDate);
+            filtersRow.Controls.Add(dtpFrom);
+            filtersRow.Controls.Add(lblToDate);
+            filtersRow.Controls.Add(dtpTo);
+            filtersRow.Controls.Add(btnGenerateReport);
+            filtersRow.Controls.Add(btnExportPdf);
 
-            headerTable.Controls.Add(titleStack, 0, 0);
-            headerTable.Controls.Add(btnStack, 1, 0);
-
-            topPanel.Controls.Add(headerTable);
+            topTable.Controls.Add(titleStack, 0, 0);
+            topTable.Controls.Add(filtersRow, 0, 1);
+            topPanel.Controls.Add(topTable);
         }
 
         // =========================================================
@@ -231,7 +299,7 @@ namespace CC.Forms.Manager.Reports
             {
                 Dock = DockStyle.Fill,
                 BackColor = Color.White,
-                Margin = new Padding(0, 0, 14, 0),
+                Margin = new Padding(4, 0, 4, 0),
                 Padding = new Padding(18, 14, 18, 14)
             };
             card.ApplyRoundedRegion(14);
@@ -290,82 +358,27 @@ namespace CC.Forms.Manager.Reports
         // =========================================================
         // 3. SEARCH & DATE FILTER BAR (With Branch Selector)
         // =========================================================
-        private void BuildSearchAndFilterBar()
+        // 3. CATEGORY FILTER PILLS (Below KPIs, Above Table)
+        // =========================================================
+        private void BuildCategoryFilterBar()
         {
-            searchFilterPanel = new Panel
+            categoryPillsPanel = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 94,
-                Padding = new Padding(0, 0, 0, 14),
+                Height = 48,
+                Padding = new Padding(0, 0, 0, 12),
                 BackColor = Color.Transparent
             };
 
-            var mainTable = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                RowCount = 2,
-                ColumnCount = 1,
-                BackColor = Color.Transparent
-            };
-            mainTable.RowStyles.Clear();
-            mainTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 40F));
-            mainTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 40F));
-
-            var row1Flow = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = false,
-                AutoSize = true,
-                BackColor = Color.Transparent
-            };
-
-            // Search pill
-            searchPill = new Panel
-            {
-                Size = new Size(260, 36),
-                BackColor = Color.White,
-                Margin = new Padding(0, 0, 12, 0)
-            };
-            searchPill.Paint += (s, e) =>
-            {
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                using var pen = new Pen(UITheme.BorderColor, 1.2f);
-                e.Graphics.DrawRoundedRectangle(pen, new Rectangle(0, 0, searchPill.Width - 1, searchPill.Height - 1), 12);
-
-                using var font = new Font("Segoe MDL2 Assets", 10.5f);
-                var rect = new Rectangle(12, 0, 20, searchPill.Height);
-                TextRenderer.DrawText(e.Graphics, "\uE721", font, rect, UITheme.TextMuted,
-                    TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter);
-            };
-            searchPill.ApplyRoundedRegion(12);
-
-            txtSearchBox = new TextBox
-            {
-                BorderStyle = BorderStyle.None,
-                BackColor = Color.White,
-                Font = new Font(UITheme.FontSans, 9.5F),
-                ForeColor = UITheme.TextDark,
-                Location = new Point(38, 9),
-                Width = searchPill.Width - 48
-            };
-            txtSearchBox.TextChanged += async (s, e) =>
-            {
-                activeSearchQuery = txtSearchBox.Text.Trim();
-                currentPage = 1;
-                await RefreshDataAsync();
-            };
-            searchPill.Controls.Add(txtSearchBox);
-            row1Flow.Controls.Add(searchPill);
-
-            // Filter pills: All, Orders, Payments, Retention
             filterPillContainer = new FlowLayoutPanel
             {
+                Dock = DockStyle.Fill,
                 FlowDirection = FlowDirection.LeftToRight,
                 WrapContents = false,
                 AutoSize = true,
                 BackColor = Color.Transparent,
-                Margin = new Padding(0, 0, 12, 0)
+                Margin = Padding.Empty,
+                Padding = Padding.Empty
             };
 
             string[] filters = new[] { "All", "Orders", "Payments", "Retention" };
@@ -381,8 +394,8 @@ namespace CC.Forms.Manager.Reports
                     },
                     AutoSize = true,
                     Height = 36,
-                    Margin = new Padding(0, 0, 6, 0),
-                    Padding = new Padding(12, 0, 12, 0),
+                    Margin = new Padding(0, 0, 8, 0),
+                    Padding = new Padding(14, 0, 14, 0),
                     FlatStyle = FlatStyle.Flat,
                     Cursor = Cursors.Hand,
                     Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold),
@@ -413,146 +426,8 @@ namespace CC.Forms.Manager.Reports
 
                 filterPillContainer.Controls.Add(btn);
             }
-            row1Flow.Controls.Add(filterPillContainer);
 
-            // Branch Dropdown (Visible only if Multi-Branching is allowed)
-            lblBranch = new Label
-            {
-                Text = "Branch:",
-                Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold),
-                ForeColor = UITheme.TextMuted,
-                AutoSize = true,
-                Margin = new Padding(4, 9, 4, 0),
-                Visible = false
-            };
-            cmbBranchFilter = new ComboBox
-            {
-                Width = 160,
-                Height = 36,
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font(UITheme.FontSans, 9.5F),
-                BackColor = Color.White,
-                ForeColor = UITheme.TextDark,
-                Margin = new Padding(0, 1, 0, 0),
-                Visible = false
-            };
-            cmbBranchFilter.SelectedIndexChanged += async (s, e) =>
-            {
-                currentPage = 1;
-                await RefreshDataAsync();
-            };
-
-            row1Flow.Controls.Add(lblBranch);
-            row1Flow.Controls.Add(cmbBranchFilter);
-
-            // Row 2: Date Range Pickers & Execution Buttons
-            var row2Flow = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = false,
-                AutoSize = true,
-                BackColor = Color.Transparent,
-                Margin = new Padding(0, 4, 0, 0)
-            };
-
-            lblFromDate = new Label
-            {
-                Text = "From Date:",
-                AutoSize = true,
-                Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold),
-                ForeColor = UITheme.TextMuted,
-                Margin = new Padding(0, 9, 4, 0)
-            };
-
-            dtpFrom = new DateTimePicker
-            {
-                Format = DateTimePickerFormat.Short,
-                Value = DateTime.Today.AddDays(-30),
-                Height = 36,
-                Width = 115,
-                Font = new Font(UITheme.FontSans, 9.5F),
-                Margin = new Padding(0, 1, 14, 0)
-            };
-
-            lblToDate = new Label
-            {
-                Text = "To Date:",
-                AutoSize = true,
-                Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold),
-                ForeColor = UITheme.TextMuted,
-                Margin = new Padding(0, 9, 4, 0)
-            };
-
-            dtpTo = new DateTimePicker
-            {
-                Format = DateTimePickerFormat.Short,
-                Value = DateTime.Today,
-                Height = 36,
-                Width = 115,
-                Font = new Font(UITheme.FontSans, 9.5F),
-                Margin = new Padding(0, 1, 14, 0)
-            };
-
-            btnGenerateReport = new Button
-            {
-                Text = "Generate Report",
-                Height = 36,
-                Width = 150,
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold),
-                BackColor = UITheme.PrimaryMauve,
-                ForeColor = Color.White,
-                Cursor = Cursors.Hand,
-                Margin = new Padding(0, 0, 8, 0)
-            };
-            btnGenerateReport.FlatAppearance.BorderSize = 0;
-            btnGenerateReport.ApplyRoundedRegion(10);
-            UITheme.ApplyActionButton(btnGenerateReport, "\uE768", 11);
-            btnGenerateReport.Click += async (s, e) =>
-            {
-                if (dtpFrom.Value.Date > dtpTo.Value.Date)
-                {
-                    MessageBox.Show(
-                        "\"From Date\" cannot be later than \"To Date\". Please adjust your date range.",
-                        "Validation Error",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Warning);
-                    return;
-                }
-                currentPage = 1;
-                await RefreshDataAsync();
-            };
-
-            btnExportPdf = new Button
-            {
-                Text = "Export PDF",
-                Height = 36,
-                Width = 130,
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font(UITheme.FontSans, 9F, FontStyle.Bold),
-                BackColor = Color.FromArgb(175, 45, 45),
-                ForeColor = Color.White,
-                Cursor = Cursors.Hand,
-                Margin = new Padding(0, 0, 0, 0)
-            };
-            btnExportPdf.FlatAppearance.BorderSize = 0;
-            btnExportPdf.ApplyRoundedRegion(10);
-            UITheme.ApplyActionButton(btnExportPdf, "\uE787", 11);
-            btnExportPdf.Click += async (s, e) => await ExportPdfAsync();
-
-            row2Flow.Controls.Add(lblFromDate);
-            row2Flow.Controls.Add(dtpFrom);
-            row2Flow.Controls.Add(lblToDate);
-            row2Flow.Controls.Add(dtpTo);
-            row2Flow.Controls.Add(btnGenerateReport);
-            row2Flow.Controls.Add(btnExportPdf);
-
-            mainTable.Controls.Add(row1Flow, 0, 0);
-            mainTable.Controls.Add(row2Flow, 0, 1);
-
-            searchFilterPanel.Controls.Add(mainTable);
+            categoryPillsPanel.Controls.Add(filterPillContainer);
             UpdateFilterPillStyles();
         }
 
@@ -567,63 +442,6 @@ namespace CC.Forms.Manager.Reports
                     btn.ForeColor = isActive ? Color.White : UITheme.TextDark;
                     btn.Invalidate();
                 }
-            }
-        }
-
-        // =========================================================
-        // 4. BRANCH FILTER LOADER
-        // =========================================================
-        private async Task LoadBranchFiltersAsync()
-        {
-            try
-            {
-                branchCapability = await CrmDataService.GetBranchCapabilityAsync();
-                bool canBranch = branchCapability != null && branchCapability.AllowBranching;
-
-                lblBranch.Visible = canBranch;
-                cmbBranchFilter.Visible = canBranch;
-
-                if (canBranch)
-                {
-                    availableBranches = await CrmDataService.GetBranchesAsync();
-                    cmbBranchFilter.Items.Clear();
-                    cmbBranchFilter.Items.Add(new ComboBoxItem("All Branches", 0));
-                    foreach (var b in availableBranches.Where(b => b.IsActive))
-                    {
-                        cmbBranchFilter.Items.Add(new ComboBoxItem(b.BranchName, b.BranchId));
-                    }
-
-                    int? targetBranchId = SessionService.CurrentUser?.BranchId;
-                    bool isStaff = string.Equals(SessionService.CurrentUser?.Role, "Staff", StringComparison.OrdinalIgnoreCase);
-
-                    if (targetBranchId.HasValue && targetBranchId.Value > 0)
-                    {
-                        for (int i = 0; i < cmbBranchFilter.Items.Count; i++)
-                        {
-                            if (cmbBranchFilter.Items[i] is ComboBoxItem item && item.Value == targetBranchId.Value)
-                            {
-                                cmbBranchFilter.SelectedIndex = i;
-                                break;
-                            }
-                        }
-                        if (isStaff)
-                        {
-                            cmbBranchFilter.Enabled = false;
-                        }
-                        else if (cmbBranchFilter.SelectedIndex < 0)
-                        {
-                            cmbBranchFilter.SelectedIndex = 0;
-                        }
-                    }
-                    else
-                    {
-                        cmbBranchFilter.SelectedIndex = 0;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"[LoadBranchFiltersAsync] {ex.Message}");
             }
         }
 
@@ -844,18 +662,8 @@ namespace CC.Forms.Manager.Reports
                     return;
                 }
 
-                int? branchId = null;
-                string branchDisplayName = "All Branches";
-                if (cmbBranchFilter != null && cmbBranchFilter.Visible && cmbBranchFilter.SelectedItem is ComboBoxItem sel)
-                {
-                    branchId = sel.Value > 0 ? sel.Value : 0;
-                    branchDisplayName = sel.Text;
-                }
-                else if (SessionService.CurrentUser?.BranchId.HasValue == true && SessionService.CurrentUser.BranchId.Value > 0)
-                {
-                    branchId = SessionService.CurrentUser.BranchId.Value;
-                    branchDisplayName = SessionService.CurrentUser.BranchName ?? "Current Branch";
-                }
+                int? branchId = SessionService.ActiveBranchId ?? SessionService.CurrentUser?.BranchId;
+                string branchDisplayName = SessionService.GetActiveBranchDisplay();
 
                 string period = $"range:{fromDate:yyyy-MM-dd}:{toDate:yyyy-MM-dd}";
                 string? typeFilter = activeFilter switch
@@ -871,7 +679,7 @@ namespace CC.Forms.Manager.Reports
                     period: period,
                     filterDate: null,
                     typeFilter: typeFilter,
-                    searchQuery: activeSearchQuery,
+                    searchQuery: null,
                     page: currentPage,
                     pageSize: PageSize,
                     fromDate: fromDate,
@@ -886,7 +694,7 @@ namespace CC.Forms.Manager.Reports
                         period: period,
                         filterDate: null,
                         typeFilter: typeFilter,
-                        searchQuery: activeSearchQuery,
+                        searchQuery: null,
                         page: currentPage,
                         pageSize: PageSize,
                         fromDate: fromDate,
@@ -914,27 +722,28 @@ namespace CC.Forms.Manager.Reports
                 }
 
                 // Handle empty results notice
+                string branchText = string.IsNullOrWhiteSpace(branchDisplayName) ? "" : $" \u00B7 {branchDisplayName}";
                 if (currentRecords.Count == 0)
                 {
                     lblNoRecordsNotice.Visible = true;
                     gridTransactions.Visible = false;
-                    lblSubtitle.Text = $"0 transactions found ({fromDate:MMM dd, yyyy} - {toDate:MMM dd, yyyy}) \u00B7 {branchDisplayName}";
+                    lblSubtitle.Text = $"{SessionService.GetActiveBrandName()} \u00B7 0 transactions found ({fromDate:MMM dd, yyyy} - {toDate:MMM dd, yyyy}){branchText}";
                 }
                 else
                 {
                     lblNoRecordsNotice.Visible = false;
                     gridTransactions.Visible = true;
-                    lblSubtitle.Text = $"{paged.TotalCount} transaction(s) found ({fromDate:MMM dd, yyyy} - {toDate:MMM dd, yyyy}) \u00B7 {branchDisplayName}";
+                    lblSubtitle.Text = $"{SessionService.GetActiveBrandName()} \u00B7 {paged.TotalCount} transaction(s) found ({fromDate:MMM dd, yyyy} - {toDate:MMM dd, yyyy}){branchText}";
                 }
 
                 pagination.SetPagination(paged.Page, paged.PageSize, paged.TotalCount, "transactions");
 
                 // Refresh KPI Summary Cards
                 var metrics = await CrmDataService.GetReportSummaryMetricsAsync(toDate);
-                lblTotalRevenue.Text = $"₱{metrics.TotalRevenue:N0}";
+                lblTotalRevenue.Text = $"₱{metrics.TotalRevenue:N2}";
                 lblTotalTransactions.Text = metrics.TotalTransactions.ToString();
-                lblDailySummary.Text = $"{metrics.DailyCount} (₱{metrics.DailyRevenue:N0})";
-                lblMonthlySummary.Text = $"{metrics.MonthlyCount} (₱{metrics.MonthlyRevenue:N0})";
+                lblDailySummary.Text = $"{metrics.DailyCount} (₱{metrics.DailyRevenue:N2})";
+                lblMonthlySummary.Text = $"{metrics.MonthlyCount} (₱{metrics.MonthlyRevenue:N2})";
             }
             catch (Exception ex)
             {
@@ -962,19 +771,8 @@ namespace CC.Forms.Manager.Reports
                     return;
                 }
 
-                // Determine branch filter
-                int? branchIdFilter = null;
-                string branchDisplayName = "All Branches";
-                if (cmbBranchFilter.Visible && cmbBranchFilter.SelectedItem is ComboBoxItem selBranch)
-                {
-                    branchIdFilter = selBranch.Value > 0 ? selBranch.Value : 0;
-                    branchDisplayName = selBranch.Text;
-                }
-                else if (SessionService.CurrentUser?.BranchId.HasValue == true && SessionService.CurrentUser.BranchId.Value > 0)
-                {
-                    branchIdFilter = SessionService.CurrentUser.BranchId.Value;
-                    branchDisplayName = SessionService.CurrentUser.BranchName ?? "Current Branch";
-                }
+                int? branchIdFilter = SessionService.ActiveBranchId ?? SessionService.CurrentUser?.BranchId;
+                string branchDisplayName = SessionService.GetActiveBranchDisplay();
 
                 string period = $"range:{fromDate:yyyy-MM-dd}:{toDate:yyyy-MM-dd}";
                 string? typeFilter = activeFilter switch
@@ -990,7 +788,7 @@ namespace CC.Forms.Manager.Reports
                     period: period,
                     filterDate: null,
                     typeFilter: typeFilter,
-                    searchQuery: activeSearchQuery,
+                    searchQuery: null,
                     fromDate: fromDate,
                     toDate: toDate,
                     branchId: branchIdFilter
@@ -1034,7 +832,7 @@ namespace CC.Forms.Manager.Reports
                     ReportType = reportTypeLabel,
                     FromDate = fromDate,
                     ToDate = toDate,
-                    ActiveSearchQuery = activeSearchQuery,
+                    ActiveSearchQuery = string.Empty,
                     GeneratedBy = SessionService.CurrentUser?.FullName ?? "Administrator",
                     GeneratedDate = DateTime.Now,
                     Records = exportRecords,
@@ -1067,23 +865,6 @@ namespace CC.Forms.Manager.Reports
             {
                 MessageBox.Show($"Failed to export PDF report: {ex.Message}", "Export Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
-        }
-
-        // =========================================================
-        // HELPER COMBOBOX ITEM CLASS
-        // =========================================================
-        private class ComboBoxItem
-        {
-            public string Text { get; }
-            public int Value { get; }
-
-            public ComboBoxItem(string text, int value)
-            {
-                Text = text;
-                Value = value;
-            }
-
-            public override string ToString() => Text;
         }
     }
 }

@@ -395,7 +395,7 @@ namespace CC.Forms.Staff.Payments
             {
                 using var font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold);
                 using var brush = new SolidBrush(UITheme.TextDark);
-                g.DrawString($"₱{item.Total:N0}", font, brush, e.CellBounds.Left + 12, cellY);
+                g.DrawString($"₱{item.Total:N2}", font, brush, e.CellBounds.Left + 12, cellY);
                 e.Handled = true;
             }
             // 3. DOWN PAID
@@ -403,7 +403,7 @@ namespace CC.Forms.Staff.Payments
             {
                 using var font = new Font(UITheme.FontSans, 9F);
                 using var brush = new SolidBrush(UITheme.TextDark);
-                g.DrawString($"₱{item.DownPaid:N0}", font, brush, e.CellBounds.Left + 12, cellY);
+                g.DrawString($"₱{item.DownPaid:N2}", font, brush, e.CellBounds.Left + 12, cellY);
                 e.Handled = true;
             }
             // 4. BALANCE
@@ -411,7 +411,7 @@ namespace CC.Forms.Staff.Payments
             {
                 using var font = new Font(UITheme.FontSans, 9.5F, FontStyle.Bold);
                 using var brush = new SolidBrush(item.Balance > 0 ? Color.FromArgb(170, 60, 50) : UITheme.TextDark);
-                g.DrawString($"₱{item.Balance:N0}", font, brush, e.CellBounds.Left + 12, cellY);
+                g.DrawString($"₱{item.Balance:N2}", font, brush, e.CellBounds.Left + 12, cellY);
                 e.Handled = true;
             }
             // 5. METHOD

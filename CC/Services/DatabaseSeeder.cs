@@ -188,6 +188,28 @@ namespace CC.Services
         {
             await using var context = CrmDataService.CreateDbContext(companyId);
 
+            // Ensure database tables and schema baseline exist
+            await context.Database.EnsureCreatedAsync();
+            await CrmDataService.SeedTenantBaselineAsync(context);
+
+            // Resolve company name and code from Master DB
+            string companyName = "Tenant Cake Shop";
+            string companyCode = $"TC{companyId}";
+            try
+            {
+                await using var masterCtx = CrmDataService.CreateMasterDbContext();
+                var mComp = await masterCtx.Companies.AsNoTracking().FirstOrDefaultAsync(c => c.CompanyId == companyId);
+                if (mComp != null)
+                {
+                    if (!string.IsNullOrWhiteSpace(mComp.CompanyName)) companyName = mComp.CompanyName.Trim();
+                    if (!string.IsNullOrWhiteSpace(mComp.CompanyCode)) companyCode = mComp.CompanyCode.Trim();
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[SeedDemoDataAsync Master DB lookup] {ex.Message}");
+            }
+
             // 1. Idempotency Check: check if demo customers already exist
             int existingDemoCustomers = await context.Customers
                 .CountAsync(c => c.CompanyId == companyId && c.Notes != null && c.Notes.Contains(DemoTag));
@@ -199,17 +221,137 @@ namespace CC.Services
                 {
                     Success = true,
                     AlreadySeeded = true,
-                    Message = $"Database already contains {existingDemoCustomers} demo customers (Total: {existingCounts["Customers"]} customers, {existingCounts["SalesOrders"]} orders, {existingCounts["Payments"]} payments). Idempotent seeding skipped.",
+                    Message = $"Database for '{companyName}' (Company ID {companyId}) already contains {existingDemoCustomers} demo customers (Total: {existingCounts["Customers"]} customers, {existingCounts["SalesOrders"]} orders, {existingCounts["Payments"]} payments). Idempotent seeding skipped.",
                     Counts = existingCounts
                 };
             }
 
-            // Ensure company exists
+            // Ensure company exists in tenant DB
             var company = await context.Companies.FindAsync(companyId);
             if (company == null)
             {
-                company = new Company { CompanyId = companyId, CompanyName = "CC Custom Cake Shop" };
-                context.Companies.Add(company);
+                try
+                {
+                    await context.Database.ExecuteSqlRawAsync(@"
+                        SET IDENTITY_INSERT Companies ON;
+                        INSERT INTO Companies (CompanyId, CompanyCode, CompanyName, IsActive, CreatedDate)
+                        VALUES ({0}, {1}, {2}, 1, GETUTCDATE());
+                        SET IDENTITY_INSERT Companies OFF;
+                    ", companyId, companyCode, companyName);
+                }
+                catch
+                {
+                    try
+                    {
+                        company = new Company
+                        {
+                            CompanyId = companyId,
+                            CompanyCode = companyCode,
+                            CompanyName = companyName,
+                            IsActive = true
+                        };
+                        context.Companies.Add(company);
+                        await context.SaveChangesAsync();
+                    }
+                    catch { }
+                }
+            }
+
+            // Ensure branches exist for this tenant
+            await CrmDataService.EnsureTenantBranchBaselineAsync(context, companyId);
+            var branches = await context.Branches.Where(b => b.CompanyId == companyId && b.IsActive).ToListAsync();
+            if (branches.Count < 2)
+            {
+                try
+                {
+                    var subCap = await CrmDataService.GetBranchCapabilityAsync(companyId);
+                    if (subCap.AllowBranching && subCap.MaxBranches >= 2)
+                    {
+                        var branch2 = new Branch
+                        {
+                            CompanyId = companyId,
+                            BranchName = $"{companyName} - North Hub",
+                            BranchCode = $"{companyCode}-NH",
+                            Address = "J.P. Laurel Ave, Bajada, Davao City",
+                            ContactPhone = "+63 917 555 0199",
+                            ContactEmail = $"north@{companyCode.ToLower().Replace(" ", "").Replace("-", "")}.ph",
+                            ManagerName = "Operations Lead",
+                            IsActive = true,
+                            CreatedDate = DateTime.UtcNow
+                        };
+                        context.Branches.Add(branch2);
+                        await context.SaveChangesAsync();
+                        branches = await context.Branches.Where(b => b.CompanyId == companyId && b.IsActive).ToListAsync();
+                    }
+                }
+                catch { }
+            }
+            var branchIds = branches.Select(b => b.BranchId).ToList();
+
+            // Ensure staff and admin users exist for this tenant
+            var existingUsers = await context.AppUsers.Where(u => u.CompanyId == companyId).ToListAsync();
+            if (existingUsers.Count < 3)
+            {
+                int? defBranchId = branchIds.Count > 0 ? branchIds[0] : (int?)null;
+                int? secondBranchId = branchIds.Count > 1 ? branchIds[1] : defBranchId;
+                string baseUser = companyCode.ToLower().Replace(" ", "").Replace("-", "");
+
+                var usersToSeed = new List<SystemUser>
+                {
+                    new SystemUser
+                    {
+                        CompanyId = companyId,
+                        BranchId = defBranchId,
+                        RoleId = 2, // Business Admin
+                        Username = $"{baseUser}.admin",
+                        Email = $"admin@{baseUser}.ph",
+                        FirstName = companyName.Split(' ').FirstOrDefault() ?? "Admin",
+                        LastName = "Admin",
+                        Phone = "+63 917 111 8899",
+                        IsActive = true,
+                        PasswordHash = "admin123",
+                        CreatedDate = DateTime.UtcNow.AddDays(-90),
+                        LastLoginDate = DateTime.UtcNow
+                    },
+                    new SystemUser
+                    {
+                        CompanyId = companyId,
+                        BranchId = defBranchId,
+                        RoleId = 3, // Manager
+                        Username = $"{baseUser}.manager",
+                        Email = $"manager@{baseUser}.ph",
+                        FirstName = "Operations",
+                        LastName = "Manager",
+                        Phone = "+63 918 222 8899",
+                        IsActive = true,
+                        PasswordHash = "admin123",
+                        CreatedDate = DateTime.UtcNow.AddDays(-80),
+                        LastLoginDate = DateTime.UtcNow
+                    },
+                    new SystemUser
+                    {
+                        CompanyId = companyId,
+                        BranchId = secondBranchId,
+                        RoleId = 4, // Staff
+                        Username = $"{baseUser}.staff",
+                        Email = $"staff@{baseUser}.ph",
+                        FirstName = "Baking",
+                        LastName = "Staff",
+                        Phone = "+63 919 333 8899",
+                        IsActive = true,
+                        PasswordHash = "admin123",
+                        CreatedDate = DateTime.UtcNow.AddDays(-70),
+                        LastLoginDate = DateTime.UtcNow
+                    }
+                };
+
+                foreach (var u in usersToSeed)
+                {
+                    if (!existingUsers.Any(eu => eu.Username.ToLower() == u.Username.ToLower() || eu.Email.ToLower() == u.Email.ToLower()))
+                    {
+                        context.AppUsers.Add(u);
+                    }
+                }
                 await context.SaveChangesAsync();
             }
 
@@ -236,26 +378,30 @@ namespace CC.Services
                 .Select(u => new { u.UserId, Name = u.FirstName + " " + u.LastName })
                 .ToListAsync();
 
-            var rnd = new Random(42); // Deterministic seed for reproducible data distribution
+            var rnd = new Random(42 + companyId); // Deterministic seed per company for reproducible data distribution
             var baseDate = DateTime.Today;
 
             // 2. Create Addresses (30 realistic Davao addresses)
-            var addresses = new List<Address>();
-            for (int i = 0; i < DavaoStreetAddresses.Length; i++)
+            var existingAddresses = await context.Addresses.ToListAsync();
+            var addresses = new List<Address>(existingAddresses);
+            if (addresses.Count < 30)
             {
-                var addr = new Address
+                for (int i = addresses.Count; i < DavaoStreetAddresses.Length; i++)
                 {
-                    AddressLine1 = DavaoStreetAddresses[i],
-                    AddressLine2 = i % 3 == 0 ? $"Floor {rnd.Next(1, 10)}" : null,
-                    City = "Davao City",
-                    State = "Davao del Sur",
-                    PostalCode = "8000",
-                    Country = "Philippines"
-                };
-                addresses.Add(addr);
+                    var addr = new Address
+                    {
+                        AddressLine1 = DavaoStreetAddresses[i],
+                        AddressLine2 = i % 3 == 0 ? $"Floor {rnd.Next(1, 10)}" : null,
+                        City = "Davao City",
+                        State = "Davao del Sur",
+                        PostalCode = "8000",
+                        Country = "Philippines"
+                    };
+                    context.Addresses.Add(addr);
+                    addresses.Add(addr);
+                }
+                await context.SaveChangesAsync();
             }
-            context.Addresses.AddRange(addresses);
-            await context.SaveChangesAsync();
 
             // 3. Create 200 Customers
             var customers = new List<Customer>();
@@ -268,17 +414,19 @@ namespace CC.Services
 
                     string fn = FirstNames[(f + custIdx) % FirstNames.Length];
                     string ln = LastNames[(l + custIdx * 2) % LastNames.Length];
-                    string email = $"{fn.ToLower()}.{ln.ToLower()}{custIdx}@demo.cakeshop.ph";
+                    string email = $"{fn.ToLower()}.{ln.ToLower()}{custIdx}@{companyCode.ToLower().Replace(" ", "").Replace("-", "")}.ph";
 
                     // Spread registration across past 90 days
                     int daysAgo = rnd.Next(0, 91);
                     var regDate = baseDate.AddDays(-daysAgo).AddHours(rnd.Next(8, 18)).AddMinutes(rnd.Next(0, 60));
                     int assignedUserId = staffUserIds[rnd.Next(staffUserIds.Count)];
                     var addr = addresses[rnd.Next(addresses.Count)];
+                    int? assignedBranchId = branchIds.Count > 0 ? branchIds[rnd.Next(branchIds.Count)] : (int?)null;
 
                     var cust = new Customer
                     {
                         CompanyId = companyId,
+                        BranchId = assignedBranchId,
                         FirstName = fn,
                         LastName = ln,
                         Email = email,
@@ -365,11 +513,14 @@ namespace CC.Services
                     string theme = DesignThemes[rnd.Next(DesignThemes.Length)];
                     decimal totalAmount = basePrice + (rnd.Next(0, 4) * 250m);
 
+                    int? assignedBranchId = customer.BranchId ?? (branchIds.Count > 0 ? branchIds[rnd.Next(branchIds.Count)] : (int?)null);
+
                     var order = new SalesOrder
                     {
                         CustomerId = customer.CustomerId,
                         CreatedByUserId = customer.CreatedByUserId,
                         DeliveryAddressId = customer.AddressId,
+                        BranchId = assignedBranchId,
                         StatusId = statusId,
                         OrderDate = orderDate,
                         DeliveryDate = deliveryDate,
@@ -429,12 +580,6 @@ namespace CC.Services
                 };
                 string refNo = $"{prefix}-2026-{payIdx:D5}";
 
-                // Determine payment status and amount based on order status:
-                // Completed (3) -> 100% paid, Completed status (1)
-                // Ready (4) -> 100% paid, Completed status (1)
-                // Processing (2) / Confirmed (1) -> 50% deposit paid or 100% paid
-                // Pending (0) -> 60% pending payment status (0), 40% completed deposit
-                // Cancelled (5) -> Refunded (3) or Failed (2)
                 int paymentStatusId;
                 decimal paymentAmount;
 
@@ -470,7 +615,8 @@ namespace CC.Services
                     ProcessedByUserId = order.CreatedByUserId,
                     Amount = paymentAmount,
                     PaymentDate = paymentDate,
-                    TransactionReference = refNo
+                    TransactionReference = refNo,
+                    BranchId = order.BranchId
                 };
 
                 payments.Add(payment);
@@ -488,11 +634,6 @@ namespace CC.Services
                 int daysAgo = rnd.Next(0, 91);
                 var fDate = baseDate.AddDays(-daysAgo).AddHours(rnd.Next(9, 17));
 
-                // Status distribution:
-                // 0: Pending (~40)
-                // 1: Completed (~130)
-                // 2: Cancelled (~10)
-                // 3: Overdue (~20)
                 int statusId;
                 int roll = rnd.Next(100);
                 if (roll < 20) statusId = 0; // Pending
@@ -511,7 +652,8 @@ namespace CC.Services
                     StatusId = statusId,
                     FollowUpDate = fDate,
                     Notes = $"{FollowUpTemplates[rnd.Next(FollowUpTemplates.Length)]} {DemoTag}",
-                    NextFollowUpDate = nextDate
+                    NextFollowUpDate = nextDate,
+                    BranchId = cust.BranchId
                 };
 
                 followUps.Add(fUp);
@@ -530,7 +672,6 @@ namespace CC.Services
                 var createdDate = baseDate.AddDays(-daysAgo).AddHours(rnd.Next(8, 17));
                 var eventDate = baseDate.AddDays(rnd.Next(3, 45));
 
-                // Distribute status so New, In Progress, and Quoted populate OpenInquiriesCount
                 string status = InquiryStatuses[rnd.Next(InquiryStatuses.Length)];
                 decimal budget = rnd.Next(15, 95) * 100m;
 
@@ -544,7 +685,8 @@ namespace CC.Services
                     EstimatedBudget = budget,
                     Status = status,
                     Notes = $"Client inquiry for upcoming celebration. {DemoTag}",
-                    CreatedAt = createdDate
+                    CreatedAt = createdDate,
+                    BranchId = cust.BranchId
                 };
 
                 inquiries.Add(inq);
@@ -578,9 +720,51 @@ namespace CC.Services
             {
                 Success = true,
                 AlreadySeeded = false,
-                Message = $"Successfully seeded realistic demo data into CustomCakeCRM: {customers.Count} Customers, {createdOrders.Count} SalesOrders, {createdOrders.Count} Customizations, {payments.Count} Payments, {followUps.Count} Follow-ups, {inquiries.Count} Inquiries.",
+                Message = $"Successfully seeded realistic demo data into '{companyName}' (Company ID: {companyId}): {customers.Count} Customers, {createdOrders.Count} SalesOrders, {createdOrders.Count} Customizations, {payments.Count} Payments, {followUps.Count} Follow-ups, {inquiries.Count} Inquiries.",
                 Counts = finalCounts
             };
+        }
+
+        /// <summary>
+        /// Seeds 200 demo entries into all active tenant companies in the Master database.
+        /// </summary>
+        public static async Task<List<SeedResult>> SeedAllTenantsDemoDataAsync(bool force = false)
+        {
+            var results = new List<SeedResult>();
+            try
+            {
+                await using var masterContext = CrmDataService.CreateMasterDbContext();
+                var companies = await masterContext.Companies
+                    .AsNoTracking()
+                    .Where(c => c.IsActive)
+                    .OrderBy(c => c.CompanyId)
+                    .ToListAsync();
+
+                foreach (var company in companies)
+                {
+                    try
+                    {
+                        var res = await SeedDemoDataAsync(company.CompanyId, force);
+                        results.Add(res);
+                        Console.WriteLine($"[SEEDING] {company.CompanyName} (ID: {company.CompanyId}): {res.Message}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[SEEDING ERROR] Company '{company.CompanyName}' (ID: {company.CompanyId}): {ex.Message}");
+                        results.Add(new SeedResult
+                        {
+                            Success = false,
+                            Message = $"Error seeding {company.CompanyName} (ID {company.CompanyId}): {ex.Message}"
+                        });
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[SEED ALL ERROR] {ex.Message}");
+            }
+
+            return results;
         }
 
         public static async Task<Dictionary<string, int>> GetCurrentCountsAsync(CrmDbContext context)
@@ -602,10 +786,11 @@ namespace CC.Services
 
         public static async Task PrintDatabaseCountsAsync(int companyId = 2)
         {
+            string compName = await CrmDataService.GetCompanyNameAsync(companyId) ?? $"Company {companyId}";
             await using var context = CrmDataService.CreateDbContext(companyId);
             var counts = await GetCurrentCountsAsync(context);
             Console.WriteLine("==================================================");
-            Console.WriteLine($" DATABASE COUNTS FOR TENANT COMPANY ID: {companyId}");
+            Console.WriteLine($" DATABASE COUNTS FOR: {compName.ToUpperInvariant()} (ID: {companyId})");
             Console.WriteLine("==================================================");
             foreach (var kvp in counts)
             {
@@ -613,7 +798,7 @@ namespace CC.Services
             }
             Console.WriteLine("==================================================");
 
-            var metrics = await CrmDataService.GetDashboardMetricsAsync();
+            var metrics = await CrmDataService.GetDashboardMetricsAsync(companyId);
             Console.WriteLine(" DASHBOARD LIVE METRICS:");
             Console.WriteLine($" Open Inquiries        : {metrics.OpenInquiriesCount}");
             Console.WriteLine($" Orders In Progress    : {metrics.OrdersInProgressCount}");
@@ -624,6 +809,34 @@ namespace CC.Services
             Console.WriteLine($" Total Customers       : {metrics.TotalCustomersCount}");
             Console.WriteLine($" Total Revenue (PHP)   : PHP {metrics.TotalRevenue:N2}");
             Console.WriteLine("==================================================");
+        }
+
+        public static async Task PrintAllDatabaseCountsAsync()
+        {
+            try
+            {
+                await using var masterContext = CrmDataService.CreateMasterDbContext();
+                var companies = await masterContext.Companies
+                    .AsNoTracking()
+                    .OrderBy(c => c.CompanyId)
+                    .ToListAsync();
+
+                foreach (var company in companies)
+                {
+                    try
+                    {
+                        await PrintDatabaseCountsAsync(company.CompanyId);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Could not load counts for '{company.CompanyName}' (ID {company.CompanyId}): {ex.Message}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[PRINT ALL COUNTS ERROR] {ex.Message}");
+            }
         }
     }
 }

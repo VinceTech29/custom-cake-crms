@@ -188,7 +188,7 @@ namespace CC.Forms.Staff.Inquiries
             {
                 Dock = DockStyle.Fill,
                 BackColor = Color.White,
-                Margin = new Padding(0, 0, 14, 0),
+                Margin = new Padding(4, 0, 4, 0),
                 Padding = new Padding(18, 14, 18, 14)
             };
             card.ApplyRoundedRegion(14);

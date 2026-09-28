@@ -939,7 +939,7 @@ namespace CC.Forms.Admin.Subscription
 
                 // Update Current Plan Card
                 lblPlanName.Text = currentSub.PlanName;
-                lblPlanPrice.Text = $"₱{currentSub.Price:N0} / {currentSub.BillingCycle}  \u00B7  Billed annually";
+                lblPlanPrice.Text = $"₱{currentSub.Price:N2} / {currentSub.BillingCycle}  \u00B7  Billed annually";
                 lblRenewalDate.Text = $"Next billing: {currentSub.RenewalDate:MMMM d, yyyy}";
                 lblPaymentMethod.Text = $"Payment method: {currentSub.PaymentMethod}";
 

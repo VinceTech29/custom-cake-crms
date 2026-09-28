@@ -55,9 +55,9 @@ namespace CC.Controls
             DoubleBuffered = true;
             BackColor = Color.White;
             Cursor = Cursors.Hand;
-            Padding = new Padding(18, 14, 18, 14);
-            Height = 142;
-            MinimumSize = new Size(170, 135);
+            Padding = new Padding(16, 12, 16, 12);
+            Height = 140;
+            MinimumSize = new Size(150, 125);
 
             MouseEnter += (s, e) => { _isHovered = true; Invalidate(); };
             MouseLeave += (s, e) => { _isHovered = false; Invalidate(); };
@@ -69,6 +69,7 @@ namespace CC.Controls
             base.OnPaint(e);
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
             var rect = new Rectangle(0, 0, Width - 1, Height - 1);
 
@@ -81,15 +82,15 @@ namespace CC.Controls
             }
 
             // Badge (top right)
-            int badgeLeft = Width - 16;
+            int badgeLeft = Width - 14;
             if (!string.IsNullOrWhiteSpace(_badgeText))
             {
                 using var badgeFont = new Font(UITheme.FontSans, 7.5F, FontStyle.Bold);
                 var badgeSize = g.MeasureString(_badgeText, badgeFont);
-                int bw = (int)badgeSize.Width + 12;
+                int bw = (int)Math.Ceiling(badgeSize.Width) + 12;
                 int bh = 20;
                 int bx = Width - bw - 14;
-                int by = 16;
+                int by = 13;
                 badgeLeft = bx;
 
                 var badgeRect = new Rectangle(bx, by, bw, bh);
@@ -99,28 +100,56 @@ namespace CC.Controls
                 g.DrawString(_badgeText, badgeFont, bFg, bx + 6, by + 3);
             }
 
-            // Title
+            // Title (top left)
             using (var titleFont = new Font(UITheme.FontSans, 8.5F, FontStyle.Bold))
             using (var titleBrush = new SolidBrush(UITheme.TextMuted))
             {
-                var sf = new StringFormat
+                var sfTitle = new StringFormat
                 {
                     Trimming = StringTrimming.EllipsisCharacter,
                     FormatFlags = StringFormatFlags.NoWrap,
                     LineAlignment = StringAlignment.Center
                 };
                 int titleMaxW = Math.Max(40, badgeLeft - 20);
-                g.DrawString(_title, titleFont, titleBrush, new RectangleF(16, 16, titleMaxW, 20), sf);
+                g.DrawString(_title, titleFont, titleBrush, new RectangleF(16, 13, titleMaxW, 20), sfTitle);
             }
 
-            // Big Metric Value
-            using (var valFont = new Font(UITheme.FontSerif, 24F, FontStyle.Bold))
+            // Big Metric Value (middle zone)
+            float availableWidth = Math.Max(20, Width - 32);
+            float availableHeight = 44;
+            var valRect = new RectangleF(16, 36, availableWidth, availableHeight);
+
+            float targetFontSize = 20.5F;
+            float minFontSize = 15F;
+
+            using var sfVal = new StringFormat
+            {
+                FormatFlags = StringFormatFlags.NoWrap,
+                Trimming = StringTrimming.EllipsisCharacter,
+                LineAlignment = StringAlignment.Center,
+                Alignment = StringAlignment.Near
+            };
+
+            Font valFont = new Font(UITheme.FontSans, targetFontSize, FontStyle.Bold);
+            while (targetFontSize > minFontSize)
+            {
+                var sz = g.MeasureString(_value, valFont, (int)availableWidth, sfVal);
+                if (sz.Width <= availableWidth)
+                {
+                    break;
+                }
+                targetFontSize -= 0.5f;
+                valFont.Dispose();
+                valFont = new Font(UITheme.FontSans, targetFontSize, FontStyle.Bold);
+            }
+
+            using (valFont)
             using (var valBrush = new SolidBrush(UITheme.TextDark))
             {
-                g.DrawString(_value, valFont, valBrush, 16, 42);
+                g.DrawString(_value, valFont, valBrush, valRect, sfVal);
             }
 
-            // Subtitle
+            // Subtitle (bottom zone)
             if (!string.IsNullOrWhiteSpace(_subtitle))
             {
                 using var subFont = new Font(UITheme.FontSans, 8F, FontStyle.Regular);
@@ -130,7 +159,7 @@ namespace CC.Controls
                     Trimming = StringTrimming.EllipsisCharacter,
                     LineAlignment = StringAlignment.Near
                 };
-                g.DrawString(_subtitle, subFont, subBrush, new RectangleF(16, 86, Width - 32, Math.Max(28, Height - 88)), sfSub);
+                g.DrawString(_subtitle, subFont, subBrush, new RectangleF(16, 82, Width - 32, Math.Max(22, Height - 84)), sfSub);
             }
         }
     }

@@ -217,7 +217,7 @@ namespace CC.Forms.SuperAdmin
                 Title = "Total Businesses",
                 Value = data.TotalBusinesses.ToString(),
                 Subtitle = $"Active: {data.ActiveBusinesses} tenants",
-                Margin = new Padding(0, 0, 6, 6)
+                Margin = new Padding(4)
             };
             cardBusinesses.SetBadge("Master CRM", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
             cardBusinesses.CardClicked += (s, e) => Navigate("Businesses");
@@ -228,7 +228,7 @@ namespace CC.Forms.SuperAdmin
                 Title = "Platform Users",
                 Value = data.PlatformUsersCount.ToString(),
                 Subtitle = "Across all registered tenants",
-                Margin = new Padding(6, 0, 6, 6)
+                Margin = new Padding(4)
             };
             cardUsers.SetBadge("Access", Color.FromArgb(50, 130, 200), Color.FromArgb(235, 243, 250));
             cardUsers.CardClicked += (s, e) => Navigate("Users");
@@ -239,7 +239,7 @@ namespace CC.Forms.SuperAdmin
                 Title = "Tenant Databases",
                 Value = data.ActiveDatabases.ToString(),
                 Subtitle = "Dedicated SQL DB instances",
-                Margin = new Padding(6, 0, 6, 6)
+                Margin = new Padding(4)
             };
             cardDatabases.SetBadge("Multi-Tenant", UITheme.UpgradeGold, Color.FromArgb(253, 248, 238));
             cardDatabases.CardClicked += (s, e) => Navigate("System Monitoring & Backups");
@@ -250,7 +250,7 @@ namespace CC.Forms.SuperAdmin
                 Title = "Database Backups",
                 Value = $"{data.TotalBackupsCount} Files",
                 Subtitle = "Native SQL multi-tenant archives",
-                Margin = new Padding(6, 0, 0, 6)
+                Margin = new Padding(4)
             };
             cardBackups.SetBadge("System Health", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
             cardBackups.CardClicked += (s, e) => Navigate("System Monitoring & Backups");
@@ -262,7 +262,7 @@ namespace CC.Forms.SuperAdmin
                 Title = "Active Subscriptions",
                 Value = data.ActiveSubscriptionsCount.ToString(),
                 Subtitle = "Active tenant accounts",
-                Margin = new Padding(0, 6, 6, 0)
+                Margin = new Padding(4)
             };
             cardSubs.SetBadge("Platform", UITheme.PrimaryMauve, Color.FromArgb(245, 235, 240));
             cardSubs.CardClicked += (s, e) => Navigate("Subscriptions", "Active");
@@ -273,7 +273,7 @@ namespace CC.Forms.SuperAdmin
                 Title = "Expiring Plans (30d)",
                 Value = data.ExpiringSubscriptionsCount.ToString(),
                 Subtitle = $"{data.ExpiredSubscriptionsCount} expired accounts",
-                Margin = new Padding(6, 6, 6, 0)
+                Margin = new Padding(4)
             };
             cardExpiring.SetBadge("Renewal Alert", UITheme.StatusYellowFg, UITheme.StatusYellowBg);
             cardExpiring.CardClicked += (s, e) => Navigate("Subscriptions", "Expiring");
@@ -282,9 +282,9 @@ namespace CC.Forms.SuperAdmin
             {
                 Dock = DockStyle.Fill,
                 Title = "Est. Monthly Revenue",
-                Value = $"P{data.EstimatedMonthlyRevenue:N0}",
+                Value = $"₱{data.EstimatedMonthlyRevenue:N2}",
                 Subtitle = "Active subscription MRR",
-                Margin = new Padding(6, 6, 6, 0)
+                Margin = new Padding(4)
             };
             cardMrr.SetBadge("MRR", UITheme.StatusGreenFg, UITheme.StatusGreenBg);
             cardMrr.CardClicked += (s, e) => Navigate("Subscriptions", "Plans");
@@ -295,7 +295,7 @@ namespace CC.Forms.SuperAdmin
                 Title = "Terms Compliance",
                 Value = $"{data.TermsAcceptancesCount} Signed",
                 Subtitle = "User acceptances logged",
-                Margin = new Padding(6, 6, 0, 0)
+                Margin = new Padding(4)
             };
             cardTerms.SetBadge("Compliance", UITheme.PrimaryMauve, Color.FromArgb(245, 235, 240));
             cardTerms.CardClicked += (s, e) => Navigate("Terms & Conditions");
