@@ -52,6 +52,65 @@ namespace CC
                 return;
             }
 
+            if (args.Length > 0 && args[0] == "--test-pdf-export")
+            {
+                Console.WriteLine("Testing PDF report generation with PdfReportService...");
+                string testPath1 = Path.Combine(Path.GetTempPath(), "test_report_single.pdf");
+                string testPath2 = Path.Combine(Path.GetTempPath(), "test_report_multi.pdf");
+
+                var records1 = new List<TransactionRecord>
+                {
+                    new TransactionRecord(1, "ORD-2026-0001", DateTime.Now, "Order", "Maria Santos", "Chocolate Tier Cake", 4500m, "GCash", "Confirmed")
+                };
+
+                var recordsMulti = new List<TransactionRecord>();
+                for (int i = 1; i <= 60; i++)
+                {
+                    recordsMulti.Add(new TransactionRecord(
+                        i,
+                        $"ORD-2026-{i:D4}",
+                        DateTime.Now.AddHours(-i),
+                        (i % 2 == 0) ? "Payment" : "Order",
+                        $"Customer Number {i}",
+                        $"Custom Cake Order #{i} Description",
+                        1000m + (i * 50),
+                        "Cash",
+                        "Completed"
+                    ));
+                }
+
+                Console.WriteLine("Generating single-page PDF report...");
+                PdfReportService.GenerateTransactionReport(testPath1, new PdfReportOptions
+                {
+                    CompanyName = "Custom Cake CRMS",
+                    BranchName = "Main Branch",
+                    Records = records1
+                });
+                Console.WriteLine($"[PASS] Single-page PDF generated: {new FileInfo(testPath1).Length} bytes");
+
+                Console.WriteLine("Generating multi-page PDF report (60 records)...");
+                PdfReportService.GenerateTransactionReport(testPath2, new PdfReportOptions
+                {
+                    CompanyName = "Custom Cake CRMS",
+                    BranchName = "All Branches",
+                    Records = recordsMulti
+                });
+                Console.WriteLine($"[PASS] Multi-page PDF generated: {new FileInfo(testPath2).Length} bytes");
+
+                Console.WriteLine("Generating empty-records PDF report (0 records)...");
+                string testPath3 = Path.Combine(Path.GetTempPath(), "test_report_empty.pdf");
+                PdfReportService.GenerateTransactionReport(testPath3, new PdfReportOptions
+                {
+                    CompanyName = "Custom Cake CRMS",
+                    BranchName = "All Branches",
+                    Records = new List<TransactionRecord>()
+                });
+                Console.WriteLine($"[PASS] Empty-records PDF generated: {new FileInfo(testPath3).Length} bytes");
+
+                Console.WriteLine("All PDF generation tests passed successfully!");
+                return;
+            }
+
             if (args.Length > 0 && args[0] == "--test-nav")
             {
                 Console.WriteLine("Running navigation diagnostic test...");
