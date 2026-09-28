@@ -126,8 +126,8 @@ namespace CC.Forms.Manager
             var topPanel = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 84,
-                Padding = new Padding(0, 0, 0, 14),
+                Height = 72,
+                Padding = new Padding(0, 0, 0, 10),
                 BackColor = Color.Transparent
             };
 
@@ -143,17 +143,17 @@ namespace CC.Forms.Manager
             var lblTitle = new Label
             {
                 Text = "Manager Dashboard",
-                Font = new Font(UITheme.FontSerif, 22F, FontStyle.Bold),
+                Font = new Font(UITheme.FontSerif, 20F, FontStyle.Bold),
                 ForeColor = UITheme.TextDark,
                 AutoSize = true,
-                Margin = new Padding(0, 0, 0, 4)
+                Margin = new Padding(0, 0, 0, 2)
             };
 
             string branchBadge = SessionService.GetActiveBranchDisplay();
             var lblSubtitle = new Label
             {
-                Text = $"{SessionService.GetActiveBrandName()} ({branchBadge}) \u00B7 Operational Oversight & Order Pipeline \u00B7 {DateTime.Now:MMM d, yyyy}",
-                Font = new Font(UITheme.FontSans, 9.5F, FontStyle.Regular),
+                Text = $"{SessionService.GetActiveBrandName()} \u00B7 {DateTime.Now:MMM d, yyyy}",
+                Font = new Font(UITheme.FontSans, 9F, FontStyle.Regular),
                 ForeColor = UITheme.TextMuted,
                 AutoSize = true,
                 Margin = Padding.Empty
@@ -164,8 +164,8 @@ namespace CC.Forms.Manager
 
             var periodSelector = new PeriodSelectorControl(PeriodSelectorControl.ManagerPeriods)
             {
-                Dock = DockStyle.Right,
-                SelectedPeriod = _activePeriod
+                SelectedPeriod = _activePeriod,
+                Anchor = AnchorStyles.None
             };
             periodSelector.PeriodChanged += (s, newPeriod) =>
             {
@@ -175,18 +175,33 @@ namespace CC.Forms.Manager
 
             var branchSelector = new BranchSelectorControl
             {
-                Dock = DockStyle.Right,
-                Margin = new Padding(0, 0, 10, 0)
+                Anchor = AnchorStyles.None,
+                Margin = new Padding(8, 0, 0, 0)
             };
             branchSelector.BranchChanged += (s, branchId) =>
             {
                 _ = LoadDashboardDataAsync();
             };
 
-            topPanel.Controls.Add(periodSelector);
-            topPanel.Controls.Add(branchSelector);
+            // Wrap period selector + branch selector in a single right-docked horizontal strip
+            var rightControlsPanel = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Dock = DockStyle.Right,
+                BackColor = Color.Transparent,
+                Padding = new Padding(0, 4, 0, 4),
+                Margin = Padding.Empty
+            };
+            rightControlsPanel.Controls.Add(periodSelector);
+            rightControlsPanel.Controls.Add(branchSelector);
+
+            topPanel.Controls.Add(rightControlsPanel);
             topPanel.Controls.Add(titleStack);
             rootLayout.Controls.Add(topPanel, 0, 0);
+
 
             // 2. 8 MANAGER KPI CARDS (4x2 GRID)
             var kpiTable = new TableLayoutPanel
