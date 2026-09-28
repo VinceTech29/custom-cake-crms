@@ -30,16 +30,76 @@ namespace CC
             if (args.Length > 0 && args[0] == "--seed-demo-data")
             {
                 bool force = args.Length > 1 && args[1] == "--force";
-                Console.WriteLine("Starting demo data seeding for CustomCakeCRM...");
-                var result = DatabaseSeeder.SeedDemoDataAsync(2, force).GetAwaiter().GetResult();
-                Console.WriteLine(result.Message);
+                Console.WriteLine("Starting demo data seeding for all tenant companies...");
+                var results = DatabaseSeeder.SeedAllTenantsDemoDataAsync(force).GetAwaiter().GetResult();
+                foreach (var res in results)
+                {
+                    Console.WriteLine(res.Message);
+                }
+                return;
+            }
+
+            if (args.Length > 0 && args[0] == "--list-all-companies")
+            {
+                var companies = CrmDataService.GetCompaniesAsync().GetAwaiter().GetResult();
+                Console.WriteLine($"Found {companies.Count} companies in Master DB:");
+                foreach (var c in companies)
+                {
+                    Console.WriteLine($"  ID={c.CompanyId}, Code={c.CompanyCode}, Name={c.CompanyName}, DB={c.DatabaseName}, Server={c.ServerName}");
+                }
                 return;
             }
 
             if (args.Length > 0 && args[0] == "--verify-db-counts")
             {
-                Console.WriteLine("Verifying database row counts for CustomCakeCRM...");
-                DatabaseSeeder.PrintDatabaseCountsAsync(2).GetAwaiter().GetResult();
+                Console.WriteLine("Verifying database row counts for all tenant companies...");
+                DatabaseSeeder.PrintAllDatabaseCountsAsync().GetAwaiter().GetResult();
+                return;
+            }
+
+            if (args.Length > 0 && args[0] == "--capture-reports-screen")
+            {
+                Console.WriteLine("Capturing Reports Module screenshot...");
+                SessionService.CurrentUser = new CurrentUser
+                {
+                    UserId = 2,
+                    FirstName = "Mark",
+                    LastName = "Perez",
+                    Role = "Manager",
+                    CompanyId = 2,
+                    CompanyName = "CC Custom Cake Shop",
+                    TenantDatabase = "CustomCakeCRM",
+                    TenantServer = "(localdb)\\MSSQLLocalDB"
+                };
+
+                using var form = new Form
+                {
+                    ClientSize = new Size(1300, 850),
+                    StartPosition = FormStartPosition.CenterScreen,
+                    Text = "Reports Module Preview"
+                };
+
+                var reportForm = new CC.Forms.Manager.Reports.ReportListForm
+                {
+                    TopLevel = false,
+                    Dock = DockStyle.Fill
+                };
+                form.Controls.Add(reportForm);
+                reportForm.Show();
+                form.Show();
+
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                while (sw.ElapsedMilliseconds < 2500)
+                {
+                    Application.DoEvents();
+                    Thread.Sleep(20);
+                }
+
+                using var bmp = new Bitmap(form.Width, form.Height);
+                form.DrawToBitmap(bmp, new Rectangle(0, 0, form.Width, form.Height));
+                string outPath = @"C:\Users\user1\.gemini\antigravity\brain\7aee3b98-6126-4c32-b0bc-280b2549c485\screen_reports_module.png";
+                bmp.Save(outPath, ImageFormat.Png);
+                Console.WriteLine($"[PASS] Saved screenshot to {outPath}");
                 return;
             }
 

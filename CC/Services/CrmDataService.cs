@@ -1007,6 +1007,9 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
 
                 // Seed default branch baseline if needed
                 await EnsureTenantBranchBaselineAsync(context, DefaultCompanyId);
+
+                // Ensure all active tenant companies have their 200 demo entries seeded
+                await DatabaseSeeder.SeedAllTenantsDemoDataAsync(force: false);
             }
             catch (Exception ex)
             {
@@ -2212,12 +2215,14 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
         // DASHBOARD METRICS (Dynamic Live Aggregate Queries)
         // =========================================================
 
-        public static async Task<DashboardMetrics> GetDashboardMetricsAsync()
+        public static async Task<DashboardMetrics> GetDashboardMetricsAsync(int? companyId = null)
         {
-            await using var context = CreateDbContext();
+            await using var context = CreateDbContext(companyId);
+            int targetCompanyId = companyId ?? CurrentCompanyId;
 
             // Open inquiries: status is New or In Progress or Quoted
             int openInquiries = await context.CustomerInquiries
+                .Where(i => i.CustomerId == 0 || context.Customers.Any(c => c.CustomerId == i.CustomerId && c.CompanyId == targetCompanyId))
                 .CountAsync(i => i.Status == "New" || i.Status == "In Progress" || i.Status == "Quoted");
 
             // Orders in progress: StatusId == 2 (Processing) or 1 (Confirmed)
