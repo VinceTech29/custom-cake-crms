@@ -123,7 +123,8 @@ namespace CC.Forms.Admin
                 {
                     Dock = DockStyle.Fill,
                     AutoScroll = true,
-                    BackColor = Color.Transparent
+                    BackColor = Color.Transparent,
+                    Padding = new Padding(0, 0, 24, 32)
                 };
             }
 
@@ -152,7 +153,7 @@ namespace CC.Forms.Admin
                 ColumnCount = 1,
                 RowCount = 4,
                 BackColor = Color.Transparent,
-                Padding = Padding.Empty,
+                Padding = new Padding(0, 0, 20, 0),
                 Margin = Padding.Empty
             };
             rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // Header + Period

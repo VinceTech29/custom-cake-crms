@@ -659,12 +659,12 @@ namespace CC.Forms.Staff.Inquiries
         {
             try
             {
-                // 1. KPI counts from database
-                var allInquiries = await CrmDataService.GetInquiriesAsync(null, null);
-                lblCountNew.Text = allInquiries.Count(i => i.Status.Equals("New", StringComparison.OrdinalIgnoreCase)).ToString();
-                lblCountInProgress.Text = allInquiries.Count(i => i.Status.Equals("In Progress", StringComparison.OrdinalIgnoreCase)).ToString();
-                lblCountApproved.Text = allInquiries.Count(i => i.Status.Equals("Approved", StringComparison.OrdinalIgnoreCase)).ToString();
-                lblCountConverted.Text = allInquiries.Count(i => i.Status.Equals("Converted", StringComparison.OrdinalIgnoreCase)).ToString();
+                // 1. Fast KPI counts from database (single aggregated query)
+                var counts = await CrmDataService.GetInquiryStatusCountsAsync();
+                lblCountNew.Text = counts.GetValueOrDefault("New", 0).ToString();
+                lblCountInProgress.Text = counts.GetValueOrDefault("In Progress", 0).ToString();
+                lblCountApproved.Text = counts.GetValueOrDefault("Approved", 0).ToString();
+                lblCountConverted.Text = counts.GetValueOrDefault("Converted", 0).ToString();
 
                 // 2. Filtered list from database with pagination
                 var paged = await CrmDataService.GetInquiriesPagedAsync(activeFilter, activeSearchQuery, currentPage, PageSize);

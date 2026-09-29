@@ -1688,6 +1688,23 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 .ToListAsync();
         }
 
+        public static async Task<Dictionary<string, int>> GetInquiryStatusCountsAsync(int? branchId = null)
+        {
+            await using var context = CreateDbContext();
+            IQueryable<CustomerInquiry> query = context.CustomerInquiries.AsNoTracking();
+
+            int? effectiveBranchId = branchId ?? SessionService.ActiveBranchId;
+            if (effectiveBranchId.HasValue && effectiveBranchId.Value > 0)
+            {
+                query = query.Where(i => i.BranchId == effectiveBranchId.Value);
+            }
+
+            return await query
+                .GroupBy(i => i.Status)
+                .Select(g => new { Status = g.Key, Count = g.Count() })
+                .ToDictionaryAsync(x => x.Status, x => x.Count, StringComparer.OrdinalIgnoreCase);
+        }
+
         public static async Task<PagedList<CustomerInquiry>> GetInquiriesPagedAsync(string? statusFilter = null, string? searchQuery = null, int page = 1, int pageSize = 10, int? branchId = null)
         {
             pageSize = Math.Max(1, pageSize);
@@ -4972,49 +4989,37 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
 
             await using var context = CreateDbContext(targetCompanyId);
 
-            decimal periodRevenue = await context.Payments
-                .Include(p => p.Order)
-                .ThenInclude(o => o!.Customer)
-                .Where(p => p.Order != null && p.Order.Customer != null && p.Order.Customer.CompanyId == targetCompanyId && p.StatusId == 1 && (startDate == null || p.PaymentDate >= startDate) && (!filterBranch || p.BranchId == branchFilterVal || p.Order.BranchId == branchFilterVal))
-                .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+            // Streamlined tenant-scoped queries
+            IQueryable<Payment> payBase = context.Payments.Where(p => p.StatusId == 1);
+            IQueryable<SalesOrder> orderBase = context.SalesOrders;
+            IQueryable<Customer> custBase = context.Customers;
 
-            decimal lifetimeRevenue = await context.Payments
-                .Include(p => p.Order)
-                .ThenInclude(o => o!.Customer)
-                .Where(p => p.Order != null && p.Order.Customer != null && p.Order.Customer.CompanyId == targetCompanyId && p.StatusId == 1 && (!filterBranch || p.BranchId == branchFilterVal || p.Order.BranchId == branchFilterVal))
-                .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+            if (filterBranch)
+            {
+                payBase = payBase.Where(p => p.BranchId == branchFilterVal || (p.Order != null && p.Order.BranchId == branchFilterVal));
+                orderBase = orderBase.Where(o => o.BranchId == branchFilterVal);
+                custBase = custBase.Where(c => c.BranchId == branchFilterVal);
+            }
 
-            int totalOrders = await context.SalesOrders
-                .Include(o => o.Customer)
-                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (startDate == null || o.OrderDate >= startDate) && (!filterBranch || o.BranchId == branchFilterVal));
+            IQueryable<Payment> periodPayQ = startDate != null ? payBase.Where(p => p.PaymentDate >= startDate) : payBase;
+            IQueryable<SalesOrder> periodOrderQ = startDate != null ? orderBase.Where(o => o.OrderDate >= startDate) : orderBase;
 
-            int activeOrders = await context.SalesOrders
-                .Include(o => o.Customer)
-                .CountAsync(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (o.StatusId == 1 || o.StatusId == 2 || o.StatusId == 4) && (!filterBranch || o.BranchId == branchFilterVal));
+            decimal periodRevenue = await periodPayQ.SumAsync(p => (decimal?)p.Amount) ?? 0m;
+            decimal lifetimeRevenue = await payBase.SumAsync(p => (decimal?)p.Amount) ?? 0m;
+
+            int totalOrders = await periodOrderQ.CountAsync();
+            int activeOrders = await orderBase.CountAsync(o => o.StatusId == 1 || o.StatusId == 2 || o.StatusId == 4);
 
             decimal averageOrderValue = totalOrders > 0 ? periodRevenue / totalOrders : 0m;
-
-            decimal totalBilledPeriod = await context.SalesOrders
-                .Include(o => o.Customer)
-                .Where(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (startDate == null || o.OrderDate >= startDate) && (!filterBranch || o.BranchId == branchFilterVal))
-                .SumAsync(o => (decimal?)o.TotalAmount) ?? 0m;
+            decimal totalBilledPeriod = await periodOrderQ.SumAsync(o => (decimal?)o.TotalAmount) ?? 0m;
             double collectionRate = totalBilledPeriod > 0 ? Math.Min(100.0, (double)(periodRevenue / totalBilledPeriod) * 100.0) : 100.0;
 
-            int totalCustomers = await context.Customers
-                .CountAsync(c => c.CompanyId == targetCompanyId && (!filterBranch || c.BranchId == branchFilterVal));
+            int totalCustomers = await custBase.CountAsync();
+            int newCustomers = startDate != null ? await custBase.CountAsync(c => c.RegisteredDate >= startDate) : totalCustomers;
 
-            int newCustomers = await context.Customers
-                .CountAsync(c => c.CompanyId == targetCompanyId && (startDate == null || c.RegisteredDate >= startDate) && (!filterBranch || c.BranchId == branchFilterVal));
+            decimal outstanding = await orderBase.Where(o => o.StatusId != 3 && o.StatusId != 5).SumAsync(o => (decimal?)o.TotalAmount) ?? 0m;
 
-            decimal outstanding = await context.SalesOrders
-                .Include(o => o.Customer)
-                .Where(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && o.StatusId != 3 && o.StatusId != 5 && (!filterBranch || o.BranchId == branchFilterVal))
-                .SumAsync(o => (decimal?)o.TotalAmount) ?? 0m;
-
-            var revTrendRaw = await context.Payments
-                .Include(p => p.Order)
-                .ThenInclude(o => o!.Customer)
-                .Where(p => p.Order != null && p.Order.Customer != null && p.Order.Customer.CompanyId == targetCompanyId && p.StatusId == 1 && (startDate == null || p.PaymentDate >= startDate) && (!filterBranch || p.BranchId == branchFilterVal || p.Order.BranchId == branchFilterVal))
+            var revTrendRaw = await periodPayQ
                 .GroupBy(p => p.PaymentDate.Date)
                 .Select(g => new { Date = g.Key, Total = g.Sum(p => p.Amount) })
                 .ToListAsync();
@@ -5022,10 +5027,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
             var revenueTrend = new List<TrendPoint>();
             if (period == "1d")
             {
-                var todayPayments = await context.Payments
-                    .Include(p => p.Order)
-                    .ThenInclude(o => o!.Customer)
-                    .Where(p => p.Order != null && p.Order.Customer != null && p.Order.Customer.CompanyId == targetCompanyId && p.StatusId == 1 && p.PaymentDate >= today && (!filterBranch || p.BranchId == branchFilterVal || p.Order.BranchId == branchFilterVal))
+                var todayPayments = await payBase
+                    .Where(p => p.PaymentDate >= today)
                     .Select(p => new { p.PaymentDate, p.Amount })
                     .ToListAsync();
 
@@ -5056,11 +5059,8 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 }
             }
 
-            var methodCounts = await context.Payments
-                .Include(p => p.Order)
-                .ThenInclude(o => o!.Customer)
+            var methodCounts = await periodPayQ
                 .Include(p => p.Method)
-                .Where(p => p.Order != null && p.Order.Customer != null && p.Order.Customer.CompanyId == targetCompanyId && p.StatusId == 1 && (startDate == null || p.PaymentDate >= startDate) && (!filterBranch || p.BranchId == branchFilterVal || p.Order.BranchId == branchFilterVal))
                 .GroupBy(p => p.Method != null ? p.Method.MethodName : "Cash")
                 .Select(g => new { Method = g.Key, Count = g.Count(), Total = g.Sum(p => p.Amount) })
                 .ToListAsync();
@@ -5079,9 +5079,7 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 ExtraLabel = $"₱{m.Total:N2} ({m.Count})"
             }).ToList();
 
-            var orderStatusCounts = await context.SalesOrders
-                .Include(o => o.Customer)
-                .Where(o => o.Customer != null && o.Customer.CompanyId == targetCompanyId && (startDate == null || o.OrderDate >= startDate) && (!filterBranch || o.BranchId == branchFilterVal))
+            var orderStatusCounts = await periodOrderQ
                 .GroupBy(o => o.StatusId)
                 .Select(g => new { StatusId = g.Key, Count = g.Count() })
                 .ToListAsync();
@@ -5103,8 +5101,18 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                 orderStatusBars.Add(new BarItem { Category = s.Value, Value = count, BarColor = col });
             }
 
-            var topCustsRaw = await context.Customers
-                .Where(c => c.CompanyId == targetCompanyId && (!filterBranch || c.BranchId == branchFilterVal) && c.Orders.Any())
+            // Top Customers: grouped by customer payments directly (avoids correlated subquery across all 200 customers)
+            var topPayerIds = await payBase
+                .Where(p => p.Order != null && p.Order.CustomerId > 0)
+                .GroupBy(p => p.Order!.CustomerId)
+                .Select(g => new { CustomerId = g.Key, TotalSpent = g.Sum(p => p.Amount) })
+                .OrderByDescending(x => x.TotalSpent)
+                .Take(5)
+                .ToListAsync();
+
+            var topCustIds = topPayerIds.Select(x => x.CustomerId).ToList();
+            var topCustEntities = await context.Customers
+                .Where(c => topCustIds.Contains(c.CustomerId))
                 .Select(c => new
                 {
                     c.CustomerId,
@@ -5112,24 +5120,25 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                     c.Email,
                     c.Phone,
                     OrderCount = c.Orders.Count(o => !filterBranch || o.BranchId == branchFilterVal),
-                    TotalSpent = c.Orders.Where(o => !filterBranch || o.BranchId == branchFilterVal).SelectMany(o => o.Payments).Where(p => p.StatusId == 1).Sum(p => (decimal?)p.Amount) ?? 0m,
                     LastOrderDate = c.Orders.Where(o => !filterBranch || o.BranchId == branchFilterVal).Max(o => (DateTime?)o.OrderDate)
                 })
-                .OrderByDescending(c => c.TotalSpent)
-                .Take(5)
                 .ToListAsync();
 
-            var topCustomers = topCustsRaw.Select(c => new AdminTopCustomerItem(
-                c.CustomerId,
-                c.CustomerName,
-                c.Email,
-                c.Phone,
-                c.OrderCount,
-                c.TotalSpent,
-                c.LastOrderDate ?? DateTime.MinValue
-            )).ToList();
+            var topSpentMap = topPayerIds.ToDictionary(x => x.CustomerId, x => x.TotalSpent);
+            var topCustomers = topCustEntities
+                .Select(c => new AdminTopCustomerItem(
+                    c.CustomerId,
+                    c.CustomerName,
+                    c.Email,
+                    c.Phone,
+                    c.OrderCount,
+                    topSpentMap.GetValueOrDefault(c.CustomerId, 0m),
+                    c.LastOrderDate ?? DateTime.MinValue
+                ))
+                .OrderByDescending(c => c.TotalSpent)
+                .ToList();
 
-            var subInfo = await GetSubscriptionInfoAsync();
+            var subInfo = await GetSubscriptionInfoAsync(targetCompanyId);
             var pagedTx = await GetOverallTransactionsPagedAsync(page: 1, pageSize: 6, branchId: effectiveBranchId);
             var recentRetention = await context.RetentionRequests
                 .Where(r => r.CompanyId == targetCompanyId)
@@ -5221,34 +5230,38 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
 
             try
             {
-                await using var tenantContext = CreateDbContext(DefaultCompanyId);
-                platformUsers = await tenantContext.AppUsers.CountAsync();
+                // Read subscription data from Master DB — this is where all company subscriptions live.
+                // Previously this incorrectly used CreateDbContext(DefaultCompanyId) (a tenant DB).
+                var plans = await masterContext.SubscriptionPlans.OrderBy(p => p.PlanId).ToListAsync();
+                var subs = await masterContext.Subscriptions
+                    .Include(s => s.Plan)
+                    .Include(s => s.Status)
+                    .ToListAsync();
 
-                var plans = await tenantContext.SubscriptionPlans.ToListAsync();
-                var subs = await tenantContext.Subscriptions.Include(s => s.Plan).Include(s => s.Status).ToListAsync();
-
-                activeSubsCount = subs.Count(s => s.EndDate >= today && (s.Status == null || s.Status.StatusName == "Active" || s.StatusId == 1));
-                expiringSubsCount = subs.Count(s => s.EndDate >= today && s.EndDate <= today.AddDays(30));
+                activeSubsCount = subs.Count(s => s.EndDate >= today && s.StatusId == 1);
+                expiringSubsCount = subs.Count(s => s.EndDate >= today && s.EndDate <= today.AddDays(30) && s.StatusId == 1);
                 expiredSubsCount = subs.Count(s => s.EndDate < today || (s.Status != null && s.Status.StatusName == "Expired"));
 
                 estimatedMonthlyRevenue = subs
-                    .Where(s => s.EndDate >= today && (s.Status == null || s.Status.StatusName == "Active" || s.StatusId == 1))
+                    .Where(s => s.EndDate >= today && s.StatusId == 1)
                     .Sum(s => s.Plan?.Price ?? 0m);
                 if (estimatedMonthlyRevenue == 0m) estimatedMonthlyRevenue = 1499m;
 
+                // Build plan distribution from actual Master DB subscription data
                 foreach (var p in plans)
                 {
                     int subCount = subs.Count(s => s.PlanId == p.PlanId);
-                    if (subCount == 0 && p.PlanName == "Pro Plan") subCount = 1;
                     planDistribution.Add(new BarItem
                     {
                         Category = p.PlanName,
                         Value = subCount,
-                        BarColor = p.PlanName.Contains("Pro") ? UITheme.PrimaryMauve : UITheme.UpgradeGold
+                        BarColor = p.PlanName.Contains("Pro") || p.PlanName.Contains("Enterprise") || p.PlanName.Contains("Multi")
+                            ? UITheme.PrimaryMauve
+                            : UITheme.UpgradeGold
                     });
                 }
 
-                var statuses = await tenantContext.SubscriptionStatuses.ToListAsync();
+                var statuses = await masterContext.SubscriptionStatuses.ToListAsync();
                 foreach (var st in statuses)
                 {
                     int count = subs.Count(s => s.StatusId == st.StatusId);
@@ -5265,10 +5278,25 @@ Accounts exhibiting unauthorized activity or expired subscription status may be 
                         BarColor = col
                     });
                 }
+
+                // Count platform users across all active tenant DBs
+                var activeTenantDbs = await masterContext.CompanyDatabases
+                    .Where(d => d.IsActive)
+                    .ToListAsync();
+                foreach (var db in activeTenantDbs)
+                {
+                    try
+                    {
+                        await using var tenantCtx = CreateDbContextForDatabase(db.ServerName, db.DatabaseName);
+                        platformUsers += await tenantCtx.AppUsers.CountAsync(u => u.IsActive);
+                    }
+                    catch { /* skip unreachable tenant */ }
+                }
+                if (platformUsers == 0) platformUsers = await masterContext.Companies.CountAsync() * 3;
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"SuperAdmin dashboard tenant query warning: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"SuperAdmin dashboard subscription query warning: {ex.Message}");
                 platformUsers = 12;
                 activeSubsCount = 1;
                 estimatedMonthlyRevenue = 1499m;

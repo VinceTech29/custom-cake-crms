@@ -13,10 +13,17 @@ namespace CC.Services
 
         public static void SetActiveBranch(int? branchId, string? branchName)
         {
-            ActiveBranchId = branchId;
-            ActiveBranchName = string.IsNullOrWhiteSpace(branchName)
+            string? normalizedName = string.IsNullOrWhiteSpace(branchName)
                 ? (branchId == null ? "All Branches" : null)
                 : branchName.Trim();
+
+            if (ActiveBranchId == branchId && string.Equals(ActiveBranchName, normalizedName, System.StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            ActiveBranchId = branchId;
+            ActiveBranchName = normalizedName;
             ActiveBranchChanged?.Invoke();
         }
 
