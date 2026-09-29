@@ -154,9 +154,37 @@ namespace CC.Controls
             using var textBrush = new SolidBrush(UITheme.TextDark);
             using var mutedBrush = new SolidBrush(UITheme.TextMuted);
 
-            int labelColWidth = 110;
-            int valueColWidth = 55;
-            int barAreaWidth = plotWidth - labelColWidth - valueColWidth;
+            // 1. Measure all category labels and value labels dynamically
+            float maxCatWidth = 0;
+            float maxValWidth = 0;
+            var valStrings = new string[_items.Count];
+            var valSizes = new SizeF[_items.Count];
+
+            for (int i = 0; i < _items.Count; i++)
+            {
+                var item = _items[i];
+                float pct = (float)item.Value / totalSum * 100f;
+                string valStr = item.ExtraLabel ?? $"{item.Value} ({pct:0}%)";
+                valStrings[i] = valStr;
+
+                var vSz = g.MeasureString(valStr, valFont);
+                valSizes[i] = vSz;
+                if (vSz.Width > maxValWidth) maxValWidth = vSz.Width;
+
+                var cSz = g.MeasureString(item.Category, catFont);
+                if (cSz.Width > maxCatWidth) maxCatWidth = cSz.Width;
+            }
+
+            // Category column gets enough room for its text, capped at 32% of plotWidth
+            int labelColWidth = (int)Math.Ceiling(Math.Min(maxCatWidth + 12, plotWidth * 0.32f));
+            labelColWidth = Math.Max(70, labelColWidth);
+
+            // Value column width based on measured text plus safety padding
+            int valueColWidth = (int)Math.Ceiling(maxValWidth + 8);
+
+            // Bar area is everything between label and right-aligned value column
+            int barX = left + labelColWidth;
+            int barAreaWidth = Math.Max(40, (int)(right - valueColWidth - 12 - barX));
 
             for (int i = 0; i < _items.Count; i++)
             {
@@ -164,11 +192,14 @@ namespace CC.Controls
                 int rowY = top + (i * rowHeight);
                 bool isHovered = i == _hoveredIndex;
 
-                // Category Label
-                g.DrawString(item.Category, catFont, isHovered ? textBrush : mutedBrush, left, rowY + 2);
+                // Category Label (with ellipsis if long)
+                var catRect = new RectangleF(left, rowY + 2, labelColWidth - 6, rowHeight - 4);
+                using (var sf = new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap })
+                {
+                    g.DrawString(item.Category, catFont, isHovered ? textBrush : mutedBrush, catRect, sf);
+                }
 
                 // Background track
-                int barX = left + labelColWidth;
                 int barY = rowY + (rowHeight - barThickness) / 2;
                 var trackRect = new Rectangle(barX, barY, barAreaWidth, barThickness);
                 using var trackBrush = new SolidBrush(Color.FromArgb(246, 243, 239));
@@ -184,10 +215,11 @@ namespace CC.Controls
                     g.FillRoundedRectangle(barBrush, barRect, barThickness / 2);
                 }
 
-                // Value and percentage label
-                float pct = (float)item.Value / totalSum * 100f;
-                string valStr = item.ExtraLabel ?? $"{item.Value} ({pct:0}%)";
-                g.DrawString(valStr, valFont, textBrush, barX + barAreaWidth + 10, rowY + 2);
+                // Value and percentage label - right-aligned to right edge of plot area
+                string valStr = valStrings[i];
+                float valW = valSizes[i].Width;
+                float valX = right - valW;
+                g.DrawString(valStr, valFont, textBrush, valX, rowY + 2);
             }
         }
     }
